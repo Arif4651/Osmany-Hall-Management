@@ -9,9 +9,9 @@ export default function PageHeader({ title, description, actions }) {
       </div>
       {actions?.length ? (
         <div className="page-header-actions">
-          {actions.map((action) => (
-            <Button key={action.label} variant={action.variant || 'secondary'} onClick={action.onClick}>
-              {action.label}
+          {actions.map(({ label, variant = 'secondary', onClick, ...actionProps }) => (
+            <Button key={label} variant={variant} onClick={onClick} {...actionProps}>
+              {label}
             </Button>
           ))}
         </div>

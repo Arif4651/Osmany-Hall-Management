@@ -1,4 +1,4 @@
-import { Menu, Search, LogOut, Shield, UserRound } from 'lucide-react';
+import { Menu, PanelLeftClose, PanelLeftOpen, Search, LogOut, Shield, UserRound } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Button from '../ui/Button';
 import { BRANDING } from '../../constants/branding';
@@ -13,7 +13,7 @@ function generateHeading(pathname) {
     .join(' ');
 }
 
-export default function TopHeader({ onOpenSidebar }) {
+export default function TopHeader({ onOpenSidebar, onToggleSidebarCollapsed, isSidebarCollapsed }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -27,6 +27,16 @@ export default function TopHeader({ onOpenSidebar }) {
     <header className="top-header">
       <button type="button" className="menu-button" onClick={onOpenSidebar} aria-label="Open navigation">
         <Menu size={20} />
+      </button>
+
+      <button
+        type="button"
+        className="sidebar-toggle-button"
+        onClick={onToggleSidebarCollapsed}
+        aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
       </button>
 
       <div className="header-title-wrap">

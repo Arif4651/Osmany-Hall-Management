@@ -47,43 +47,10 @@ export default function LandingPage() {
         </aside>
       </section>
 
-      <section className="landing-grid">
-        {quickActions.map((action) => (
-          <Card key={action.title}>
-            <div className="landing-card-head">
-              <ShieldCheck size={18} />
-              <h3>{action.title}</h3>
-            </div>
-            <p>{action.description}</p>
-            <Link className="text-link" to={action.link}>
-              Access Portal <ArrowRight size={14} />
-            </Link>
-          </Card>
-        ))}
-      </section>
 
-      <section className="landing-grid">
-        {dashboardHighlights.map((item) => (
-          <Card key={item.title}>
-            <div className="landing-card-head">
-              <Sparkles size={18} />
-              <h3>{item.title}</h3>
-            </div>
-            <p>{item.description}</p>
-          </Card>
-        ))}
-      </section>
 
-      <section className="landing-grid">
-        <Card className="announcements-card">
-          <h3>Operational Announcements</h3>
-          <ul className="bullet-list">
-            {homeAnnouncements.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </Card>
-      </section>
+
+
     </div>
   );
 }

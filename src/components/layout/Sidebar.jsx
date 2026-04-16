@@ -41,6 +41,7 @@ export default function Sidebar({ role, navItems, isOpen, onClose }) {
                 to={item.path}
                 className={({ isActive }) => clsx('nav-item', { 'is-active': isActive })}
                 onClick={onClose}
+                title={item.label}
               >
                 <Icon size={18} />
                 <span>{item.label}</span>
@@ -53,7 +54,8 @@ export default function Sidebar({ role, navItems, isOpen, onClose }) {
           <p>{user?.fullName || 'Authenticated User'}</p>
           <small>{user?.designation || 'Osmany Hall Member'}</small>
           <Button variant="ghost" onClick={handleLogout}>
-            <LogOut size={14} /> Sign Out
+            <LogOut size={14} />
+            <span className="sidebar-signout-label">Sign Out</span>
           </Button>
         </div>
       </aside>
