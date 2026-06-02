@@ -12,12 +12,8 @@ function toFormData(student) {
     hallId: student.hallId || '',
     mobileNumber: student.mobileNumber || '',
     level: student.level || 'Level-01',
-    sessionYear: student.sessionYear || '',
     hallName: student.hallName || '',
-    email: student.email || '',
-    admissionDate: student.admissionDate || '',
-    expectedGraduationDate: student.expectedGraduationDate || '',
-    hallValidityEndDate: student.hallValidityEndDate || '',
+    roomNo: student.roomNo || '',
     status: student.status || 'active',
   };
 }

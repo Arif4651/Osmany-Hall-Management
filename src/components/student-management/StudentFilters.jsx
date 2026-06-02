@@ -7,7 +7,7 @@ function toOptionList(values = []) {
 export default function StudentFilters({
   filters,
   departments,
-  sessions,
+
   halls,
   onChange,
   onReset,
@@ -23,11 +23,7 @@ export default function StudentFilters({
       label: 'Level / Year',
       options: [{ label: 'All', value: 'all' }, ...toOptionList(STUDENT_LEVELS)],
     },
-    {
-      key: 'sessionYear',
-      label: 'Session Year',
-      options: [{ label: 'All', value: 'all' }, ...toOptionList(sessions)],
-    },
+  
     {
       key: 'hallName',
       label: 'Hall Name',

@@ -14,7 +14,7 @@ function getDefaultCredentials(mode) {
     return { email: 'admin@mist.ac.bd', password: 'Admin@123' };
   }
 
-  return { email: 'student@mist.ac.bd', password: 'Student@123' };
+  return { email: '2023001', password: '2023001' };
 }
 
 export default function LoginPage({ mode = 'student' }) {
@@ -41,13 +41,13 @@ export default function LoginPage({ mode = 'student' }) {
 
   const fromPath = location.state?.from?.pathname;
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);
 
     const authAction = isAdminMode ? loginAdmin : loginStudent;
-    const result = authAction(form);
+    const result = await authAction(form);
 
     if (!result.ok) {
       setError(result.message);
@@ -82,12 +82,12 @@ export default function LoginPage({ mode = 'student' }) {
 
           <form onSubmit={handleSubmit} className="auth-form">
             <label className="field-control" htmlFor="email">
-              <span>Email</span>
+              <span>{isAdminMode ? 'Email' : 'Student ID'}</span>
               <div className="input-with-icon">
                 <Mail size={16} />
                 <input
                   id="email"
-                  type="email"
+                  type={isAdminMode ? 'email' : 'text'}
                   value={form.email}
                   onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
                   required
@@ -127,7 +127,7 @@ export default function LoginPage({ mode = 'student' }) {
 
           <div className="auth-hint">
             <p>Demo credentials:</p>
-            <small>{isAdminMode ? 'admin@mist.ac.bd / Admin@123' : 'student@mist.ac.bd / Student@123'}</small>
+            <small>{isAdminMode ? 'admin@mist.ac.bd / Admin@123' : '2023001 / 2023001'}</small>
             {isAdminMode ? (
               <small className="auth-warning">
                 <ShieldAlert size={13} /> Admin route: <code>/halladmin</code>

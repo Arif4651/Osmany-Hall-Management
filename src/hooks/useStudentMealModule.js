@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import mealRepository from '../services/meal/mealRepository';
 import { getTomorrowDayId, getMinutesUntilCutoff, isAfterDailyCutoff } from '../constants/mealConfig';
 
-const DEFAULT_STUDENT_ID = 'active-student';
-
-export default function useStudentMealModule(studentId = DEFAULT_STUDENT_ID) {
+export default function useStudentMealModule(studentId) {
   const [moduleData, setModuleData] = useState(null);
   const [preferences, setPreferences] = useState({});
   const [isLoading, setIsLoading] = useState(true);
@@ -12,6 +10,14 @@ export default function useStudentMealModule(studentId = DEFAULT_STUDENT_ID) {
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
   const loadState = useCallback(async () => {
+    if (!studentId) {
+      setIsLoading(true);
+      setErrorMessage('');
+      setModuleData(null);
+      setPreferences({});
+      return;
+    }
+
     setIsLoading(true);
     setErrorMessage('');
 

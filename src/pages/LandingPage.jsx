@@ -1,9 +1,7 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
-import Card from '../components/ui/Card';
+import { ArrowRight } from 'lucide-react';
 import Button from '../components/ui/Button';
 import useDocumentTitle from '../hooks/useDocumentTitle';
-import { quickActions, dashboardHighlights, homeAnnouncements } from '../data/mock/commonData';
 import mistLogo from '../assets/images/mist-logo.png';
 import { BRAND_COPY, BRANDING } from '../constants/branding';
 import { useAuth } from '../context/AuthContext';

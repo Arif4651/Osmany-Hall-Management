@@ -9,14 +9,11 @@ export default function ReactivateStudentModal({
   onClose,
   onReactivate,
 }) {
-  const [payload, setPayload] = useState({ hallValidityEndDate: '', expectedGraduationDate: '' });
+  const [payload, setPayload] = useState({});
 
   useEffect(() => {
     if (isOpen && student) {
-      setPayload({
-        hallValidityEndDate: student.hallValidityEndDate || '',
-        expectedGraduationDate: student.expectedGraduationDate || '',
-      });
+      setPayload({});
     }
   }, [isOpen, student]);
 
@@ -46,24 +43,8 @@ export default function ReactivateStudentModal({
     >
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.8rem' }}>
         <p>
-          Reactivation will set status to active, restore login access, and update lifecycle dates.
+          Reactivation will set status to active and restore login access.
         </p>
-        <label className="field-control">
-          <span>Hall Validity End Date</span>
-          <input
-            type="date"
-            value={payload.hallValidityEndDate}
-            onChange={(event) => setPayload((prev) => ({ ...prev, hallValidityEndDate: event.target.value }))}
-          />
-        </label>
-        <label className="field-control">
-          <span>Expected Graduation Date</span>
-          <input
-            type="date"
-            value={payload.expectedGraduationDate}
-            onChange={(event) => setPayload((prev) => ({ ...prev, expectedGraduationDate: event.target.value }))}
-          />
-        </label>
       </form>
     </Modal>
   );

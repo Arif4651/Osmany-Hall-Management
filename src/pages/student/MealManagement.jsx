@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import DataTable from '../../components/common/DataTable';
 import PageHeader from '../../components/common/PageHeader';
 import PageSection from '../../components/layout/PageSection';
@@ -8,20 +9,11 @@ import Modal from '../../components/ui/Modal';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import useStudentMealModule from '../../hooks/useStudentMealModule';
 import { formatCutoffTimeLabel } from '../../constants/mealConfig';
-import { studentMealHistory } from '../../data/mock/studentData';
-import { formatCurrency, formatDate } from '../../utils/formatters';
-
-const mealColumns = [
-  { key: 'id', title: 'Meal ID' },
-  { key: 'date', title: 'Date', render: (value) => formatDate(value) },
-  { key: 'type', title: 'Type' },
-  { key: 'quantity', title: 'Quantity' },
-  { key: 'cost', title: 'Cost', render: (value) => formatCurrency(value) },
-  { key: 'status', title: 'Status', type: 'status' },
-];
+import { formatCurrency } from '../../utils/formatters';
 
 export default function MealManagement() {
   useDocumentTitle('Meal Management');
+  const { user } = useAuth();
 
   const {
     isLoading,
@@ -37,7 +29,7 @@ export default function MealManagement() {
     savePreferences,
     resetPreferences,
     getMealOptions,
-  } = useStudentMealModule();
+  } = useStudentMealModule(user?.studentId);
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -49,7 +41,6 @@ export default function MealManagement() {
     if (hours > 0) return `${hours}h ${minutes}m remaining`;
     return `${minutes}m remaining`;
   }, [minutesUntilCutoff]);
-
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -60,6 +51,26 @@ export default function MealManagement() {
   };
 
   const resolveMealByType = (dayEntry, mealTypeId) => dayEntry.meals.find((meal) => meal.mealTypeId === mealTypeId);
+
+  const mealOverviewRows = useMemo(
+    () => moduleDays.map((dayEntry) => ({
+      id: dayEntry.id,
+      day: dayEntry.label,
+      configuredMeals: dayEntry.meals.length,
+      commonItems: dayEntry.meals.reduce((sum, meal) => sum + meal.commonItems.length, 0),
+      optionalItems: dayEntry.meals.reduce((sum, meal) => sum + meal.optionalItems.length, 0),
+      status: dayEntry.meals.every((meal) => meal.status === 'active') ? 'active' : 'mixed',
+    })),
+    [moduleDays],
+  );
+
+  const mealOverviewColumns = [
+    { key: 'day', title: 'Day' },
+    { key: 'configuredMeals', title: 'Meals' },
+    { key: 'commonItems', title: 'Common Items' },
+    { key: 'optionalItems', title: 'Optional Items' },
+    { key: 'status', title: 'Status', type: 'status' },
+  ];
 
   return (
     <div>
@@ -175,8 +186,8 @@ export default function MealManagement() {
         </PageSection>
       </section>
 
-      <PageSection title="Meal History" subtitle="Past entries and statuses">
-        <DataTable columns={mealColumns} rows={studentMealHistory} />
+      <PageSection title="Meal Module Snapshot" subtitle="Live meal configuration from the backend">
+        <DataTable columns={mealOverviewColumns} rows={mealOverviewRows} />
       </PageSection>
 
       <Modal

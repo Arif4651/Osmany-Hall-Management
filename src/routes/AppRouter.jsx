@@ -2,6 +2,7 @@ import { Route, Routes, Navigate } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
 import LandingPage from '../pages/LandingPage';
 import LoginPage from '../pages/auth/LoginPage';
+import ChangePasswordPage from '../pages/auth/ChangePasswordPage';
 import NotFoundPage from '../pages/system/NotFoundPage';
 import StudentDashboard from '../pages/student/StudentDashboard';
 import MealManagement from '../pages/student/MealManagement';
@@ -41,6 +42,14 @@ export default function AppRouter() {
           <PublicOnlyRoute>
             <LoginPage mode="admin" />
           </PublicOnlyRoute>
+        }
+      />
+      <Route
+        path={ROUTE_PATHS.changePassword}
+        element={
+          <ProtectedRoute>
+            <ChangePasswordPage />
+          </ProtectedRoute>
         }
       />
 

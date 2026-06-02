@@ -26,10 +26,8 @@ export default function StudentTable({
             <th>Hall ID</th>
             <th>Mobile Number</th>
             <th>Level / Year</th>
-            <th>Session Year</th>
             <th>Hall Name</th>
-            <th>Admission Date</th>
-            <th>Hall Validity End Date</th>
+            <th>Room No</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -37,7 +35,7 @@ export default function StudentTable({
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: '1.3rem', color: 'var(--muted)' }}>
+              <td colSpan={11} style={{ textAlign: 'center', padding: '1.3rem', color: 'var(--muted)' }}>
                 Loading students...
               </td>
             </tr>
@@ -57,10 +55,8 @@ export default function StudentTable({
                 <td>{student.hallId}</td>
                 <td>{student.mobileNumber}</td>
                 <td>{student.level}</td>
-                <td>{student.sessionYear}</td>
                 <td>{student.hallName}</td>
-                <td>{student.admissionDate || '-'}</td>
-                <td>{student.hallValidityEndDate || '-'}</td>
+                <td>{student.roomNo || '-'}</td>
                 <td>
                   <StudentStatusBadge status={student.status} />
                 </td>
@@ -71,7 +67,7 @@ export default function StudentTable({
             ))
           ) : (
             <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: '1.3rem', color: 'var(--muted)' }}>
+              <td colSpan={11} style={{ textAlign: 'center', padding: '1.3rem', color: 'var(--muted)' }}>
                 No students match the current search and filters.
               </td>
             </tr>

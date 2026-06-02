@@ -66,16 +66,6 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
       </label>
 
       <label className="field-control">
-        <span>Session Year</span>
-        <input
-          value={formData.sessionYear}
-          onChange={(event) => onChange('sessionYear', event.target.value)}
-          placeholder="2022-23"
-        />
-        {errors.sessionYear ? <small className="form-error">{errors.sessionYear}</small> : null}
-      </label>
-
-      <label className="field-control">
         <span>Hall Name</span>
         <input
           value={formData.hallName}
@@ -85,46 +75,17 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
         {errors.hallName ? <small className="form-error">{errors.hallName}</small> : null}
       </label>
 
-      <label className="field-control">
-        <span>Email</span>
-        <input
-          type="email"
-          value={formData.email}
-          onChange={(event) => onChange('email', event.target.value)}
-          placeholder="student@example.com"
-        />
-        {errors.email ? <small className="form-error">{errors.email}</small> : null}
-      </label>
+        <label className="field-control">
+          <span>Room No</span>
+          <input
+            value={formData.roomNo}
+            onChange={(event) => onChange('roomNo', event.target.value)}
+            placeholder="e.g. 210"
+          />
+          {errors.roomNo ? <small className="form-error">{errors.roomNo}</small> : null}
+        </label>
 
-      <label className="field-control">
-        <span>Admission Date</span>
-        <input
-          type="date"
-          value={formData.admissionDate}
-          onChange={(event) => onChange('admissionDate', event.target.value)}
-        />
-        {errors.admissionDate ? <small className="form-error">{errors.admissionDate}</small> : null}
-      </label>
 
-      <label className="field-control">
-        <span>Expected Graduation Date</span>
-        <input
-          type="date"
-          value={formData.expectedGraduationDate}
-          onChange={(event) => onChange('expectedGraduationDate', event.target.value)}
-        />
-        {errors.expectedGraduationDate ? <small className="form-error">{errors.expectedGraduationDate}</small> : null}
-      </label>
-
-      <label className="field-control">
-        <span>Hall Validity End Date</span>
-        <input
-          type="date"
-          value={formData.hallValidityEndDate}
-          onChange={(event) => onChange('hallValidityEndDate', event.target.value)}
-        />
-        {errors.hallValidityEndDate ? <small className="form-error">{errors.hallValidityEndDate}</small> : null}
-      </label>
 
       {includeStatus ? (
         <label className="field-control">

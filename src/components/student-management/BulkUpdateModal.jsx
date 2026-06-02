@@ -5,11 +5,9 @@ import { STUDENT_LEVELS, STUDENT_STATUSES } from '../../types/student.types';
 
 const EMPTY_UPDATE_FIELDS = {
   level: '',
-  sessionYear: '',
   hallName: '',
+  roomNo: '',
   status: '',
-  hallValidityEndDate: '',
-  expectedGraduationDate: '',
 };
 
 export default function BulkUpdateModal({
@@ -73,20 +71,20 @@ export default function BulkUpdateModal({
           {!isPromotionOnly ? (
             <>
               <label className="field-control">
-                <span>Session Year</span>
-                <input
-                  value={updateFields.sessionYear}
-                  onChange={(event) => setUpdateFields((prev) => ({ ...prev, sessionYear: event.target.value }))}
-                  placeholder="2023-24"
-                />
-              </label>
-
-              <label className="field-control">
                 <span>Hall Name</span>
                 <input
                   value={updateFields.hallName}
                   onChange={(event) => setUpdateFields((prev) => ({ ...prev, hallName: event.target.value }))}
                   placeholder="Main / Extension A / Extension B"
+                />
+              </label>
+
+              <label className="field-control">
+                <span>Room No</span>
+                <input
+                  value={updateFields.roomNo}
+                  onChange={(event) => setUpdateFields((prev) => ({ ...prev, roomNo: event.target.value }))}
+                  placeholder="e.g. 210"
                 />
               </label>
 
@@ -101,24 +99,6 @@ export default function BulkUpdateModal({
                     <option key={status} value={status}>{status}</option>
                   ))}
                 </select>
-              </label>
-
-              <label className="field-control">
-                <span>Hall Validity End Date</span>
-                <input
-                  type="date"
-                  value={updateFields.hallValidityEndDate}
-                  onChange={(event) => setUpdateFields((prev) => ({ ...prev, hallValidityEndDate: event.target.value }))}
-                />
-              </label>
-
-              <label className="field-control">
-                <span>Expected Graduation Date</span>
-                <input
-                  type="date"
-                  value={updateFields.expectedGraduationDate}
-                  onChange={(event) => setUpdateFields((prev) => ({ ...prev, expectedGraduationDate: event.target.value }))}
-                />
               </label>
             </>
           ) : null}

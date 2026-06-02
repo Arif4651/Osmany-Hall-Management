@@ -2,6 +2,7 @@ export const ROUTE_PATHS = {
   landing: '/',
   login: '/login',
   adminLogin: '/halladmin',
+  changePassword: '/change-password',
 
   studentDashboard: '/student/dashboard',
   studentMeals: '/student/meals',

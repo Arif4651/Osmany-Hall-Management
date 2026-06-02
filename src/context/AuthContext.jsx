@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AUTH_USERS } from '../data/mock/authUsers';
+import { apiRequest, setAccessToken } from '../services/apiClient';
 
 const STORAGE_KEY = 'osmany-hall-auth-session-v1';
 
@@ -16,6 +16,7 @@ function readStoredSession() {
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(() => readStoredSession());
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
 
   useEffect(() => {
     if (session) {
@@ -26,45 +27,100 @@ export function AuthProvider({ children }) {
     window.localStorage.removeItem(STORAGE_KEY);
   }, [session]);
 
-  const authenticate = useCallback(({ email, password, allowedRole }) => {
-    const normalizedEmail = String(email || '').trim().toLowerCase();
+  useEffect(() => {
+    let isMounted = true;
 
-    const foundUser = AUTH_USERS.find(
-      (user) =>
-        user.email.toLowerCase() === normalizedEmail &&
-        user.password === password &&
-        user.role === allowedRole,
-    );
-
-    if (!foundUser) {
-      return { ok: false, message: 'Invalid credentials. Please try again.' };
+    async function hydrateSession() {
+      try {
+        const user = await apiRequest('/auth/me');
+        if (isMounted) {
+          setSession((prev) => ({
+            user,
+            accessToken: prev?.accessToken || null,
+            loggedInAt: prev?.loggedInAt || new Date().toISOString(),
+          }));
+        }
+      } catch {
+        setAccessToken('');
+        if (isMounted) setSession(null);
+      } finally {
+        if (isMounted) setIsSessionLoading(false);
+      }
     }
 
-    const nextSession = {
-      user: {
-        id: foundUser.id,
-        fullName: foundUser.fullName,
-        email: foundUser.email,
-        role: foundUser.role,
-        designation: foundUser.designation,
-      },
-      loggedInAt: new Date().toISOString(),
+    hydrateSession();
+    return () => {
+      isMounted = false;
     };
+  }, []);
 
-    setSession(nextSession);
-    return { ok: true, user: nextSession.user };
+  const authenticate = useCallback(async ({ email, password, allowedRole }) => {
+    try {
+      const response = await apiRequest('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, role: allowedRole }),
+      });
+
+      setAccessToken(response.accessToken);
+
+      const nextSession = {
+        user: response.user,
+        accessToken: response.accessToken,
+        expiresAtUtc: response.expiresAtUtc,
+        loggedInAt: new Date().toISOString(),
+      };
+
+      setSession(nextSession);
+      return { ok: true, user: nextSession.user };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : 'Invalid credentials. Please try again.',
+      };
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await apiRequest('/auth/logout', { method: 'POST' });
+    } catch {
+      // Logging out locally is still valid when the token is already expired.
+    }
+    setAccessToken('');
+    setSession(null);
+  }, []);
+
+  const changePassword = useCallback(async ({ currentPassword, newPassword }) => {
+    try {
+      await apiRequest('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const user = await apiRequest('/auth/me');
+      setSession((prev) => (prev ? { ...prev, user } : prev));
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : 'Password change failed.',
+      };
+    }
   }, []);
 
   const value = useMemo(
     () => ({
+      isSessionLoading,
       isAuthenticated: Boolean(session),
       user: session?.user ?? null,
       role: session?.user?.role ?? null,
+      mustChangePassword: Boolean(session?.user?.mustChangePassword),
       loginStudent: ({ email, password }) => authenticate({ email, password, allowedRole: 'student' }),
       loginAdmin: ({ email, password }) => authenticate({ email, password, allowedRole: 'admin' }),
-      logout: () => setSession(null),
+      changePassword,
+      logout,
     }),
-    [session, authenticate],
+    [session, isSessionLoading, authenticate, changePassword, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

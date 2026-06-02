@@ -15,30 +15,22 @@ export const DEFAULT_STUDENT_FORM = {
   hallId: '',
   mobileNumber: '',
   level: 'Level-01',
-  sessionYear: '',
   hallName: '',
-  email: '',
-  admissionDate: '',
-  expectedGraduationDate: '',
-  hallValidityEndDate: '',
+  roomNo: '',
   status: 'active',
-  hasDue: false,
 };
 
 export const DEFAULT_STUDENT_FILTERS = {
   search: '',
   department: 'all',
   level: 'all',
-  sessionYear: 'all',
   hallName: 'all',
   status: 'all',
 };
 
 export const BULK_UPDATABLE_FIELDS = [
   'level',
-  'sessionYear',
   'hallName',
+  'roomNo',
   'status',
-  'hallValidityEndDate',
-  'expectedGraduationDate',
 ];
