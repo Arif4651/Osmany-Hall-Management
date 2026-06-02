@@ -1,0 +1,6 @@
+@HallBackend_HostAddress = http://localhost:5012
+
+GET {{HallBackend_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
