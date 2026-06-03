@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
-import { STUDENT_LEVELS, STUDENT_STATUSES } from '../../types/student.types';
+import { HALL_NAMES, STUDENT_LEVELS, STUDENT_STATUSES } from '../../types/student.types';
 
 const EMPTY_UPDATE_FIELDS = {
   level: '',
@@ -72,11 +72,15 @@ export default function BulkUpdateModal({
             <>
               <label className="field-control">
                 <span>Hall Name</span>
-                <input
+                <select
                   value={updateFields.hallName}
                   onChange={(event) => setUpdateFields((prev) => ({ ...prev, hallName: event.target.value }))}
-                  placeholder="Main / Extension A / Extension B"
-                />
+                >
+                  <option value="">No change</option>
+                  {HALL_NAMES.map((hallName) => (
+                    <option key={hallName} value={hallName}>{hallName}</option>
+                  ))}
+                </select>
               </label>
 
               <label className="field-control">

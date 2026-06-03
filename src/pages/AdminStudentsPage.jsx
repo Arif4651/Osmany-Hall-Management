@@ -79,7 +79,6 @@ export default function AdminStudentsPage() {
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
   const [bulkConfirmTitle, setBulkConfirmTitle] = useState('Confirm Bulk Update');
-  const [bulkConfirmTyped, setBulkConfirmTyped] = useState('');
   const [pendingBulkFields, setPendingBulkFields] = useState({});
   const [isExporting, setIsExporting] = useState(false);
 
@@ -143,9 +142,8 @@ export default function AdminStudentsPage() {
   };
 
   const handleBulkDeleteConfirm = async () => {
-    await bulkPermanentDeleteStudents(false);
+    await bulkPermanentDeleteStudents(true);
     setIsBulkDeleteConfirmOpen(false);
-    setBulkConfirmTyped('');
   };
 
   const handleExportStudents = async (format) => {
@@ -333,14 +331,14 @@ export default function AdminStudentsPage() {
         onUpdate={updateStudent}
       />
 
-      <DeleteStudentModal
-        student={deleteStudent}
-        isOpen={Boolean(deleteStudent)}
-        isSubmitting={isSubmitting}
-        onClose={() => setDeleteStudent(null)}
-        onMarkInactive={markStudentInactive}
-        onDeletePermanent={() => deleteStudentPermanently(deleteStudent.id, false)}
-      />
+    <DeleteStudentModal
+  student={deleteStudent}
+  isOpen={Boolean(deleteStudent)}
+  isSubmitting={isSubmitting}
+  onClose={() => setDeleteStudent(null)}
+  onMarkInactive={markStudentInactive}
+  onDeletePermanent={() => deleteStudentPermanently(deleteStudent.id, false)}
+/>
 
       <ReactivateStudentModal
         student={reactivateTarget}
@@ -366,28 +364,22 @@ export default function AdminStudentsPage() {
         summary={selectionSummary}
         updateFields={pendingBulkFields}
         isDestructive={false}
-        typedValue=""
-        setTypedValue={() => {}}
         onClose={() => {
           setIsBulkConfirmOpen(false);
           setPendingBulkFields({});
-          setBulkConfirmTyped('');
         }}
         onConfirm={handleBulkConfirm}
       />
 
-      <BulkConfirmationModal
+    <BulkConfirmationModal
         isOpen={isBulkDeleteConfirmOpen}
         title="Permanent Delete by Filtering"
         isSubmitting={isSubmitting}
         summary={selectionSummary}
         updateFields={{ action: 'Delete Permanently' }}
         isDestructive
-        typedValue={bulkConfirmTyped}
-        setTypedValue={setBulkConfirmTyped}
         onClose={() => {
           setIsBulkDeleteConfirmOpen(false);
-          setBulkConfirmTyped('');
         }}
         onConfirm={handleBulkDeleteConfirm}
       />

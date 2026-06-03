@@ -1,22 +1,40 @@
-import { STUDENT_LEVELS, STUDENT_STATUSES } from '../../types/student.types';
+import {
+  DEPARTMENTS,
+  HALL_NAMES,
+  STUDENT_LEVELS,
+  STUDENT_STATUSES,
+} from '../../types/student.types';
 
 function toOptionList(values = []) {
   return values.filter(Boolean).map((value) => ({ label: value, value }));
 }
 
+function mergeOptionValues(...lists) {
+  return Array.from(
+    new Set(
+      lists
+        .flat()
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export default function StudentFilters({
   filters,
   departments,
-
   halls,
   onChange,
   onReset,
 }) {
+  const departmentOptions = mergeOptionValues(DEPARTMENTS, departments);
+  const hallOptions = mergeOptionValues(HALL_NAMES, halls);
+
   const filterItems = [
     {
       key: 'department',
       label: 'Department',
-      options: [{ label: 'All', value: 'all' }, ...toOptionList(departments)],
+      options: [{ label: 'All', value: 'all' }, ...toOptionList(departmentOptions)],
     },
     {
       key: 'level',
@@ -27,7 +45,7 @@ export default function StudentFilters({
     {
       key: 'hallName',
       label: 'Hall Name',
-      options: [{ label: 'All', value: 'all' }, ...toOptionList(halls)],
+      options: [{ label: 'All', value: 'all' }, ...toOptionList(hallOptions)],
     },
     {
       key: 'status',

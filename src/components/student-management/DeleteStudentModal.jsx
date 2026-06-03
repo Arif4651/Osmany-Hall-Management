@@ -10,14 +10,9 @@ export default function DeleteStudentModal({
   onMarkInactive,
   onDeletePermanent,
 }) {
-  const [typed, setTyped] = useState('');
-
-  const canDelete = useMemo(() => typed === 'DELETE', [typed]);
-
   if (!student) return null;
 
   const handleClose = () => {
-    setTyped('');
     onClose();
   };
 
@@ -27,7 +22,6 @@ export default function DeleteStudentModal({
   };
 
   const handleDeletePermanent = async () => {
-    if (!canDelete) return;
     await onDeletePermanent();
     handleClose();
   };
@@ -40,7 +34,7 @@ export default function DeleteStudentModal({
       actions={(
         <>
           <Button variant="secondary" onClick={handleClose}>Cancel</Button>
-          <Button variant="danger" disabled={!canDelete || isSubmitting} onClick={handleDeletePermanent}>
+          <Button variant="danger" onClick={handleDeletePermanent} disabled={isSubmitting}>
             Permanently Delete
           </Button>
         </>
@@ -48,8 +42,8 @@ export default function DeleteStudentModal({
     >
       <div style={{ display: 'grid', gap: '0.9rem' }}>
         <p>
-          For regular offboarding, use safe removal. Permanent delete is only for duplicates, invalid records,
-          or archived data after final review.
+          <strong>Warning:</strong> Permanent deletion will remove this student record completely. 
+          This action cannot be undone.
         </p>
 
         <div className="inline-actions">
@@ -57,11 +51,6 @@ export default function DeleteStudentModal({
             Mark Inactive (Safe)
           </Button>
         </div>
-
-        <label className="field-control">
-          <span>Type DELETE to permanently remove this student record</span>
-          <input value={typed} onChange={(event) => setTyped(event.target.value)} placeholder="DELETE" />
-        </label>
       </div>
     </Modal>
   );

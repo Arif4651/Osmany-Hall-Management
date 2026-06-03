@@ -8,13 +8,10 @@ export default function BulkConfirmationModal({
   summary,
   updateFields,
   isDestructive,
-  typedValue,
-  setTypedValue,
   onClose,
   onConfirm,
 }) {
   const fieldEntries = Object.entries(updateFields || {});
-  const destructiveLocked = isDestructive && typedValue !== 'DELETE';
 
   return (
     <Modal
@@ -24,7 +21,7 @@ export default function BulkConfirmationModal({
       actions={(
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant={isDestructive ? 'danger' : 'primary'} onClick={onConfirm} disabled={isSubmitting || destructiveLocked}>
+          <Button variant={isDestructive ? 'danger' : 'primary'} onClick={onConfirm} disabled={isSubmitting}>
             {isSubmitting ? 'Applying...' : 'Confirm'}
           </Button>
         </>
@@ -37,22 +34,27 @@ export default function BulkConfirmationModal({
           <p>Total excluded students: {summary.totalExcluded}</p>
         </div>
 
-        {fieldEntries.length ? (
-          <div>
-            <strong>Update Preview</strong>
-            <ul className="bullet-list" style={{ marginTop: '0.4rem' }}>
-              {fieldEntries.map(([field, value]) => (
-                <li key={field}>{field}: {String(value)}</li>
-              ))}
-            </ul>
+        {fieldEntries.length > 0 ? (
+          <div className="student-summary-box">
+            {fieldEntries.map(([key, value]) => (
+              <p key={key}>
+                <strong>{key}:</strong> {value}
+              </p>
+            ))}
           </div>
         ) : null}
 
         {isDestructive ? (
-          <label className="field-control">
-            <span>Type DELETE to continue</span>
-            <input value={typedValue} onChange={(event) => setTypedValue(event.target.value)} placeholder="DELETE" />
-          </label>
+          <div style={{
+            marginTop: '0.5rem',
+            padding: '0.75rem',
+            background: '#fee',
+            border: '1px solid #fcc',
+            borderRadius: '4px',
+            color: '#c00'
+          }}>
+            Please review the affected records before confirming.
+          </div>
         ) : null}
       </div>
     </Modal>

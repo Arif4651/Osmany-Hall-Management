@@ -6,8 +6,10 @@ export const STUDENT_STATUSES = [
   'archived',
 ];
 
-export const STUDENT_LEVELS = ['Level-01', 'Level-02', 'Level-03', 'Level-04', "Master's"];
+export const STUDENT_LEVELS = ['Level-01', 'Level-02', 'Level-03', 'Level-04'];
 
+export const HALL_NAMES = ['Osmany Hall-Male', 'Osmany Hall-Female', 'Extension-A', 'Extension-B'];
+export const DEPARTMENTS = ['CSE', 'EECE', 'CE', 'ME', 'IPE', 'ARCH', 'URP','EWCE','PME','AE','NAME','BME','NSE','MATH','CHEM','SC&H'];
 export const DEFAULT_STUDENT_FORM = {
   studentName: '',
   studentId: '',

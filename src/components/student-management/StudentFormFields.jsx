@@ -1,4 +1,9 @@
-import { STUDENT_LEVELS, STUDENT_STATUSES } from '../../types/student.types';
+import {
+  DEPARTMENTS,
+  HALL_NAMES,
+  STUDENT_LEVELS,
+  STUDENT_STATUSES,
+} from '../../types/student.types';
 
 export default function StudentFormFields({ formData, errors = {}, onChange, includeStatus = true }) {
   return (
@@ -25,11 +30,17 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
 
       <label className="field-control">
         <span>Department</span>
-        <input
+        <select
           value={formData.department}
           onChange={(event) => onChange('department', event.target.value)}
-          placeholder="e.g. CSE"
-        />
+        >
+          <option value="">Select Department</option>
+          {DEPARTMENTS.map((department) => (
+            <option key={department} value={department}>
+              {department}
+            </option>
+          ))}
+        </select>
         {errors.department ? <small className="form-error">{errors.department}</small> : null}
       </label>
 
@@ -67,11 +78,17 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
 
       <label className="field-control">
         <span>Hall Name</span>
-        <input
+        <select
           value={formData.hallName}
           onChange={(event) => onChange('hallName', event.target.value)}
-          placeholder="Main / Extension A / Extension B"
-        />
+        >
+          <option value="">Select Hall Name</option>
+          {HALL_NAMES.map((hallName) => (
+            <option key={hallName} value={hallName}>
+              {hallName}
+            </option>
+          ))}
+        </select>
         {errors.hallName ? <small className="form-error">{errors.hallName}</small> : null}
       </label>
 
