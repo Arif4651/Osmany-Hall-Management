@@ -128,3 +128,4 @@ E:\all_downloads\Osmany Hall\Hall_Backend\obj\Debug\net10.0\refint\HallBackend.d
 E:\all_downloads\Osmany Hall\Hall_Backend\obj\Debug\net10.0\HallBackend.pdb
 E:\all_downloads\Osmany Hall\Hall_Backend\obj\Debug\net10.0\HallBackend.genruntimeconfig.cache
 E:\all_downloads\Osmany Hall\Hall_Backend\obj\Debug\net10.0\ref\HallBackend.dll
+E:\all_downloads\Osmany Hall\Hall_Backend\obj\Debug\net10.0\HallBackend.sourcelink.json

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "e:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj": {}
+    "E:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj": {}
   },
   "projects": {
-    "e:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj": {
+    "E:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "e:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj",
+        "projectUniqueName": "E:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj",
         "projectName": "HallBackend",
-        "projectPath": "e:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj",
+        "projectPath": "E:\\all_downloads\\Osmany Hall\\Hall_Backend\\HallBackend.csproj",
         "packagesPath": "C:\\Users\\Lenovo\\.nuget\\packages\\",
-        "outputPath": "e:\\all_downloads\\Osmany Hall\\Hall_Backend\\obj\\",
+        "outputPath": "E:\\all_downloads\\Osmany Hall\\Hall_Backend\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

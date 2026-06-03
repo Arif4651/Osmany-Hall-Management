@@ -132,6 +132,8 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         var student = await db.Students.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (student is null) return NotFound();
         if (!force && !student.PermanentDeleteEligible) return BadRequest(new { message = "Student is not eligible for permanent deletion." });
+
+        await DetachStudentNotificationsAsync([student.Id], cancellationToken);
         db.Students.Remove(student);
         await db.SaveChangesAsync(cancellationToken);
         return new BulkStudentResponse(0, [], 1, [id], []);
@@ -177,6 +179,11 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         var students = await db.Students.Where(x => request.SelectedStudentIds.Contains(x.Id)).ToListAsync(cancellationToken);
         var eligible = students.Where(x => request.Force || x.PermanentDeleteEligible).ToList();
         var skipped = students.Where(x => !eligible.Contains(x)).Select(x => x.Id).ToList();
+
+        if (eligible.Count > 0)
+        {
+            await DetachStudentNotificationsAsync(eligible.Select(x => x.Id), cancellationToken);
+        }
 
         db.Students.RemoveRange(eligible);
         await db.SaveChangesAsync(cancellationToken);
@@ -284,6 +291,22 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         student.LoginAccessEnabled = status is "active" or "pending_clearance";
         student.ReactivationEligible = status is "inactive" or "archived" or "graduated" or "pending_clearance";
         student.PermanentDeleteEligible = status is "inactive" or "archived" or "graduated";
+    }
+
+    private async Task DetachStudentNotificationsAsync(IEnumerable<Guid> studentIds, CancellationToken cancellationToken)
+    {
+        var ids = studentIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+
+        var notifications = await db.Notifications
+            .Where(x => x.StudentId.HasValue && ids.Contains(x.StudentId.Value))
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in notifications)
+        {
+            notification.StudentId = null;
+            notification.Student = null;
+        }
     }
 
     private static bool IsAll(string? value) => string.IsNullOrWhiteSpace(value) || value == "all";
