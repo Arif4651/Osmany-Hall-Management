@@ -28,9 +28,6 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             .Include(x => x.Item)
             .Where(x => x.TransactionType == "out" && x.Date >= from && x.Date <= to)
             .ToListAsync(cancellationToken);
-        var subsidies = await db.DswSubsidies.AsNoTracking()
-            .Where(x => !x.IsReversed && x.Date >= from && x.Date <= to)
-            .ToListAsync(cancellationToken);
         var students = await db.Students.AsNoTracking().ToListAsync(cancellationToken);
         var statuses = await db.MealStatusHistory.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
@@ -48,11 +45,6 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                         && x.MealPeriod == period
                         && (effectiveGender == "All" || x.Item != null && x.Item.Wing == effectiveGender))
                     .Sum(x => x.TotalCost);
-                var subsidyCost = subsidies
-                    .Where(x => x.Date == date
-                        && x.MealPeriod == period
-                        && (effectiveGender == "All" || x.Wing == effectiveGender))
-                    .Sum(x => x.SubsidyAmount);
                 var participants = students.Where(student =>
                 {
                     var mealOverride = overrides
@@ -70,29 +62,35 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                             .FirstOrDefault()?.IsOn == true;
                 }).ToList();
                 var filtered = effectiveGender == "All" ? participants : participants.Where(x => x.Gender == effectiveGender).ToList();
-                var totalCost = transactionCost - subsidyCost;
-                var filteredCost = FinancialMath.ProportionalCost(totalCost, filtered.Count, participants.Count);
-                return new DailyCostMealDto(filteredCost, filtered.Count, filtered.Count == 0 ? 0m : filteredCost / filtered.Count);
+                // transactionCost is already filtered by wing, so no proportional split needed
+                return new DailyCostMealDto(transactionCost, filtered.Count, filtered.Count == 0 ? 0m : transactionCost / filtered.Count);
             }
             var breakfast = Meal("breakfast");
             var lunch = Meal("lunch");
             var dinner = Meal("dinner");
-            var totalCost = breakfast.Cost + lunch.Cost + dinner.Cost;
-            var count = breakfast.Students + lunch.Students + dinner.Students;
-            rows.Add(new DailyCostRowDto(date, breakfast, lunch, dinner, totalCost, count == 0 ? 0m : totalCost / count));
+            // Total per head = sum of each meal's per-head cost for this day
+            var totalPerHead = breakfast.PerHead + lunch.PerHead + dinner.PerHead;
+            rows.Add(new DailyCostRowDto(date, breakfast, lunch, dinner, totalPerHead));
         }
 
-        static DailyCostMealDto Total(IEnumerable<DailyCostMealDto> meals)
-        {
-            var list = meals.ToList();
-            var cost = list.Sum(x => x.Cost);
-            var students = list.Sum(x => x.Students);
-            return new DailyCostMealDto(cost, students, students == 0 ? 0m : cost / students);
-        }
-        var breakfastTotal = Total(rows.Select(x => x.Breakfast));
-        var lunchTotal = Total(rows.Select(x => x.Lunch));
-        var dinnerTotal = Total(rows.Select(x => x.Dinner));
-        var grand = Total(rows.SelectMany(x => new[] { x.Breakfast, x.Lunch, x.Dinner }));
+
+        // Footer totals: sum of each day's per-head for each period
+        var breakfastTotal = new DailyCostMealDto(
+            rows.Sum(x => x.Breakfast.Cost),
+            rows.Sum(x => x.Breakfast.Students),
+            rows.Sum(x => x.Breakfast.PerHead));
+        var lunchTotal = new DailyCostMealDto(
+            rows.Sum(x => x.Lunch.Cost),
+            rows.Sum(x => x.Lunch.Students),
+            rows.Sum(x => x.Lunch.PerHead));
+        var dinnerTotal = new DailyCostMealDto(
+            rows.Sum(x => x.Dinner.Cost),
+            rows.Sum(x => x.Dinner.Students),
+            rows.Sum(x => x.Dinner.PerHead));
+        var grand = new DailyCostMealDto(
+            breakfastTotal.Cost + lunchTotal.Cost + dinnerTotal.Cost,
+            breakfastTotal.Students + lunchTotal.Students + dinnerTotal.Students,
+            breakfastTotal.PerHead + lunchTotal.PerHead + dinnerTotal.PerHead);
         return new DailyCostReportDto(month, year, effectiveGender, rows, breakfastTotal, lunchTotal, dinnerTotal, grand);
     }
 }

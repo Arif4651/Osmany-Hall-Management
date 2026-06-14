@@ -260,6 +260,10 @@ public sealed class MealsController(
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
             return BadRequest(new { message = "Invalid meal period." });
 
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (request.EffectiveFrom < today)
+            return BadRequest(new { message = "Meal changes can only be applied for today or future dates." });
+
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
         var student = await db.Students
             .FirstOrDefaultAsync(x => x.Id == request.StudentRecordId && x.Gender == selectedWing, cancellationToken);
@@ -272,8 +276,9 @@ public sealed class MealsController(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await history.SetStatusAsync(student.Id, request.MealPeriod, request.IsOn, request.EffectiveFrom, cancellationToken);
-            await SaveStudentOptionPreferenceAsync(student.Id, selectedWing, request.MealPeriod, request.OptionItemId, request.EffectiveFrom, cancellationToken);
+            // Use AdminForceStatusAsync so today's meal can be changed even when a future status exists.
+            await history.AdminForceStatusAsync(student.Id, request.MealPeriod, request.IsOn, request.EffectiveFrom, cancellationToken);
+            await AdminForceOptionPreferenceAsync(student.Id, selectedWing, request.MealPeriod, request.OptionItemId, request.EffectiveFrom, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
@@ -779,6 +784,68 @@ public sealed class MealsController(
         return DateOnly.FromDateTime(now.Date).AddDays(daysAhead);
     }
 
+    /// <summary>
+    /// Admin version of SaveStudentOptionPreferenceAsync: uses AdminForcePreferenceAsync to
+    /// allow setting preferences for today even when a future preference record exists.
+    /// </summary>
+    private async Task AdminForceOptionPreferenceAsync(
+        Guid studentId,
+        string wing,
+        string mealPeriod,
+        Guid? optionItemId,
+        DateOnly effectiveFrom,
+        CancellationToken cancellationToken)
+    {
+        if (!optionItemId.HasValue)
+        {
+            await history.AdminForcePreferenceAsync(studentId, mealPeriod, null, effectiveFrom, cancellationToken);
+            return;
+        }
+
+        var dayCode = effectiveFrom.DayOfWeek.ToString()[..3].ToLowerInvariant();
+        var allowedOption = await db.MealConfigurations.AsNoTracking()
+            .Include(x => x.MealDay)
+            .Include(x => x.MealType)
+            .Include(x => x.Items)
+            .Where(x => x.Wing == wing && x.MealDay!.Code == dayCode && x.MealType!.Code == mealPeriod)
+            .SelectMany(x => x.Items)
+            .AnyAsync(x => x.IsOptional && x.InventoryItemId == optionItemId, cancellationToken);
+
+        if (!allowedOption)
+            throw new InvalidOperationException("This optional choice is not configured for the selected meal on that date.");
+
+        await history.AdminForcePreferenceAsync(studentId, mealPeriod, optionItemId, effectiveFrom, cancellationToken);
+    }
+
+    private async Task SaveStudentOptionPreferenceAsync(
+        Guid studentId,
+        string wing,
+        string mealPeriod,
+        Guid? optionItemId,
+        DateOnly effectiveFrom,
+        CancellationToken cancellationToken)
+    {
+        if (!optionItemId.HasValue)
+        {
+            await history.SetPreferenceAsync(studentId, mealPeriod, null, effectiveFrom, cancellationToken);
+            return;
+        }
+
+        var dayCode = effectiveFrom.DayOfWeek.ToString()[..3].ToLowerInvariant();
+        var allowedOption = await db.MealConfigurations.AsNoTracking()
+            .Include(x => x.MealDay)
+            .Include(x => x.MealType)
+            .Include(x => x.Items)
+            .Where(x => x.Wing == wing && x.MealDay!.Code == dayCode && x.MealType!.Code == mealPeriod)
+            .SelectMany(x => x.Items)
+            .AnyAsync(x => x.IsOptional && x.InventoryItemId == optionItemId, cancellationToken);
+
+        if (!allowedOption)
+            throw new InvalidOperationException("This optional choice is not configured for the selected meal on that date.");
+
+        await history.SetPreferenceAsync(studentId, mealPeriod, optionItemId, effectiveFrom, cancellationToken);
+    }
+
     private async Task<AdminStudentMealControlDto> BuildStudentMealControlAsync(
         Student student,
         string wing,
@@ -839,33 +906,5 @@ public sealed class MealsController(
                 .ToList());
     }
 
-    private async Task SaveStudentOptionPreferenceAsync(
-        Guid studentId,
-        string wing,
-        string mealPeriod,
-        Guid? optionItemId,
-        DateOnly effectiveFrom,
-        CancellationToken cancellationToken)
-    {
-        if (!optionItemId.HasValue)
-        {
-            await history.SetPreferenceAsync(studentId, mealPeriod, null, effectiveFrom, cancellationToken);
-            return;
-        }
-
-        var dayCode = effectiveFrom.DayOfWeek.ToString()[..3].ToLowerInvariant();
-        var allowedOption = await db.MealConfigurations.AsNoTracking()
-            .Include(x => x.MealDay)
-            .Include(x => x.MealType)
-            .Include(x => x.Items)
-            .Where(x => x.Wing == wing && x.MealDay!.Code == dayCode && x.MealType!.Code == mealPeriod)
-            .SelectMany(x => x.Items)
-            .AnyAsync(x => x.IsOptional && x.InventoryItemId == optionItemId, cancellationToken);
-
-        if (!allowedOption)
-            throw new InvalidOperationException("This optional choice is not configured for the selected meal on that date.");
-
-        await history.SetPreferenceAsync(studentId, mealPeriod, optionItemId, effectiveFrom, cancellationToken);
-    }
-
 }
+

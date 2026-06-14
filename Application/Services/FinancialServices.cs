@@ -159,6 +159,207 @@ public sealed class MealHistoryService(HallDbContext db)
         });
     }
 
+    /// <summary>
+    /// Admin-only override: sets the meal status for a specific date even when a newer record already
+    /// exists. If a future open record is present, a bounded single-day record is inserted/updated for
+    /// <paramref name="targetDate"/> so the future chain is not disturbed.
+    /// </summary>
+    public async Task AdminForceStatusAsync(Guid studentId, string mealPeriod, bool isOn, DateOnly targetDate, CancellationToken cancellationToken)
+    {
+        ValidatePeriod(mealPeriod);
+
+        // Check whether a future open record (EffectiveTo == null) beyond targetDate already exists.
+        var allOpen = await db.MealStatusHistory
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveTo == null)
+            .ToListAsync(cancellationToken);
+
+        var hasFuture = allOpen.Any(x => x.EffectiveFrom > targetDate);
+
+        if (!hasFuture)
+        {
+            // No future record — behave exactly like the normal SetStatusAsync path.
+            await SetStatusAsync(studentId, mealPeriod, isOn, targetDate, cancellationToken);
+            return;
+        }
+
+        // A future record exists. We must not close it. Instead we upsert a bounded record for exactly targetDate.
+        // First check if a bounded record already covers targetDate.
+        var bounded = await db.MealStatusHistory
+            .Where(x => x.StudentId == studentId
+                && x.MealPeriod == mealPeriod
+                && x.EffectiveFrom == targetDate
+                && x.EffectiveTo == targetDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (bounded is not null)
+        {
+            bounded.IsOn = isOn;
+            return;
+        }
+
+        // Check if a record that starts on targetDate exists (open or ending on the same day).
+        var sameStart = await db.MealStatusHistory
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveFrom == targetDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (sameStart is not null)
+        {
+            // Narrow it to a single day.
+            sameStart.IsOn = isOn;
+            sameStart.EffectiveTo = targetDate;
+            return;
+        }
+
+        // Find the open record that was active on targetDate (EffectiveFrom <= targetDate) and split it:
+        // close the current record at targetDate-1, insert the single-day override, then re-open a new
+        // record for targetDate+1 restoring the original value.
+        var covering = allOpen
+            .Where(x => x.EffectiveFrom <= targetDate)
+            .OrderByDescending(x => x.EffectiveFrom)
+            .FirstOrDefault();
+
+        if (covering is not null)
+        {
+            var originalIsOn = covering.IsOn;
+            covering.EffectiveTo = targetDate.AddDays(-1);
+
+            // Single-day override.
+            db.MealStatusHistory.Add(new MealStatusHistory
+            {
+                StudentId = studentId,
+                MealPeriod = mealPeriod,
+                IsOn = isOn,
+                EffectiveFrom = targetDate,
+                EffectiveTo = targetDate,
+            });
+
+            // Restore original value from targetDate+1 only if no future record already starts there.
+            var restoreDate = targetDate.AddDays(1);
+            var futureAlreadyCovers = allOpen.Any(x => x.EffectiveFrom <= restoreDate);
+            if (!futureAlreadyCovers)
+            {
+                db.MealStatusHistory.Add(new MealStatusHistory
+                {
+                    StudentId = studentId,
+                    MealPeriod = mealPeriod,
+                    IsOn = originalIsOn,
+                    EffectiveFrom = restoreDate,
+                    EffectiveTo = null,
+                });
+            }
+        }
+        else
+        {
+            // No covering record for targetDate; just insert a single-day bounded record.
+            db.MealStatusHistory.Add(new MealStatusHistory
+            {
+                StudentId = studentId,
+                MealPeriod = mealPeriod,
+                IsOn = isOn,
+                EffectiveFrom = targetDate,
+                EffectiveTo = targetDate,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Admin-only override: sets the meal preference for a specific date even when a newer record already
+    /// exists, using the same bounded single-day strategy as <see cref="AdminForceStatusAsync"/>.
+    /// </summary>
+    public async Task AdminForcePreferenceAsync(Guid studentId, string mealPeriod, Guid? optionItemId, DateOnly targetDate, CancellationToken cancellationToken)
+    {
+        ValidatePeriod(mealPeriod);
+
+        if (optionItemId.HasValue && !await db.InventoryItems.AnyAsync(
+                x => x.Id == optionItemId && x.Category == "Options" && !x.IsDeleted, cancellationToken))
+        {
+            throw new InvalidOperationException("The selected option item is not active.");
+        }
+
+        var allOpen = await db.MealPreferenceHistory
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveTo == null)
+            .ToListAsync(cancellationToken);
+
+        var hasFuture = allOpen.Any(x => x.EffectiveFrom > targetDate);
+
+        if (!hasFuture)
+        {
+            await SetPreferenceAsync(studentId, mealPeriod, optionItemId, targetDate, cancellationToken);
+            return;
+        }
+
+        // Upsert bounded single-day record.
+        var bounded = await db.MealPreferenceHistory
+            .Where(x => x.StudentId == studentId
+                && x.MealPeriod == mealPeriod
+                && x.EffectiveFrom == targetDate
+                && x.EffectiveTo == targetDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (bounded is not null)
+        {
+            bounded.OptionItemId = optionItemId;
+            return;
+        }
+
+        var sameStart = await db.MealPreferenceHistory
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveFrom == targetDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (sameStart is not null)
+        {
+            sameStart.OptionItemId = optionItemId;
+            sameStart.EffectiveTo = targetDate;
+            return;
+        }
+
+        var covering = allOpen
+            .Where(x => x.EffectiveFrom <= targetDate)
+            .OrderByDescending(x => x.EffectiveFrom)
+            .FirstOrDefault();
+
+        if (covering is not null)
+        {
+            var originalOptionItemId = covering.OptionItemId;
+            covering.EffectiveTo = targetDate.AddDays(-1);
+
+            db.MealPreferenceHistory.Add(new MealPreferenceHistory
+            {
+                StudentId = studentId,
+                MealPeriod = mealPeriod,
+                OptionItemId = optionItemId,
+                EffectiveFrom = targetDate,
+                EffectiveTo = targetDate,
+            });
+
+            // Restore original preference from targetDate+1 only if no future record already covers it.
+            var prefRestoreDate = targetDate.AddDays(1);
+            var prefFutureCovers = allOpen.Any(x => x.EffectiveFrom <= prefRestoreDate);
+            if (!prefFutureCovers)
+            {
+                db.MealPreferenceHistory.Add(new MealPreferenceHistory
+                {
+                    StudentId = studentId,
+                    MealPeriod = mealPeriod,
+                    OptionItemId = originalOptionItemId,
+                    EffectiveFrom = prefRestoreDate,
+                    EffectiveTo = null,
+                });
+            }
+        }
+        else
+        {
+            db.MealPreferenceHistory.Add(new MealPreferenceHistory
+            {
+                StudentId = studentId,
+                MealPeriod = mealPeriod,
+                OptionItemId = optionItemId,
+                EffectiveFrom = targetDate,
+                EffectiveTo = targetDate,
+            });
+        }
+    }
+
     private static void ValidatePeriod(string mealPeriod)
     {
         if (!MealPeriods.Contains(mealPeriod)) throw new InvalidOperationException("Invalid meal period.");

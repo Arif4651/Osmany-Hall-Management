@@ -51,7 +51,7 @@ public sealed record SaveDueAdjustmentRequest(
 public sealed record DailyCostMealDto(decimal Cost, int Students, decimal PerHead);
 public sealed record DailyCostRowDto(
     DateOnly Date, DailyCostMealDto Breakfast, DailyCostMealDto Lunch,
-    DailyCostMealDto Dinner, decimal TotalCost, decimal TotalPerHead);
+    DailyCostMealDto Dinner, decimal TotalPerHead);
 public sealed record DailyCostReportDto(
     int Month, int Year, string Gender, IReadOnlyList<DailyCostRowDto> Rows,
     DailyCostMealDto Breakfast, DailyCostMealDto Lunch, DailyCostMealDto Dinner,
