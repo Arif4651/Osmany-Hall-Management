@@ -95,7 +95,6 @@ export default function DailyCost() {
     'Dinner Cost': row.dinner.cost,
     'D. Students': row.dinner.students,
     'D. /Head': row.dinner.perHead,
-    'Total Cost': row.totalCost,
     'Total /Head': row.totalPerHead,
   }));
 
@@ -278,7 +277,7 @@ export default function DailyCost() {
                   <th colSpan={3} className="th-breakfast">BREAKFAST</th>
                   <th colSpan={3} className="th-lunch">LUNCH</th>
                   <th colSpan={3} className="th-dinner">DINNER</th>
-                  <th colSpan={2} className="th-total">TOTAL</th>
+                  <th rowSpan={2} className="th-total">TOTAL<br /><small style={{fontWeight:400,fontSize:'0.75em'}}>/Head</small></th>
                 </tr>
                 <tr>
                   <th className="th-breakfast">Cost</th>
@@ -290,8 +289,6 @@ export default function DailyCost() {
                   <th className="th-dinner">Cost</th>
                   <th className="th-dinner">Students</th>
                   <th className="th-dinner">/Head</th>
-                  <th className="th-total">Cost</th>
-                  <th className="th-total">/Head</th>
                 </tr>
               </thead>
               <tbody>
@@ -314,7 +311,6 @@ export default function DailyCost() {
                       <td className="cell-dinner">{formatCurrency(row.dinner.cost)}</td>
                       <td className="cell-student">{row.dinner.students}</td>
                       <td className="cell-dinner">{formatCurrency(row.dinner.perHead)}</td>
-                      <td className="cell-total">{formatCurrency(row.totalCost)}</td>
                       <td className="cell-total">{formatCurrency(row.totalPerHead)}</td>
                     </tr>
                   );
@@ -323,16 +319,15 @@ export default function DailyCost() {
               <tfoot>
                 <tr className="table-total-row">
                   <td style={{ fontWeight: '700', color: '#1e293b' }}>TOTAL</td>
-                  <td className="cell-breakfast" style={{ fontWeight: '700' }}>{formatCurrency(report.breakfast.cost)}</td>
+                  <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
                   <td className="cell-breakfast" style={{ fontWeight: '700' }}>{formatCurrency(report.breakfast.perHead)}</td>
-                  <td className="cell-lunch" style={{ fontWeight: '700' }}>{formatCurrency(report.lunch.cost)}</td>
+                  <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
                   <td className="cell-lunch" style={{ fontWeight: '700' }}>{formatCurrency(report.lunch.perHead)}</td>
-                  <td className="cell-dinner" style={{ fontWeight: '700' }}>{formatCurrency(report.dinner.cost)}</td>
+                  <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
                   <td className="cell-dinner" style={{ fontWeight: '700' }}>{formatCurrency(report.dinner.perHead)}</td>
-                  <td className="cell-total" style={{ fontWeight: '800' }}>{formatCurrency(report.grandTotal.cost)}</td>
                   <td className="cell-total" style={{ fontWeight: '800' }}>{formatCurrency(report.grandTotal.perHead)}</td>
                 </tr>
               </tfoot>

@@ -8,13 +8,8 @@ import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
 import { todayLocal } from '../../utils/formatters';
 
-const tomorrowLocal = () => {
-  const date = new Date(`${todayLocal()}T00:00:00`);
-  date.setDate(date.getDate() + 1);
-  return new Intl.DateTimeFormat('en-CA').format(date);
-};
 
-const defaultMealSheetDate = tomorrowLocal();
+const defaultMealSheetDate = todayLocal();
 
 const MealIndicator = ({ label, isOn }) => (
   <span

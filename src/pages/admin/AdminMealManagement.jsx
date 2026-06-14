@@ -535,7 +535,7 @@ export default function AdminMealManagement() {
             <div className="admin-meal-section-head">
               <div><h2>Global Meal Controls</h2><p>Force a meal ON or OFF for every active student.</p></div>
               <div className="admin-meal-count-actions">
-                <label><CalendarDays size={16} /><input type="date" value={countDate} onChange={(event) => setCountDate(event.target.value)} /></label>
+                <label><CalendarDays size={16} /><input type="date" value={countDate} min={todayLocal()} onChange={(event) => setCountDate(event.target.value)} /></label>
               </div>
             </div>
             <div className="admin-student-meal-control">
