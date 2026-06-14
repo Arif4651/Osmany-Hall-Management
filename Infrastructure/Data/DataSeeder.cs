@@ -11,6 +11,32 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
     {
         if (await db.Users.AnyAsync(cancellationToken))
         {
+            if (!await db.Users.AnyAsync(x => x.Role == Roles.SuperAdmin, cancellationToken))
+            {
+                var existingDatabaseSuperAdmin = User("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "Super Administrator");
+                existingDatabaseSuperAdmin.PasswordHash = passwords.Hash("Admin@123");
+                db.Users.Add(existingDatabaseSuperAdmin);
+            }
+            var legacyAdmins = await db.Users.Where(x => x.Role == Roles.Admin).ToListAsync(cancellationToken);
+            foreach (var legacyAdmin in legacyAdmins)
+            {
+                legacyAdmin.Role = Roles.MaleWingAdmin;
+                legacyAdmin.Wing = "Male";
+                legacyAdmin.Designation = "Male Wing Administrator";
+            }
+            if (!await db.Users.AnyAsync(x => x.Role == Roles.FemaleWingAdmin, cancellationToken))
+            {
+                var existingDatabaseFemaleAdmin = User("Female Wing Administrator", "femaleadmin", "femaleadmin@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
+                existingDatabaseFemaleAdmin.PasswordHash = passwords.Hash("Admin@123");
+                db.Users.Add(existingDatabaseFemaleAdmin);
+            }
+            if (!await db.PaymentCategories.AnyAsync(cancellationToken))
+            {
+                db.PaymentCategories.AddRange(
+                    new PaymentCategory { Name = "bKash" },
+                    new PaymentCategory { Name = "Bank Transfer" });
+            }
+            await db.SaveChangesAsync(cancellationToken);
             // Update existing student users to not require password change
             var studentUsers = await db.Users.Where(x => x.Role == Roles.Student).ToListAsync(cancellationToken);
             if (studentUsers.Count > 0)
@@ -21,14 +47,169 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
                 }
                 await db.SaveChangesAsync(cancellationToken);
             }
+            var inventoryItems = await db.InventoryItems.ToListAsync(cancellationToken);
+            if (inventoryItems.Count > 0)
+            {
+                var preferredFemaleCreatorId = await db.Users.AsNoTracking()
+                    .Where(x => x.Role == Roles.FemaleWingAdmin)
+                    .Select(x => (Guid?)x.Id)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? await db.Users.AsNoTracking()
+                        .Where(x => x.Role == Roles.MaleWingAdmin || x.Role == Roles.SuperAdmin)
+                        .Select(x => (Guid?)x.Id)
+                        .FirstOrDefaultAsync(cancellationToken)
+                    ?? Guid.Empty;
+                foreach (var item in inventoryItems)
+                {
+                    if (string.IsNullOrWhiteSpace(item.Wing))
+                    {
+                        item.Wing = "Male";
+                    }
+                    if (string.IsNullOrWhiteSpace(item.Unit))
+                    {
+                        item.Unit = item.Item.Contains("Oil", StringComparison.OrdinalIgnoreCase) ? "L" : "kg";
+                    }
+
+                    if (item.AveragePrice == 0 && item.Stock > 0)
+                    {
+                        item.AveragePrice = item.Item switch
+                        {
+                            var name when name.Contains("Rice", StringComparison.OrdinalIgnoreCase) => 62,
+                            var name when name.Contains("Oil", StringComparison.OrdinalIgnoreCase) => 180,
+                            var name when name.Contains("Lentils", StringComparison.OrdinalIgnoreCase) => 110,
+                            _ => item.AveragePrice,
+                        };
+                    }
+
+                    item.TotalStockValue = item.Stock * item.AveragePrice;
+                    item.CurrentStockQuantity = item.Stock;
+                    item.CurrentWac = item.AveragePrice;
+                    if (item.Category is not ("Common" or "Options" or "Others")) item.Category = "Common";
+                    item.Status = item.Stock <= item.Threshold ? "low-stock" : "active";
+                }
+                await db.SaveChangesAsync(cancellationToken);
+
+                if (!inventoryItems.Any(x => x.Wing == "Female"))
+                {
+                    var maleItems = inventoryItems
+                        .Where(x => x.Wing == "Male" && !x.IsDeleted)
+                        .OrderBy(x => x.Category)
+                        .ThenBy(x => x.Item)
+                        .ToList();
+                    var clonedBySourceId = new Dictionary<Guid, InventoryItem>();
+
+                    foreach (var source in maleItems.Where(x => x.Category != "Others"))
+                    {
+                        var clone = new InventoryItem
+                        {
+                            Item = source.Item,
+                            Wing = "Female",
+                            Category = source.Category,
+                            Unit = source.Unit,
+                            IsStored = source.IsStored,
+                            Threshold = source.Threshold,
+                            AveragePrice = source.AveragePrice,
+                            CurrentWac = source.CurrentWac,
+                            CurrentStockQuantity = 0m,
+                            Stock = 0m,
+                            TotalStockValue = 0m,
+                            Status = "active",
+                            CreatedById = preferredFemaleCreatorId,
+                        };
+                        db.InventoryItems.Add(clone);
+                        clonedBySourceId[source.Id] = clone;
+                    }
+
+                    await db.SaveChangesAsync(cancellationToken);
+
+                    foreach (var source in maleItems.Where(x => x.Category == "Others"))
+                    {
+                        var clone = new InventoryItem
+                        {
+                            Item = source.Item,
+                            Wing = "Female",
+                            Category = source.Category,
+                            Unit = source.Unit,
+                            IsStored = source.IsStored,
+                            Threshold = source.Threshold,
+                            AveragePrice = source.AveragePrice,
+                            CurrentWac = source.CurrentWac,
+                            CurrentStockQuantity = 0m,
+                            Stock = 0m,
+                            TotalStockValue = 0m,
+                            LinkedOptionId = source.LinkedOptionId.HasValue && clonedBySourceId.ContainsKey(source.LinkedOptionId.Value)
+                                ? clonedBySourceId[source.LinkedOptionId.Value].Id
+                                : null,
+                            Status = "active",
+                            CreatedById = preferredFemaleCreatorId,
+                        };
+                        db.InventoryItems.Add(clone);
+                        clonedBySourceId[source.Id] = clone;
+                    }
+
+                    await db.SaveChangesAsync(cancellationToken);
+                    inventoryItems = await db.InventoryItems.ToListAsync(cancellationToken);
+                }
+
+                var inventoryLookup = inventoryItems
+                    .Where(x => !x.IsDeleted)
+                    .GroupBy(x => $"{x.Wing}|{x.Category}|{ItemCatalogService.NormalizeName(x.Item)}")
+                    .ToDictionary(x => x.Key, x => x.First());
+                var mealItems = await db.MealItems
+                    .Include(x => x.MealConfiguration)
+                    .ToListAsync(cancellationToken);
+                foreach (var mealItem in mealItems)
+                {
+                    if (mealItem.MealConfiguration is null) continue;
+                    var category = mealItem.IsOptional ? "Options" : "Common";
+                    var key = $"{mealItem.MealConfiguration.Wing}|{category}|{ItemCatalogService.NormalizeName(mealItem.Name)}";
+                    if (inventoryLookup.TryGetValue(key, out var linkedItem))
+                    {
+                        mealItem.InventoryItemId = linkedItem.Id;
+                    }
+                }
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            if (!await db.MealConfigurations.AnyAsync(x => x.Wing == "Female", cancellationToken))
+            {
+                var maleConfigurations = await db.MealConfigurations
+                    .Include(x => x.Items)
+                    .Where(x => x.Wing == "Male")
+                    .ToListAsync(cancellationToken);
+                foreach (var configuration in maleConfigurations)
+                {
+                    db.MealConfigurations.Add(new MealConfiguration
+                    {
+                        MealDayId = configuration.MealDayId,
+                        MealTypeId = configuration.MealTypeId,
+                        Wing = "Female",
+                        Status = configuration.Status,
+                        Items = configuration.Items.Select(item => new MealItem
+                        {
+                            InventoryItemId = item.InventoryItemId,
+                            Name = item.Name,
+                            Cost = item.Cost,
+                            IsOptional = item.IsOptional,
+                        }).ToList(),
+                    });
+                }
+                await db.SaveChangesAsync(cancellationToken);
+            }
             return;
         }
 
         // Admin user only - students will be added dynamically through the admin panel
-        var admin = User("Admin Officer", "admin", "admin@mist.ac.bd", Roles.Admin, "Hall Administrator");
+        var admin = User("Male Wing Administrator", "admin", "admin@mist.ac.bd", Roles.MaleWingAdmin, "Male Wing Administrator", "Male");
         admin.PasswordHash = passwords.Hash("Admin@123");
+        var superAdmin = User("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "Super Administrator");
+        superAdmin.PasswordHash = passwords.Hash("Admin@123");
+        var femaleAdmin = User("Female Wing Administrator", "femaleadmin", "femaleadmin@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
+        femaleAdmin.PasswordHash = passwords.Hash("Admin@123");
 
-        db.Users.Add(admin);
+        db.Users.AddRange(admin, femaleAdmin, superAdmin);
+        db.PaymentCategories.AddRange(
+            new PaymentCategory { Name = "bKash" },
+            new PaymentCategory { Name = "Bank Transfer" });
 
         var mealTypes = new[]
         {
@@ -58,6 +239,7 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
             {
                 MealDay = day,
                 MealType = type,
+                Wing = "Male",
                 Items =
                 [
                     new MealItem { Name = type.Code == "breakfast" ? "Ruti" : "Rice", Cost = type.Code == "breakfast" ? 14 : 22, IsOptional = false },
@@ -65,12 +247,33 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
                     new MealItem { Name = type.Code == "dinner" ? "Chicken" : "Egg", Cost = type.Code == "dinner" ? 85 : 15, IsOptional = true },
                 ],
             });
+            db.MealConfigurations.Add(new MealConfiguration
+            {
+                MealDay = day,
+                MealType = type,
+                Wing = "Female",
+                Items =
+                [
+                    new MealItem { Name = type.Code == "breakfast" ? "Ruti" : "Rice", Cost = type.Code == "breakfast" ? 14 : 22, IsOptional = false },
+                    new MealItem { Name = "Dal", Cost = 10, IsOptional = false },
+                ],
+            });
         }
 
-        db.InventoryItems.AddRange(
-            new InventoryItem { Item = "Rice", Category = "Food", Stock = 120, Threshold = 150, Status = "overdue" },
-            new InventoryItem { Item = "Soybean Oil", Category = "Food", Stock = 35, Threshold = 40, Status = "pending" },
-            new InventoryItem { Item = "Lentils", Category = "Food", Stock = 90, Threshold = 60, Status = "active" });
+        var rice = new InventoryItem { Item = "Rice", Wing = "Male", Category = "Common", Unit = "kg", Stock = 120, CurrentStockQuantity = 120, Threshold = 150, AveragePrice = 62, CurrentWac = 62, TotalStockValue = 7440, Status = "low-stock", CreatedBy = admin };
+        var oil = new InventoryItem { Item = "Soybean Oil", Wing = "Male", Category = "Common", Unit = "L", Stock = 35, CurrentStockQuantity = 35, Threshold = 40, AveragePrice = 180, CurrentWac = 180, TotalStockValue = 6300, Status = "low-stock", CreatedBy = admin };
+        var lentils = new InventoryItem { Item = "Lentils", Wing = "Male", Category = "Common", Unit = "kg", Stock = 90, CurrentStockQuantity = 90, Threshold = 60, AveragePrice = 110, CurrentWac = 110, TotalStockValue = 9900, Status = "active", CreatedBy = admin };
+        var femaleRice = new InventoryItem { Item = "Rice", Wing = "Female", Category = "Common", Unit = "kg", Stock = 120, CurrentStockQuantity = 120, Threshold = 150, AveragePrice = 62, CurrentWac = 62, TotalStockValue = 7440, Status = "low-stock", CreatedBy = femaleAdmin };
+        var femaleOil = new InventoryItem { Item = "Soybean Oil", Wing = "Female", Category = "Common", Unit = "L", Stock = 35, CurrentStockQuantity = 35, Threshold = 40, AveragePrice = 180, CurrentWac = 180, TotalStockValue = 6300, Status = "low-stock", CreatedBy = femaleAdmin };
+        var femaleLentils = new InventoryItem { Item = "Lentils", Wing = "Female", Category = "Common", Unit = "kg", Stock = 90, CurrentStockQuantity = 90, Threshold = 60, AveragePrice = 110, CurrentWac = 110, TotalStockValue = 9900, Status = "active", CreatedBy = femaleAdmin };
+        db.InventoryItems.AddRange(rice, oil, lentils, femaleRice, femaleOil, femaleLentils);
+        db.StockTransactions.AddRange(
+            OpeningStock(rice, 120m, 62m, admin),
+            OpeningStock(oil, 35m, 180m, admin),
+            OpeningStock(lentils, 90m, 110m, admin),
+            OpeningStock(femaleRice, 120m, 62m, femaleAdmin),
+            OpeningStock(femaleOil, 35m, 180m, femaleAdmin),
+            OpeningStock(femaleLentils, 90m, 110m, femaleAdmin));
 
         db.AuditLogs.AddRange(
             new AuditLog { Actor = "Admin User", Action = "System initialized", Module = "System", Date = DateOnly.FromDateTime(DateTime.Today) });
@@ -78,7 +281,7 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static AppUser User(string fullName, string userName, string email, string role, string designation)
+    private static AppUser User(string fullName, string userName, string email, string role, string designation, string? wing = null)
     {
         return new AppUser
         {
@@ -89,6 +292,21 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
             NormalizedEmail = email.Trim().ToUpperInvariant(),
             Role = role,
             Designation = designation,
+            Wing = wing,
         };
     }
+
+    private static StockTransaction OpeningStock(InventoryItem item, decimal quantity, decimal rate, AppUser admin)
+        => new()
+        {
+            Item = item,
+            TransactionType = "in",
+            Date = DateOnly.FromDateTime(DateTime.Today),
+            Quantity = quantity,
+            Rate = rate,
+            WacSnapshot = rate,
+            TotalCost = quantity * rate,
+            Note = "Opening stock",
+            CreatedBy = admin,
+        };
 }

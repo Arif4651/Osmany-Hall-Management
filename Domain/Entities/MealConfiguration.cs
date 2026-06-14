@@ -8,6 +8,7 @@ public sealed class MealConfiguration : Entity
     public MealDay? MealDay { get; set; }
     public Guid MealTypeId { get; set; }
     public MealType? MealType { get; set; }
+    public string Wing { get; set; } = "Male";
     public string Status { get; set; } = "active";
     public ICollection<MealItem> Items { get; set; } = [];
 }

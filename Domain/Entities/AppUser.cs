@@ -12,6 +12,7 @@ public sealed class AppUser : Entity
     public string PasswordHash { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public string Designation { get; set; } = string.Empty;
+    public string? Wing { get; set; }
     public bool MustChangePassword { get; set; }
     public DateTime? LastLoginAtUtc { get; set; }
     public bool IsActive { get; set; } = true;

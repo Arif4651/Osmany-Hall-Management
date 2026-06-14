@@ -1,12 +1,20 @@
 using System.Text;
 using HallBackend.Application.Services;
+using HallBackend.Application.Serialization;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
+{
+    HallBackend.PortHelper.FreePortsFromEnvironment();
+}
+
 var builder = WebApplication.CreateBuilder(args);
+
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
@@ -20,14 +28,28 @@ if (jwtSecret.StartsWith("CHANGE_", StringComparison.OrdinalIgnoreCase))
 builder.Services.AddDbContext<HallDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtTokenService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<CurrentUserService>();
+builder.Services.AddScoped<BillingPeriodService>();
+builder.Services.AddScoped<InventoryTransactionService>();
+builder.Services.AddScoped<ItemCatalogService>();
+builder.Services.AddScoped<MealHistoryService>();
+builder.Services.AddScoped<BillingCalculationService>();
 builder.Services.AddScoped<DataSeeder>();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
-        var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
-        policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
+        if (builder.Environment.IsDevelopment())
+        {
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        }
+        else
+        {
+            var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+            policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
+        }
     });
 });
 
@@ -48,7 +70,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.Converters.Add(new DecimalJsonConverter());
+    options.JsonSerializerOptions.Converters.Add(new NullableDecimalJsonConverter());
+});
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
 
