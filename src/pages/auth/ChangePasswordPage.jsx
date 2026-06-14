@@ -4,7 +4,7 @@ import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { useAuth } from '../../context/AuthContext';
-import { ROUTE_PATHS } from '../../constants/routePaths';
+import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../../constants/routePaths';
 
 export default function ChangePasswordPage() {
   useDocumentTitle('Change Password');
@@ -39,7 +39,7 @@ export default function ChangePasswordPage() {
       return;
     }
 
-    navigate(role === 'admin' ? ROUTE_PATHS.adminDashboard : ROUTE_PATHS.studentDashboard, { replace: true });
+    navigate(role === 'admin' || role === 'super_admin' ? DEFAULT_REDIRECTS.admin : DEFAULT_REDIRECTS.student, { replace: true });
   };
 
   return (

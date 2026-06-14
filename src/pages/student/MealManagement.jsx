@@ -1,15 +1,48 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import DataTable from '../../components/common/DataTable';
 import PageHeader from '../../components/common/PageHeader';
 import PageSection from '../../components/layout/PageSection';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
-import Modal from '../../components/ui/Modal';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import useStudentMealModule from '../../hooks/useStudentMealModule';
+import { financialService } from '../../services/financialService';
 import { formatCutoffTimeLabel } from '../../constants/mealConfig';
-import { formatCurrency } from '../../utils/formatters';
+import { formatDate } from '../../utils/formatters';
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getEarliestGuestDate(isCutoffPassed) {
+  const date = new Date();
+  date.setDate(date.getDate() + (isCutoffPassed ? 2 : 1));
+  return formatLocalDate(date);
+}
+
+function ActionFeedback({ feedback, onClose }) {
+  if (!feedback) return null;
+  const Icon = feedback.type === 'success'
+    ? CheckCircle2
+    : feedback.type === 'error'
+      ? AlertCircle
+      : Info;
+
+  return (
+    <div className={`meal-action-feedback is-${feedback.type}`} role="status" aria-live="polite">
+      <Icon size={19} />
+      <div>
+        <strong>{feedback.title}</strong>
+        {feedback.message ? <span>{feedback.message}</span> : null}
+      </div>
+      <button type="button" onClick={onClose} aria-label="Dismiss message"><X size={16} /></button>
+    </div>
+  );
+}
 
 export default function MealManagement() {
   useDocumentTitle('Meal Management');
@@ -23,18 +56,64 @@ export default function MealManagement() {
     isCutoffPassed,
     minutesUntilCutoff,
     tomorrowMenu,
-    moduleDays,
     preferences,
+    clearErrorMessage,
     updatePreference,
     savePreferences,
     resetPreferences,
     getMealOptions,
   } = useStudentMealModule(user?.studentId);
 
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [preferenceFeedback, setPreferenceFeedback] = useState(null);
+  const [guestForm, setGuestForm] = useState({ date: '', mealPeriod: '', guestCount: 1 });
+  const [guestMeals, setGuestMeals] = useState([]);
+  const [guestError, setGuestError] = useState('');
+  const [guestMessage, setGuestMessage] = useState('');
+  const [isGuestLoading, setIsGuestLoading] = useState(false);
+  const [isGuestSaving, setIsGuestSaving] = useState(false);
+
+  useEffect(() => {
+    if (!preferenceFeedback || preferenceFeedback.type === 'error') return undefined;
+    const timeoutId = window.setTimeout(() => setPreferenceFeedback(null), 4500);
+    return () => window.clearTimeout(timeoutId);
+  }, [preferenceFeedback]);
+
+  useEffect(() => {
+    if (!guestMessage) return undefined;
+    const timeoutId = window.setTimeout(() => setGuestMessage(''), 4500);
+    return () => window.clearTimeout(timeoutId);
+  }, [guestMessage]);
 
   const cutoffLabel = formatCutoffTimeLabel(cutoffTime);
+  const earliestGuestDate = getEarliestGuestDate(isCutoffPassed);
+  const guestMonth = Number(guestForm.date.slice(5, 7)) || new Date().getMonth() + 1;
+  const guestYear = Number(guestForm.date.slice(0, 4)) || new Date().getFullYear();
+
+  useEffect(() => {
+    setGuestForm((current) => ({
+      ...current,
+      date: current.date && current.date >= earliestGuestDate ? current.date : earliestGuestDate,
+      mealPeriod: current.mealPeriod || mealTypes[0]?.id || '',
+    }));
+  }, [earliestGuestDate, mealTypes]);
+
+  const loadGuestMeals = useCallback(async () => {
+    setIsGuestLoading(true);
+    setGuestError('');
+    try {
+      const rows = await financialService.getGuestMeals(guestMonth, guestYear);
+      setGuestMeals(rows);
+    } catch (error) {
+      setGuestError(error instanceof Error ? error.message : 'Failed to load guest meals.');
+    } finally {
+      setIsGuestLoading(false);
+    }
+  }, [guestMonth, guestYear]);
+
+  useEffect(() => {
+    loadGuestMeals();
+  }, [loadGuestMeals]);
   const countdownLabel = useMemo(() => {
     const hours = Math.floor(minutesUntilCutoff / 60);
     const minutes = minutesUntilCutoff % 60;
@@ -42,57 +121,119 @@ export default function MealManagement() {
     return `${minutes}m remaining`;
   }, [minutesUntilCutoff]);
   const handleSave = async () => {
+    setPreferenceFeedback(null);
     setIsSaving(true);
     try {
       await savePreferences();
+      setPreferenceFeedback({
+        type: 'success',
+        title: 'Preferences saved',
+        message: `Your meal choices for ${tomorrowMenu?.label || 'the next meal day'} were updated successfully.`,
+      });
+    } catch (error) {
+      setPreferenceFeedback({
+        type: 'error',
+        title: 'Could not save preferences',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const resolveMealByType = (dayEntry, mealTypeId) => dayEntry.meals.find((meal) => meal.mealTypeId === mealTypeId);
+  const handleReset = async () => {
+    setPreferenceFeedback(null);
+    try {
+      await resetPreferences();
+      setPreferenceFeedback({
+        type: 'info',
+        title: 'Form reset',
+        message: 'Your currently saved meal preferences have been restored.',
+      });
+    } catch (error) {
+      setPreferenceFeedback({
+        type: 'error',
+        title: 'Could not reset preferences',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
+    }
+  };
 
-  const mealOverviewRows = useMemo(
-    () => moduleDays.map((dayEntry) => ({
-      id: dayEntry.id,
-      day: dayEntry.label,
-      configuredMeals: dayEntry.meals.length,
-      commonItems: dayEntry.meals.reduce((sum, meal) => sum + meal.commonItems.length, 0),
-      optionalItems: dayEntry.meals.reduce((sum, meal) => sum + meal.optionalItems.length, 0),
-      status: dayEntry.meals.every((meal) => meal.status === 'active') ? 'active' : 'mixed',
-    })),
-    [moduleDays],
-  );
+  const handleGuestSubmit = async (event) => {
+    event.preventDefault();
+    setGuestError('');
+    setGuestMessage('');
+    setIsGuestSaving(true);
+    try {
+      await financialService.saveGuestMeal({
+        date: guestForm.date,
+        mealPeriod: guestForm.mealPeriod,
+        guestCount: Number(guestForm.guestCount),
+      });
+      setGuestMessage('Guest meal request saved successfully.');
+      await loadGuestMeals();
+    } catch (error) {
+      setGuestError(error instanceof Error ? error.message : 'Failed to save guest meal.');
+    } finally {
+      setIsGuestSaving(false);
+    }
+  };
 
-  const mealOverviewColumns = [
-    { key: 'day', title: 'Day' },
-    { key: 'configuredMeals', title: 'Meals' },
-    { key: 'commonItems', title: 'Common Items' },
-    { key: 'optionalItems', title: 'Optional Items' },
-    { key: 'status', title: 'Status', type: 'status' },
-  ];
+  const editGuestMeal = (request) => {
+    setGuestForm({
+      date: request.date,
+      mealPeriod: request.mealPeriod,
+      guestCount: request.guestCount,
+    });
+    setGuestMessage('Request loaded. Update the details and save again.');
+  };
+
+  const deleteGuestMeal = async (id) => {
+    setGuestError('');
+    setGuestMessage('');
+    try {
+      await financialService.deleteGuestMeal(id);
+      setGuestMessage('Guest meal request removed.');
+      await loadGuestMeals();
+    } catch (error) {
+      setGuestError(error instanceof Error ? error.message : 'Failed to remove guest meal.');
+    }
+  };
 
   return (
     <div>
       <PageHeader
         title="Meal Management"
         description="Maintain daily meal preferences, track consumption history, and explore daily specials."
-        actions={[
-          { label: 'View Menu', variant: 'secondary', onClick: () => setIsMenuOpen(true), disabled: isLoading },
-          {
-            label: isCutoffPassed ? 'Cutoff Closed' : 'Update Tomorrow Meal',
-            variant: 'primary',
-            onClick: () => null,
-            disabled: isLoading || isCutoffPassed,
-            title: isCutoffPassed ? `Daily cutoff reached at ${cutoffLabel}` : `Open until ${cutoffLabel}`,
-          },
-        ]}
+        aside={(
+          <div className={`meal-update-status ${isCutoffPassed ? 'is-closed' : 'is-open'}`}>
+            <span className="meal-update-status-dot" />
+            <div>
+              <strong>{isCutoffPassed ? 'Tomorrow Meal Update Closed' : 'Tomorrow Meal Preferences'}</strong>
+              <small>
+                {isCutoffPassed
+                  ? `Cutoff ended at ${cutoffLabel}`
+                  : `Open until ${cutoffLabel} · ${countdownLabel}`}
+              </small>
+            </div>
+          </div>
+        )}
       />
 
       <section className="two-col-grid">
         <PageSection title="Meal Preferences" subtitle={`Applied for ${tomorrowMenu?.label || 'tomorrow'}`}>
           <Card>
-            {errorMessage ? <p className="menu-config-line">{errorMessage}</p> : null}
+            <ActionFeedback
+              feedback={preferenceFeedback || (errorMessage ? {
+                type: 'error',
+                title: 'Meal preferences unavailable',
+                message: errorMessage,
+              } : null)}
+              onClose={() => {
+                setPreferenceFeedback(null);
+                clearErrorMessage();
+              }}
+            />
             <div className="form-grid">
               {mealTypes.map((mealType, mealTypeIndex) => {
                 const pref = preferences[mealType.id] || { enabled: true, optionItemId: '' };
@@ -133,7 +274,7 @@ export default function MealManagement() {
                           <option value="">None</option>
                           {options.map((option) => (
                             <option key={option.id} value={option.id}>
-                              {option.name} (+{formatCurrency(option.cost)})
+                              {option.name}
                             </option>
                           ))}
                         </select>
@@ -155,7 +296,7 @@ export default function MealManagement() {
                 variant="secondary"
                 disabled={isLoading || isCutoffPassed || isSaving}
                 title={isCutoffPassed ? `Daily cutoff reached at ${cutoffLabel}` : 'Reset current form'}
-                onClick={resetPreferences}
+                onClick={handleReset}
               >
                 Reset
               </Button>
@@ -163,70 +304,111 @@ export default function MealManagement() {
           </Card>
         </PageSection>
 
-        <PageSection title="Current Rules" subtitle={`Meal changes close daily at ${cutoffLabel}`}>
-          <Card>
+        <PageSection title="Guest Meal Configuration" subtitle="Book extra meals for your guests">
+          <Card className="guest-meal-card">
             <div className={`student-cutoff-alert ${isCutoffPassed ? 'is-locked' : 'is-open'}`}>
-              <strong>
-                {isCutoffPassed
-                  ? `Meal changes are currently locked (closed at ${cutoffLabel}).`
-                  : `Meal changes are open until ${cutoffLabel}.`}
-              </strong>
+              <strong>Guest meals can be booked from {formatDate(earliestGuestDate)}.</strong>
               <small>
                 {isCutoffPassed
-                  ? 'Updates will be applied to the next available cycle after tomorrow.'
-                  : `You can still update preferences for tomorrow (${countdownLabel}).`}
+                  ? `Today's ${cutoffLabel} cutoff has passed.`
+                  : `Cutoff time: ${cutoffLabel} (${countdownLabel}).`}
               </small>
             </div>
-            <ul className="bullet-list">
-              <li>Late changes are applied on next available meal cycle.</li>
-              <li>Meal off requests are billed only for active meals and common items are always divided if you stay.</li>
-              <li>Emergency updates require admin approval.</li>
-            </ul>
+
+            <form className="guest-meal-form" onSubmit={handleGuestSubmit}>
+              <label className="field-control">
+                <span>Date</span>
+                <input
+                  type="date"
+                  min={earliestGuestDate}
+                  value={guestForm.date}
+                  onChange={(event) => setGuestForm({ ...guestForm, date: event.target.value })}
+                  required
+                />
+              </label>
+              <label className="field-control">
+                <span>Meal</span>
+                <select
+                  value={guestForm.mealPeriod}
+                  onChange={(event) => setGuestForm({ ...guestForm, mealPeriod: event.target.value })}
+                  required
+                >
+                  {mealTypes.map((mealType) => (
+                    <option key={mealType.id} value={mealType.id}>{mealType.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-control">
+                <span>Number of Guests</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={guestForm.guestCount}
+                  onChange={(event) => setGuestForm({ ...guestForm, guestCount: event.target.value })}
+                  required
+                />
+              </label>
+              <Button type="submit" disabled={isGuestSaving || !guestForm.mealPeriod}>
+                {isGuestSaving ? 'Saving...' : 'Save Guest Meal'}
+              </Button>
+            </form>
+
+            <ActionFeedback
+              feedback={guestError ? {
+                type: 'error',
+                title: 'Guest meal request failed',
+                message: guestError,
+              } : guestMessage ? {
+                type: 'success',
+                title: 'Action completed',
+                message: guestMessage,
+              } : null}
+              onClose={() => {
+                setGuestError('');
+                setGuestMessage('');
+              }}
+            />
+
+            <div className="guest-meal-list-header">
+              <div>
+                <strong>Saved Requests</strong>
+                <small>{guestMonth}/{guestYear}</small>
+              </div>
+              <span>{guestMeals.length} request{guestMeals.length === 1 ? '' : 's'}</span>
+            </div>
+
+            <div className="guest-meal-list">
+              {isGuestLoading ? <p className="guest-meal-empty">Loading guest meals...</p> : null}
+              {!isGuestLoading && guestMeals.length === 0 ? (
+                <p className="guest-meal-empty">No guest meals booked for this month.</p>
+              ) : null}
+              {!isGuestLoading && guestMeals.map((request) => {
+                const requestDate = new Date(`${request.date}T00:00:00`);
+                const mealLabel = mealTypes.find((meal) => meal.id === request.mealPeriod)?.label
+                  || request.mealPeriod;
+                return (
+                  <article className="guest-meal-request" key={request.id}>
+                    <div className="guest-meal-date">
+                      <strong>{requestDate.getDate()}</strong>
+                      <span>{requestDate.toLocaleDateString('en-BD', { month: 'short' })}</span>
+                    </div>
+                    <div className="guest-meal-request-info">
+                      <strong>{mealLabel}</strong>
+                      <span>{request.guestCount} guest{request.guestCount === 1 ? '' : 's'} · {formatDate(request.date)}</span>
+                    </div>
+                    <div className="guest-meal-actions">
+                      <button type="button" onClick={() => editGuestMeal(request)}>Edit</button>
+                      <button type="button" className="is-delete" onClick={() => deleteGuestMeal(request.id)}>Remove</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </Card>
         </PageSection>
       </section>
 
-      <PageSection title="Meal Module Snapshot" subtitle="Live meal configuration from the backend">
-        <DataTable columns={mealOverviewColumns} rows={mealOverviewRows} />
-      </PageSection>
-
-      <Modal
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        title="Weekly Diet Menu"
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setIsMenuOpen(false)}>Close</Button>
-            <Button variant="primary" onClick={() => alert('Menu downloaded as PDF')}>Download PDF</Button>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          {moduleDays.map((dayEntry) => (
-            <Card key={dayEntry.id}>
-              <h4 style={{ marginBottom: '0.8rem', color: 'var(--primary)', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
-                {dayEntry.label}
-              </h4>
-              <div style={{ display: 'grid', gap: '0.6rem' }}>
-                {mealTypes.map((mealType) => {
-                  const meal = resolveMealByType(dayEntry, mealType.id);
-                  return (
-                    <div key={`${dayEntry.id}-${mealType.id}`}>
-                      <strong>{mealType.label}:</strong>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-                        <em>Common:</em> {(meal?.commonItems || []).map((item) => item.name).join(', ') || 'N/A'}
-                      </div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-                        <em>Optional:</em> {(meal?.optionalItems || []).map((item) => `${item.name} (${formatCurrency(item.cost)})`).join(', ') || 'N/A'}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          ))}
-        </div>
-      </Modal>
     </div>
   );
 }

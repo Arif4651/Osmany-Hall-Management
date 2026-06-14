@@ -1,146 +1,229 @@
-import React, { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Check, X } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
-import DataTable from '../../components/common/DataTable';
 import Modal from '../../components/ui/Modal';
-import { Eye, Check, X, MessageSquare, Send } from 'lucide-react';
+import { adminDataService } from '../../services/adminDataService';
+import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
+import { useAuth } from '../../context/AuthContext';
 
-const initialPayments = [
-  { id: 1, student: { name: 'Kamal Hossain', dept: 'CSE', id: '202314051', hallId: 'OH-402' }, amount: 'BDT 3,200', method: 'bKash', txnId: 'TXN-11234', date: '2026-04-12', status: 'Submitted', proofUrl: '' },
-  { id: 2, student: { name: 'Tanvir Islam', dept: 'EEE', id: '202214152', hallId: 'OH-210' }, amount: 'BDT 2,500', method: 'Nagad', txnId: 'TXN-11235', date: '2026-04-12', status: 'Under Review', proofUrl: '' },
-  { id: 3, student: { name: 'Arif Hasan', dept: 'ME', id: '202414011', hallId: 'OH-105' }, amount: 'BDT 2,100', method: 'Bank Transfer', txnId: 'TXN-11236', date: '2026-04-11', status: 'Submitted', proofUrl: 'https://via.placeholder.com/400x600/dcfce7/16a34a?text=Real+Screenshot' },
-  { id: 4, student: { name: 'Mita Das', dept: 'CE', id: '202314099', hallId: 'OH-309' }, amount: 'BDT 1,500', method: 'bKash', txnId: 'TXN-11237', date: '2026-04-11', status: 'Under Review', proofUrl: '' },
-];
+const monthNames = Array.from({ length: 12 }, (_, index) =>
+  new Intl.DateTimeFormat('en', { month: 'short' }).format(new Date(2000, index, 1)));
 
 export default function PaymentVerification() {
   useDocumentTitle('Payment Verification');
-
-  const [payments, setPayments] = useState(initialPayments);
-  const [selectedProof, setSelectedProof] = useState(null);
-  const [messagingStudent, setMessagingStudent] = useState(null);
-  const [messageText, setMessageText] = useState('');
-
-  const handleApprove = (id) => {
-    setPayments(payments.map(p => p.id === id ? { ...p, status: 'Approved' } : p));
-    setSelectedProof(null);
+  const { user, role } = useAuth();
+  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+  // Wing admins default to their own wing; admin/super_admin start on Male
+  const [gender, setGender] = useState(() => user?.wing || 'Male');
+  const [rows, setRows] = useState([]);
+  const [reviewing, setReviewing] = useState(null);
+  const [approvedAmount, setApprovedAmount] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    try { setRows(await adminDataService.getPayments(gender)); setError(''); }
+    catch (loadError) { setError(loadError.message); }
+  }, [gender]);
+  useEffect(() => { load(); }, [load]);
+  const review = async (id, action, amount = null) => {
+    try {
+      await adminDataService.reviewPayment(id, action, amount);
+      setMessage(`Payment ${action === 'approve' ? 'approved' : 'rejected'} successfully.`);
+      setError('');
+      setReviewing(null);
+      await load();
+    } catch (reviewError) { setError(reviewError.message); }
   };
-
-  const handleReject = (id) => {
-    setPayments(payments.map(p => p.id === id ? { ...p, status: 'Rejected' } : p));
-    setSelectedProof(null);
+  const openApproval = (row) => {
+    setReviewing(row);
+    setApprovedAmount(row.submittedAmount);
   };
-
-  const handleSendMessage = () => {
-    if (messageText.trim()) {
-      alert(`Message sent to ${messagingStudent.student.name}: ${messageText}`);
-      setMessageText('');
-      setMessagingStudent(null);
-    }
-  };
-
-  const pendingCount = payments.filter(p => p.status === 'Submitted' || p.status === 'Under Review').length;
-
-  const columns = [
-    { key: 'name', title: 'Student Name', render: (val, row) => <span style={{ fontWeight: '500', color: '#1e293b' }}>{row.student.name}</span> },
-    { key: 'dept', title: 'Dept.', render: (val, row) => <span style={{ color: '#64748b' }}>{row.student.dept}</span> },
-    { key: 'sid', title: 'Student ID', render: (val, row) => <span style={{ color: '#64748b' }}>{row.student.id}</span> },
-    { key: 'hid', title: 'Hall ID', render: (val, row) => <span style={{ color: '#64748b' }}>{row.student.hallId}</span> },
-    { key: 'amount', title: 'Amount' },
-    { key: 'method', title: 'Method' },
-    { key: 'txnId', title: 'Txn ID' },
-    { key: 'date', title: 'Date' },
-    {
-      key: 'status', title: 'Status', render: (val) => {
-        let bg = val === 'Submitted' ? '#e0eeff' : val === 'Under Review' ? '#fef3c7' : val === 'Approved' ? '#dcfce7' : '#fee2e2';
-        let color = val === 'Submitted' ? '#3b82f6' : val === 'Under Review' ? '#d97706' : val === 'Approved' ? '#16a34a' : '#dc2626';
-        return (
-          <span style={{ backgroundColor: bg, color, padding: '4px 12px', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            {val}
-          </span>
-        );
-      }
-    },
-    {
-      key: 'proof', title: 'Proof', render: (val, row) => (
-        <div onClick={() => setSelectedProof(row)} style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#6366f1', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>
-          <Eye size={16} /> View
-        </div>
-      )
-    },
-    {
-      key: 'actions', title: 'Actions', render: (val, row) => (
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <button onClick={() => handleApprove(row.id)} title="Approve" disabled={row.status === 'Approved'} style={{ backgroundColor: row.status === 'Approved' ? '#f1f5f9' : '#dcfce7', color: row.status === 'Approved' ? '#94a3b8' : '#16a34a', border: 'none', borderRadius: '4px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: row.status === 'Approved' ? 'not-allowed' : 'pointer', transition: 'background-color 0.2s' }}>
-            <Check size={16} strokeWidth={2.5} />
-          </button>
-          <button onClick={() => handleReject(row.id)} title="Reject" disabled={row.status === 'Rejected' || row.status === 'Approved'} style={{ backgroundColor: (row.status === 'Rejected' || row.status === 'Approved') ? '#f1f5f9' : '#fee2e2', color: (row.status === 'Rejected' || row.status === 'Approved') ? '#94a3b8' : '#dc2626', border: 'none', borderRadius: '4px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: (row.status === 'Rejected' || row.status === 'Approved') ? 'not-allowed' : 'pointer', transition: 'background-color 0.2s' }}>
-            <X size={16} strokeWidth={2.5} />
-          </button>
-          <button onClick={() => setMessagingStudent(row)} title="Message Student" style={{ backgroundColor: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-            <MessageSquare size={14} strokeWidth={2} />
-          </button>
-        </div>
-      )
-    },
-  ];
+  const approve = () => review(reviewing.id, 'approve', moneyInput(approvedAmount));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: '500', color: '#1e293b', marginBottom: '4px' }}>Payment Verification</h1>
-        <p style={{ color: '#64748b', fontSize: '1rem', margin: 0 }}>{pendingCount} payments pending review</p>
-      </div>
-
-      <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0', overflowX: 'auto' }}>
-        <DataTable columns={columns} rows={payments} />
-      </div>
-
-      {/* Proof Viewer Modal */}
-      <Modal isOpen={!!selectedProof} onClose={() => setSelectedProof(null)} title={`Payment Proof: ${selectedProof?.student?.name}`}>
-        {selectedProof && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', width: '100%', display: 'flex', justifyContent: 'space-between', border: '1px solid #e2e8f0' }}>
-              <div><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Txn ID</span><br/><strong>{selectedProof.txnId}</strong></div>
-              <div><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Amount</span><br/><strong>{selectedProof.amount}</strong></div>
-              <div><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Method</span><br/><strong>{selectedProof.method}</strong></div>
-            </div>
-
-            <div style={{ width: '100%', height: '300px', backgroundColor: '#f1f5f9', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {selectedProof.proofUrl ? (
-                <img src={selectedProof.proofUrl} alt="Transaction Proof" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              ) : (
-                <span style={{ color: '#64748b', fontSize: '1rem' }}>Screenshot preview placeholder</span>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button onClick={() => handleApprove(selectedProof.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#05c46b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500', fontSize: '1rem' }}>
-                Approve
+    <div className="financial-page">
+      <header><h1>Payment Verification</h1><p>Review student payment submissions and update monthly dues atomically.</p></header>
+      {message && <div className="student-message student-message-success">{message}</div>}
+      {error && <div className="student-message student-message-error">{error}</div>}
+      <div className="wing-filter-bar">
+        <strong>{gender} Wing Payments</strong>
+        {isWingAdmin ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            background: user?.wing === 'Female' ? '#fce7f3' : '#dbeafe',
+            color: user?.wing === 'Female' ? '#9d174d' : '#1e40af',
+            border: `1px solid ${user?.wing === 'Female' ? '#f9a8d4' : '#93c5fd'}`,
+            borderRadius: '6px',
+            padding: '0.3rem 0.8rem',
+            fontWeight: 600,
+            fontSize: '0.82rem',
+          }}>
+            Restricted to {user?.wing} Wing
+          </span>
+        ) : (
+          <div className="wing-switcher">
+            {['Male', 'Female'].map((wing) => (
+              <button type="button" key={wing} className={gender === wing ? 'is-active' : ''} onClick={() => setGender(wing)}>
+                {wing} Wing
               </button>
-              <button onClick={() => handleReject(selectedProof.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#ff3b3b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500', fontSize: '1rem' }}>
-                Reject
-              </button>
-            </div>
+            ))}
           </div>
         )}
-      </Modal>
+      </div>
+      <section className="financial-card table-wrap">
+        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Wing</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Roll / Hall ID</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Billing Period</th>
+              <th style={{ textAlign: 'right', padding: '0.75rem' }}>Amount</th>
+              <th style={{ textAlign: 'right', padding: '0.75rem' }}>Charges</th>
+              <th style={{ textAlign: 'right', padding: '0.75rem' }}>Approved Amount</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Category</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Transaction ID</th>
+              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Submitted At</th>
+              <th style={{ textAlign: 'center', padding: '0.75rem' }}>Status</th>
+              <th style={{ textAlign: 'center', padding: '0.75rem' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={12} style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
+                  No payment submissions found.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
+                const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ');
+                let badgeBg = '#f1f5f9';
+                let badgeColor = '#64748b';
+                if (statusNorm === 'approved') {
+                  badgeBg = '#ecfdf5';
+                  badgeColor = '#047857';
+                } else if (statusNorm === 'pending' || statusNorm === 'under review' || statusNorm === 'under_review') {
+                  badgeBg = '#fffbeb';
+                  badgeColor = '#b45309';
+                } else if (statusNorm === 'rejected') {
+                  badgeBg = '#fef2f2';
+                  badgeColor = '#b91c1c';
+                }
 
-      {/* Message Student Modal */}
-      <Modal isOpen={!!messagingStudent} onClose={() => setMessagingStudent(null)} title={`Message ${messagingStudent?.student?.name}`}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <p style={{ color: '#475569', fontSize: '0.95rem' }}>Send a message to student regarding Txn: <strong>{messagingStudent?.txnId}</strong></p>
-          <textarea
-            rows={4}
-            value={messageText}
-            onChange={(e) => setMessageText(e.target.value)}
-            placeholder="Type your message here..."
-            style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none', resize: 'none', fontFamily: 'inherit', color: '#334155' }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-            <button onClick={() => setMessagingStudent(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid #e2e8f0', borderRadius: '6px', color: '#64748b', cursor: 'pointer', fontWeight: 500 }}>Cancel</button>
-            <button onClick={handleSendMessage} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#4f46e5', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontWeight: 500 }}>
-              <Send size={16} /> Send 
-            </button>
-          </div>
+                return (
+                  <tr key={row.id} style={{ borderBottom: '1px solid var(--border)', verticalAlign: 'middle' }}>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
+                      {row.studentName}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left' }}>{row.gender}</td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left' }}>
+                      <span style={{ fontWeight: '500' }}>{row.rollNumber}</span>
+                      <br />
+                      <span className="table-secondary" style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{row.hallId}</span>
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left' }}>
+                      {monthNames[row.billingMonth - 1]} {row.billingYear}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
+                      {formatCurrency(row.submittedAmount)}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--muted)' }}>
+                      {formatCurrency(row.submittedCharge)}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: row.approvedAmount ? 'var(--success)' : 'inherit' }}>
+                      {row.approvedAmount == null ? '—' : formatCurrency(row.approvedAmount)}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left' }}>
+                      {row.category}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
+                      {row.transactionId}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.85rem' }}>
+                      {formatDate(row.submittedAtUtc)}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                      <span style={{
+                        background: badgeBg,
+                        color: badgeColor,
+                        padding: '0.25rem 0.6rem',
+                        borderRadius: '20px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600',
+                        textTransform: 'capitalize',
+                        display: 'inline-block',
+                        textAlign: 'center',
+                        minWidth: '95px'
+                      }}>
+                        {statusNorm}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                      {row.status === 'under_review' && (
+                        <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
+                          <button
+                            className="approve-action"
+                            onClick={() => openApproval(row)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.35rem 0.6rem',
+                              fontSize: '0.8rem',
+                              fontWeight: '600',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              background: '#ecfdf5',
+                              color: '#065f46'
+                            }}
+                          >
+                            <Check size={14} /> Approve
+                          </button>
+                          <button
+                            className="danger-action"
+                            onClick={() => review(row.id, 'reject')}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.35rem 0.6rem',
+                              fontSize: '0.8rem',
+                              fontWeight: '600',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              background: '#fef2f2',
+                              color: '#991b1b'
+                            }}
+                          >
+                            <X size={14} /> Reject
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </section>
+      <Modal isOpen={!!reviewing} onClose={() => setReviewing(null)} title="Approve Payment">
+        <div className="payment-review-summary">
+          <div><span>Student</span><strong>{reviewing?.studentName}</strong></div>
+          <div><span>Submitted amount</span><strong>{formatCurrency(reviewing?.submittedAmount || 0)}</strong></div>
+          <div><span>Submitted charges</span><strong>{formatCurrency(reviewing?.submittedCharge || 0)}</strong></div>
+        </div>
+        <label className="field-control">
+          <span>Amount to deduct from due bill</span>
+          <input type="number" min="0" step="0.01" required value={approvedAmount} onChange={(event) => setApprovedAmount(event.target.value)} />
+        </label>
+        <div className="payment-review-actions">
+          <button type="button" className="secondary-action" onClick={() => setReviewing(null)}>Cancel</button>
+          <button type="button" className="approve-action" onClick={approve}><Check size={16} />Confirm Approval</button>
         </div>
       </Modal>
     </div>

@@ -7,6 +7,7 @@ function normalizeFilters(filters = {}) {
     level: filters.level,
     hallName: filters.hallName,
     status: filters.status,
+    gender: filters.gender,
   };
 }
 
@@ -22,6 +23,14 @@ function initialCredentials(studentId) {
   return {
     defaultLoginId: studentId,
     defaultPassword: studentId,
+  };
+}
+
+function withLegacyRollNumber(payload = {}) {
+  const studentId = String(payload.studentId || '').trim();
+  return {
+    ...payload,
+    rollNumber: String(payload.rollNumber || studentId).trim(),
   };
 }
 
@@ -45,7 +54,7 @@ export const studentService = {
   createStudent: async (payload) => {
     const created = await apiRequest('/students', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withLegacyRollNumber(payload)),
     });
 
     return {
@@ -57,7 +66,7 @@ export const studentService = {
   updateStudent: async (id, payload) => {
     return apiRequest(`/students/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withLegacyRollNumber(payload)),
     });
   },
 

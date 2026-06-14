@@ -7,7 +7,7 @@ import useDocumentTitle from '../../hooks/useDocumentTitle';
 import mistLogo from '../../assets/images/mist-logo.png';
 import { BRANDING } from '../../constants/branding';
 import { useAuth } from '../../context/AuthContext';
-import { ROUTE_PATHS } from '../../constants/routePaths';
+import { DEFAULT_REDIRECTS } from '../../constants/routePaths';
 
 function getDefaultCredentials(mode) {
   if (mode === 'admin') {
@@ -33,7 +33,7 @@ export default function LoginPage({ mode = 'student' }) {
   if (isAuthenticated) {
     return (
       <Navigate
-        to={activeRole === 'admin' ? ROUTE_PATHS.adminDashboard : ROUTE_PATHS.studentDashboard}
+        to={activeRole !== 'student' ? DEFAULT_REDIRECTS.admin : DEFAULT_REDIRECTS.student}
         replace
       />
     );
@@ -55,7 +55,7 @@ export default function LoginPage({ mode = 'student' }) {
       return;
     }
 
-    const roleHome = result.user.role === 'admin' ? ROUTE_PATHS.adminDashboard : ROUTE_PATHS.studentDashboard;
+    const roleHome = result.user.role !== 'student' ? DEFAULT_REDIRECTS.admin : DEFAULT_REDIRECTS.student;
     navigate(fromPath || roleHome, { replace: true });
   };
 

@@ -4,22 +4,20 @@ import LandingPage from '../pages/LandingPage';
 import LoginPage from '../pages/auth/LoginPage';
 import ChangePasswordPage from '../pages/auth/ChangePasswordPage';
 import NotFoundPage from '../pages/system/NotFoundPage';
-import StudentDashboard from '../pages/student/StudentDashboard';
 import MealManagement from '../pages/student/MealManagement';
+import MealSnapshot from '../pages/student/MealSnapshot';
+import ViewMenu from '../pages/student/ViewMenu';
 import Billing from '../pages/student/Billing';
 import Payments from '../pages/student/Payments';
-import Profile from '../pages/student/Profile';
-import Notifications from '../pages/student/Notifications';
-import AdminDashboard from '../pages/admin/AdminDashboard';
 import StudentManagement from '../pages/admin/StudentManagement';
 import AdminMealManagement from '../pages/admin/AdminMealManagement';
+import MealSheet from '../pages/admin/MealSheet';
 import BillingManagement from '../pages/admin/BillingManagement';
 import PaymentVerification from '../pages/admin/PaymentVerification';
 import Inventory from '../pages/admin/Inventory';
-import Reports from '../pages/admin/Reports';
-import AuditLogs from '../pages/admin/AuditLogs';
-import Analytics from '../pages/admin/Analytics';
-import Settings from '../pages/admin/Settings';
+import DueBill from '../pages/admin/DueBill';
+import DailyCost from '../pages/admin/DailyCost';
+import AdminSettings from '../pages/admin/AdminSettings';
 import { ADMIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '../constants/navigation';
 import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
 import { ProtectedRoute, PublicOnlyRoute } from './RouteGuards';
@@ -62,12 +60,11 @@ export default function AppRouter() {
         }
       >
         <Route index element={<Navigate to={DEFAULT_REDIRECTS.student} replace />} />
-        <Route path="dashboard" element={<StudentDashboard />} />
         <Route path="meals" element={<MealManagement />} />
+        <Route path="meal-snapshot" element={<MealSnapshot />} />
+        <Route path="view-menu" element={<ViewMenu />} />
         <Route path="billing" element={<Billing />} />
         <Route path="payments" element={<Payments />} />
-        <Route path="profile" element={<Profile />} />
-        <Route path="notifications" element={<Notifications />} />
       </Route>
 
       <Route
@@ -79,16 +76,15 @@ export default function AppRouter() {
         }
       >
         <Route index element={<Navigate to={DEFAULT_REDIRECTS.admin} replace />} />
-        <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="students" element={<StudentManagement />} />
         <Route path="meals" element={<AdminMealManagement />} />
+        <Route path="meal-sheet" element={<MealSheet />} />
         <Route path="billing" element={<BillingManagement />} />
         <Route path="payments" element={<PaymentVerification />} />
         <Route path="inventory" element={<Inventory />} />
-        <Route path="reports" element={<Reports />} />
-        <Route path="audit-logs" element={<AuditLogs />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="due" element={<DueBill />} />
+        <Route path="daily-cost" element={<DailyCost />} />
+        <Route path="settings" element={<ProtectedRoute role="super_admin"><AdminSettings /></ProtectedRoute>} />
       </Route>
 
       <Route path={ROUTE_PATHS.notFound} element={<NotFoundPage />} />

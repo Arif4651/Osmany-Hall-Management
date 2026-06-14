@@ -1,411 +1,606 @@
-import React, { useState } from 'react';
-import { Box, AlertTriangle, TrendingDown, Plus, Minus, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import Modal from '../../components/ui/Modal';
+import Button from '../../components/ui/Button';
+import { adminDataService } from '../../services/adminDataService';
+import { money, todayLocal } from '../../utils/formatters';
+import { useAuth } from '../../context/AuthContext';
 
-// Mock Initial Data matching screenshot
-const initialInventory = [
-  { id: 1, item: 'Rice (Premium)', category: 'Common', unit: 'kg', added: 500, used: 320, remaining: 180, unitPrice: 65, totalValue: 11700, lastUpdate: '2026-04-12' },
-  { id: 2, item: 'Cooking Oil', category: 'Common', unit: 'L', added: 100, used: 72, remaining: 28, unitPrice: 180, totalValue: 5040, lastUpdate: '2026-04-11' },
-  { id: 3, item: 'Salt', category: 'Common', unit: 'kg', added: 50, used: 35, remaining: 15, unitPrice: 40, totalValue: 600, lastUpdate: '2026-04-10' },
-  { id: 4, item: 'Chicken', category: 'Optional', unit: 'kg', added: 200, used: 165, remaining: 35, unitPrice: 280, totalValue: 9800, lastUpdate: '2026-04-12' },
-  { id: 5, item: 'Beef', category: 'Optional', unit: 'kg', added: 150, used: 128, remaining: 22, unitPrice: 650, totalValue: 14300, lastUpdate: '2026-04-12' },
-  { id: 6, item: 'Fish (Rohu)', category: 'Optional', unit: 'kg', added: 120, used: 98, remaining: 22, unitPrice: 350, totalValue: 7700, lastUpdate: '2026-04-11' },
-  { id: 7, item: 'Eggs', category: 'Optional', unit: 'pcs', added: 2000, used: 1650, remaining: 350, unitPrice: 14, totalValue: 4900, lastUpdate: '2026-04-12' },
+const tabs = [
+  { id: 'in', label: 'Stock In' },
+  { id: 'out', label: 'Stock Out' },
+  { id: 'non-stock', label: 'Non-Stock' },
+  { id: 'items', label: 'Items' },
 ];
 
-const initialMovements = [
-  { id: 1, item: 'Chicken', action: 'Added', quantity: '50 kg', costEffect: '+BDT 14,000', date: '2026-04-12', admin: 'Admin' },
-  { id: 2, item: 'Rice (Premium)', action: 'Used', quantity: '25 kg', costEffect: 'BDT -1,625', date: '2026-04-12', admin: 'System' },
-  { id: 3, item: 'Cooking Oil', action: 'Added', quantity: '20 L', costEffect: '+BDT 3,600', date: '2026-04-11', admin: 'Admin' },
-  { id: 4, item: 'Beef', action: 'Used', quantity: '15 kg', costEffect: 'BDT -9,750', date: '2026-04-11', admin: 'System' },
-  { id: 5, item: 'Eggs', action: 'Added', quantity: '500 pcs', costEffect: '+BDT 7,000', date: '2026-04-10', admin: 'Admin' },
-];
+const emptyMovement = { date: todayLocal(), mealPeriod: 'breakfast', itemId: '', quantity: '', rate: '' };
+const emptyItem = { id: '', name: '', unit: 'KG', category: 'Common', linkedOptionId: '', isStored: true };
+const formatNumber = (value) => money(value).toFixed(2);
+const formatDisplayDate = (value) => new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit', month: 'short', year: 'numeric',
+}).format(new Date(`${value}T00:00:00`));
 
-export default function Inventory() {
-  useDocumentTitle('Inventory');
+function ItemPicker({ items, value, onChange, showRemaining }) {
+  const rootRef = useRef(null);
+  const optionRefs = useRef([]);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const selected = items.find((item) => item.id === value);
 
-  const [inventory, setInventory] = useState(initialInventory);
-  const [movements, setMovements] = useState(initialMovements);
-  const [activeTab, setActiveTab] = useState('inventory');
-  
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isRemoveModalOpen, setIsRemoveModalOpen] = useState(false);
+  useEffect(() => {
+    if (selected) setQuery(selected.name);
+  }, [selected]);
 
-  const [stockForm, setStockForm] = useState({
-    item: '',
-    amount: '',
-    category: 'Common'
-  });
+  useEffect(() => {
+    const close = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
 
-  const handleStockFormChange = (e) => {
-    setStockForm({ ...stockForm, [e.target.name]: e.target.value });
-  };
+  const filtered = useMemo(() => {
+    return items.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()));
+  }, [items, query]);
 
-  const handleAddStock = (e) => {
-    e.preventDefault();
-    if (!stockForm.item || !stockForm.amount) return;
-    
-    const addAmt = Number(stockForm.amount);
-    let existingItem = inventory.find(inv => inv.item.toLowerCase() === stockForm.item.toLowerCase());
-    let unitPrice = existingItem ? existingItem.unitPrice : 150; 
-    let unit = existingItem ? existingItem.unit : 'kg';
-    const costEffectValue = addAmt * unitPrice;
-    
-    if (existingItem) {
-      setInventory(inventory.map(inv => {
-        if (inv.id === existingItem.id) {
-          return {
-            ...inv,
-            category: stockForm.category,
-            added: inv.added + addAmt,
-            remaining: inv.remaining + addAmt,
-            totalValue: (inv.remaining + addAmt) * inv.unitPrice,
-            lastUpdate: new Date().toISOString().split('T')[0]
-          };
-        }
-        return inv;
-      }));
-    } else {
-      setInventory([{
-        id: Date.now(),
-        item: stockForm.item,
-        category: stockForm.category,
-        unit: 'kg',
-        added: addAmt,
-        used: 0,
-        remaining: addAmt,
-        unitPrice: unitPrice,
-        totalValue: costEffectValue,
-        lastUpdate: new Date().toISOString().split('T')[0]
-      }, ...inventory]);
+  // Reset highlighted index when options change
+  useEffect(() => {
+    setHighlightedIndex(filtered.length > 0 ? 0 : -1);
+  }, [filtered]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex >= 0 && optionRefs.current[highlightedIndex]) {
+      optionRefs.current[highlightedIndex].scrollIntoView({ block: 'nearest' });
     }
+  }, [highlightedIndex]);
 
-    setMovements([{
-      id: Date.now(),
-      item: existingItem ? existingItem.item : stockForm.item,
-      action: 'Added',
-      quantity: `${addAmt} ${unit}`,
-      costEffect: `+BDT ${costEffectValue.toLocaleString()}`,
-      date: new Date().toISOString().split('T')[0],
-      admin: 'Admin'
-    }, ...movements]);
-
-    setIsAddModalOpen(false);
-    setStockForm({ item: '', amount: '', category: 'Common' });
+  const selectItem = (item) => {
+    onChange(item.id);
+    setQuery(item.name);
+    setOpen(false);
   };
 
-  const handleRemoveStock = (e) => {
-    e.preventDefault();
-    if (!stockForm.item || !stockForm.amount) return;
-    
-    const subAmt = Number(stockForm.amount);
-    let existingItem = inventory.find(inv => inv.item.toLowerCase() === stockForm.item.toLowerCase());
-    if (!existingItem) {
-      alert("Item not found in inventory!");
+  const handleKeyDown = (e) => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        setOpen(true);
+        e.preventDefault();
+      }
       return;
     }
 
-    const costEffectValue = subAmt * existingItem.unitPrice;
-
-    setInventory(inventory.map(inv => {
-      if (inv.id === existingItem.id) {
-        return {
-          ...inv,
-          used: inv.used + subAmt,
-          remaining: Math.max(0, inv.remaining - subAmt),
-          totalValue: Math.max(0, inv.remaining - subAmt) * inv.unitPrice,
-          lastUpdate: new Date().toISOString().split('T')[0]
-        };
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && highlightedIndex < filtered.length) {
+        selectItem(filtered[highlightedIndex]);
       }
-      return inv;
-    }));
-
-    setMovements([{
-      id: Date.now(),
-      item: existingItem.item,
-      action: 'Used',
-      quantity: `${subAmt} ${existingItem.unit}`,
-      costEffect: `BDT -${costEffectValue.toLocaleString()}`,
-      date: new Date().toISOString().split('T')[0],
-      admin: 'System'
-    }, ...movements]);
-
-    setIsRemoveModalOpen(false);
-    setStockForm({ item: '', amount: '', category: 'Common' });
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      if (selected) {
+        setQuery(selected.name);
+      } else {
+        setQuery('');
+      }
+    }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'relative' }}>
-      
-      {/* Header & Actions */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: '500', color: '#1e293b', marginBottom: '4px' }}>Inventory / Store</h1>
-          <p style={{ color: '#64748b', fontSize: '1rem', margin: 0 }}>Stock and cost control</p>
+    <div className="stock-item-picker" ref={rootRef}>
+      <Search size={17} />
+      <input
+        value={query}
+        placeholder="Search item..."
+        autoComplete="off"
+        onFocus={() => {
+          setOpen(true);
+          setHighlightedIndex(filtered.length > 0 ? 0 : -1);
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onChange('');
+          setOpen(true);
+        }}
+        onKeyDown={handleKeyDown}
+      />
+      {open && (
+        <div className="stock-item-menu">
+          {filtered.length ? filtered.map((item, index) => (
+            <button
+              type="button"
+              key={item.id}
+              ref={(el) => (optionRefs.current[index] = el)}
+              className={highlightedIndex === index ? 'is-highlighted' : ''}
+              onClick={() => selectItem(item)}
+            >
+              <span>{item.name}</span>
+              {showRemaining && (
+                <span className="stock-item-left">
+                  <b>{item.unit.toUpperCase()}</b>
+                  <em>({formatNumber(item.currentStockQty)} left)</em>
+                </span>
+              )}
+            </button>
+          )) : <p>No matching items</p>}
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            onClick={() => setIsAddModalOpen(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px',
-              backgroundColor: '#10b981', color: 'white', border: 'none',
-              borderRadius: '8px', fontWeight: '500', cursor: 'pointer',
-              fontSize: '0.95rem'
-            }}
-          >
-            <Plus size={18} /> Add Stock
+      )}
+    </div>
+  );
+}
+
+export default function Inventory() {
+  useDocumentTitle('Stock');
+  const { user, role } = useAuth();
+  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+
+  const [activeTab, setActiveTab] = useState('in');
+  // Wing admins are locked to their wing's gender; super_admin/admin can switch
+  const [gender, setGender] = useState(() => user?.wing || 'Male');
+  const [items, setItems] = useState([]);
+  const [movement, setMovement] = useState(emptyMovement);
+  const [summarySearch, setSummarySearch] = useState('');
+  const [itemSearch, setItemSearch] = useState('');
+  const [itemModal, setItemModal] = useState(null);
+  const [itemForm, setItemForm] = useState(emptyItem);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // History ledger state variables
+  const [historyItem, setHistoryItem] = useState(null);
+  const [ledgerTransactions, setLedgerTransactions] = useState([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerTab, setLedgerTab] = useState('all');
+
+  const formRef = useRef(null);
+
+  const loadItems = useCallback(async () => {
+    try {
+      setItems(await adminDataService.getInventory(false, gender));
+    } catch (error) {
+      setMessage(error.message || 'Unable to load inventory.');
+    }
+  }, [gender]);
+
+  useEffect(() => { loadItems(); }, [loadItems]);
+
+  const storedItems = items.filter((item) => item.isStored);
+  const optionItems = items.filter((item) => item.category === 'Options' && item.id !== itemForm.id);
+  const pickerItems = activeTab === 'non-stock' ? items.filter((item) => !item.isStored) : storedItems;
+  const summaryItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(summarySearch.toLowerCase())), [items, summarySearch]);
+  const visibleItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(itemSearch.toLowerCase())), [items, itemSearch]);
+
+  // Compute stats for history ledger modal
+  const historyStats = useMemo(() => {
+    let totalIn = 0;
+    let totalOut = 0;
+    let totalSpent = 0;
+
+    ledgerTransactions.forEach((t) => {
+      const qty = Number(t.quantity || 0);
+      const cost = Number(t.totalCost || 0);
+      if (t.transactionType === 'in') {
+        totalIn += qty;
+      } else {
+        totalOut += qty;
+      }
+      totalSpent += cost;
+    });
+
+    return { totalIn, totalOut, totalSpent };
+  }, [ledgerTransactions]);
+
+  // Chronologically sort timeline to compute running balance correctly
+  const historyTimeline = useMemo(() => {
+    // The backend returns transactions sorted newest first (Date desc, CreatedAtUtc desc).
+    // Reversing it gives us chronological order (oldest first).
+    const oldestFirst = [...ledgerTransactions].reverse();
+
+    let balance = 0;
+    const computed = oldestFirst.map((t) => {
+      if (t.transactionType === 'in') {
+        balance += Number(t.quantity || 0);
+      } else {
+        balance -= Number(t.quantity || 0);
+      }
+      return { ...t, runningBalance: balance };
+    });
+
+    return computed.reverse();
+  }, [ledgerTransactions]);
+
+
+  const filteredTimeline = useMemo(() => {
+    if (ledgerTab === 'all') return historyTimeline;
+    return historyTimeline.filter((t) => t.transactionType === ledgerTab);
+  }, [historyTimeline, ledgerTab]);
+
+  const switchTab = useCallback((tab) => {
+    setActiveTab(tab);
+    setMovement(emptyMovement);
+    setMessage('');
+  }, []);
+
+  // Open history ledger modal and load timeline from backend
+  const openHistoryModal = async (item) => {
+    setHistoryItem(item);
+    setLedgerTransactions([]);
+    setLedgerLoading(true);
+    setLedgerTab('all');
+    try {
+      const data = await adminDataService.getInventoryLedger({ itemId: item.id, wing: gender });
+      setLedgerTransactions(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setMessage(error.message || 'Unable to load stock history.');
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+
+
+  // Form input field navigation using Arrow Keys
+  const handleFormKeyDown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      // Don't hijack arrow keys if user is navigating the searchable picker dropdown list
+      if (document.activeElement && document.activeElement.closest('.stock-item-picker')) return;
+      e.preventDefault();
+      const inputs = Array.from(e.currentTarget.querySelectorAll('input, select'));
+      const index = inputs.indexOf(document.activeElement);
+      if (index >= 0 && index < inputs.length - 1) {
+        inputs[index + 1].focus();
+      }
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      if (document.activeElement && document.activeElement.closest('.stock-item-picker')) return;
+      e.preventDefault();
+      const inputs = Array.from(e.currentTarget.querySelectorAll('input, select'));
+      const index = inputs.indexOf(document.activeElement);
+      if (index > 0) {
+        inputs[index - 1].focus();
+      }
+    }
+  };
+
+  const submitMovement = async (event) => {
+    event.preventDefault();
+    const item = items.find((row) => row.id === movement.itemId);
+    if (!item) return setMessage('Please select an item.');
+    if (money(movement.quantity).lessThanOrEqualTo(0)) return setMessage('Quantity must be greater than zero.');
+    if (activeTab === 'out' && money(movement.quantity).greaterThan(money(item.currentStockQty))) {
+      return setMessage(`Only ${formatNumber(item.currentStockQty)} ${item.unit} is available.`);
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      await adminDataService.createInventoryMovement({
+        itemId: item.id,
+        wing: gender,
+        transactionType: activeTab === 'in' ? 'in' : 'out',
+        date: movement.date,
+        mealPeriod: activeTab === 'in' ? null : movement.mealPeriod,
+        quantity: Number(movement.quantity),
+        rate: activeTab === 'in' || activeTab === 'non-stock' ? Number(movement.rate) : null,
+        note: null,
+      });
+      setMovement(emptyMovement);
+      await loadItems();
+      setMessage('Transaction saved successfully.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to save transaction.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openItemModal = (item = null) => {
+    setItemForm(item ? {
+      id: item.id, name: item.name, unit: item.unit, category: item.category,
+      linkedOptionId: item.linkedOptionId || '', isStored: item.isStored,
+    } : emptyItem);
+    setItemModal(item ? 'edit' : 'new');
+  };
+
+  const saveItem = async (event) => {
+    event.preventDefault();
+    if (itemForm.category === 'Others' && !itemForm.linkedOptionId) {
+      setMessage('Please select which optional item this item belongs to.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        name: itemForm.name,
+        wing: gender,
+        unit: itemForm.unit,
+        category: itemForm.category,
+        linkedOptionId: itemForm.category === 'Others' ? itemForm.linkedOptionId || null : null,
+        isStored: itemForm.isStored,
+      };
+      if (itemForm.id) await adminDataService.updateInventoryItem(itemForm.id, payload);
+      else await adminDataService.createInventoryItem(payload);
+      setItemModal(null);
+      await loadItems();
+    } catch (error) {
+      setMessage(error.message || 'Unable to save item.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDeleteDialog = (item, force = false) => {
+    setDeleteTarget({ item, force });
+  };
+
+  const deleteItem = async () => {
+    if (!deleteTarget?.item) return;
+    try {
+      setSaving(true);
+      setMessage('');
+      if (deleteTarget.force) await adminDataService.forceDeleteInventoryItem(deleteTarget.item.id);
+      else await adminDataService.deleteInventoryItem(deleteTarget.item.id);
+      setDeleteTarget(null);
+      await loadItems();
+      setMessage(deleteTarget.force ? 'Item was permanently deleted.' : 'Item deleted successfully.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to delete item.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="stock-page">
+      <div className="stock-title-row">
+        <h1>Stock</h1>
+        <div className="stock-top-actions">
+          {isWingAdmin ? (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              background: user?.wing === 'Female' ? '#fce7f3' : '#dbeafe',
+              color: user?.wing === 'Female' ? '#9d174d' : '#1e40af',
+              border: `1px solid ${user?.wing === 'Female' ? '#f9a8d4' : '#93c5fd'}`,
+              borderRadius: '6px',
+              padding: '0.4rem 0.9rem',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+            }}>
+              {user?.wing} Wing Only
+            </span>
+          ) : (
+            <label className="stock-gender-select">
+              <select value={gender} onChange={(event) => setGender(event.target.value)}>
+                <option>Male</option>
+                <option>Female</option>
+              </select>
+              <ChevronDown size={16} />
+            </label>
+          )}
+        </div>
+      </div>
+
+      <nav className="stock-tabs">
+        {tabs.map((tab) => (
+          <button type="button" key={tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => switchTab(tab.id)}>
+            {tab.label}
           </button>
-          <button 
-            onClick={() => setIsRemoveModalOpen(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px',
-              backgroundColor: 'white', color: '#475569', border: '1px solid #e2e8f0',
-              borderRadius: '8px', fontWeight: '500', cursor: 'pointer',
-              fontSize: '0.95rem'
-            }}
-          >
-            <Minus size={18} /> Remove Stock
-          </button>
-        </div>
-      </div>
+        ))}
+      </nav>
 
-      {/* Cards Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '24px', position: 'relative' }}>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '8px', fontWeight: '500' }}>Total Stock Value</p>
-          <h3 style={{ fontSize: '1.5rem', color: '#1e293b', fontWeight: '500', margin: 0 }}>BDT 59K</h3>
-          <div style={{ position: 'absolute', top: '24px', right: '24px', backgroundColor: '#efe7ff', padding: '8px', borderRadius: '8px', color: '#8b5cf6' }}>
-            <Box size={20} />
-          </div>
-        </div>
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '24px', position: 'relative' }}>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '8px', fontWeight: '500' }}>Low Stock Items</p>
-          <h3 style={{ fontSize: '1.5rem', color: '#1e293b', fontWeight: '500', margin: 0 }}>4</h3>
-          <div style={{ position: 'absolute', top: '24px', right: '24px', backgroundColor: '#ede9fe', padding: '8px', borderRadius: '8px', color: '#8b5cf6' }}>
-            <AlertTriangle size={20} />
-          </div>
-        </div>
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '24px', position: 'relative' }}>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '8px', fontWeight: '500' }}>Common Items</p>
-          <h3 style={{ fontSize: '1.5rem', color: '#1e293b', fontWeight: '500', margin: 0 }}>{inventory.filter(i => i.category === 'Common').length}</h3>
-          <div style={{ position: 'absolute', top: '24px', right: '24px', backgroundColor: '#ede9fe', padding: '8px', borderRadius: '8px', color: '#8b5cf6' }}>
-            <Box size={20} />
-          </div>
-        </div>
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '24px', position: 'relative' }}>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '8px', fontWeight: '500' }}>Optional Items</p>
-          <h3 style={{ fontSize: '1.5rem', color: '#1e293b', fontWeight: '500', margin: 0 }}>{inventory.filter(i => i.category === 'Optional').length}</h3>
-          <div style={{ position: 'absolute', top: '24px', right: '24px', backgroundColor: '#ede9fe', padding: '8px', borderRadius: '8px', color: '#8b5cf6' }}>
-            <TrendingDown size={20} />
-          </div>
-        </div>
-      </div>
+      {message && <div className="stock-message">{message}</div>}
 
-      {/* Warning Banner */}
-      <div style={{ 
-        display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', 
-        backgroundColor: '#fffbeb', border: '1px solid #fde047', borderRadius: '8px', 
-        color: '#b45309', fontSize: '0.95rem'
-      }}>
-        <AlertTriangle size={18} />
-        <span><strong style={{ fontWeight: '500' }}>Low Stock Alert:</strong> Salt (15 kg), Lentils (Dal) (18 kg), Onion (12 kg), Spices Mix (5 kg)</span>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'inline-flex', padding: '4px', backgroundColor: '#f8fafc', borderRadius: '10px', gap: '4px', border: '1px solid #e2e8f0', alignSelf: 'flex-start' }}>
-        <button 
-          onClick={() => setActiveTab('inventory')}
-          style={{ 
-            padding: '8px 16px', border: 'none', borderRadius: '6px', cursor: 'pointer', 
-            fontWeight: '500', fontSize: '0.95rem', transition: 'all 0.2s',
-            backgroundColor: activeTab === 'inventory' ? 'white' : 'transparent',
-            color: activeTab === 'inventory' ? '#1e293b' : '#64748b',
-            boxShadow: activeTab === 'inventory' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-          }}
-        >
-          Inventory
-        </button>
-        <button 
-          onClick={() => setActiveTab('stock_movements')}
-          style={{ 
-            padding: '8px 16px', border: 'none', borderRadius: '6px', cursor: 'pointer', 
-            fontWeight: '500', fontSize: '0.95rem', transition: 'all 0.2s',
-            backgroundColor: activeTab === 'stock_movements' ? 'white' : 'transparent',
-            color: activeTab === 'stock_movements' ? '#1e293b' : '#64748b',
-            boxShadow: activeTab === 'stock_movements' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-          }}
-        >
-          Stock Movements
-        </button>
-      </div>
-
-      {/* Table Area for Inventory */}
-      {activeTab === 'inventory' && (
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Item</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Category</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Unit</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Added</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Used</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Remaining</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Unit Price</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Total Value</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Last Update</th>
+      {activeTab === 'items' ? (
+        <section className="stock-items-view">
+          <div className="stock-items-toolbar">
+            <div><Search size={17} /><input placeholder="Search items..." value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} /></div>
+            <button type="button" onClick={() => openItemModal()}><Plus size={17} /> New Item</button>
+          </div>
+          <div className="stock-items-table-wrap">
+            <table className="stock-items-table">
+              <thead><tr><th>Name</th><th>Unit</th><th>Category</th><th>Main Option</th><th>Storage Type</th><th>Actions</th></tr></thead>
+              <tbody style={{ cursor: 'pointer' }}>{visibleItems.map((item) => (
+                <tr key={item.id} onClick={() => openHistoryModal(item)}>
+                  <td>{item.name}</td>
+                  <td>{item.unit.toUpperCase()}</td>
+                  <td><span className={`stock-category stock-category-${item.category.toLowerCase()}`}>{item.category.toUpperCase()}</span></td>
+                  <td>{item.category === 'Others' ? items.find((option) => option.id === item.linkedOptionId)?.name || 'Not linked' : '—'}</td>
+                  <td><span className={`stock-storage ${item.isStored ? 'is-stored' : 'is-non-stored'}`}>{item.isStored ? 'STORED' : 'NON-STORED'}</span></td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button type="button" aria-label={`Edit ${item.name}`} onClick={() => openItemModal(item)}><Pencil size={17} /></button>
+                    <button type="button" aria-label={`Delete ${item.name}`} onClick={() => openDeleteDialog(item)}><Trash2 size={17} /></button>
+                    <button type="button" aria-label={`Force delete ${item.name}`} onClick={() => openDeleteDialog(item, true)}><Flame size={17} /></button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {inventory.map((inv) => (
-                  <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0', color: '#1e293b', fontSize: '0.95rem' }}>
-                    <td style={{ padding: '16px' }}>{inv.item}</td>
-                    <td style={{ padding: '16px' }}>
-                      <span style={{
-                        backgroundColor: inv.category === 'Common' ? '#e0e7ff' : '#fae8ff',
-                        color: inv.category === 'Common' ? '#4338ca' : '#c026d3',
-                        padding: '4px 10px', borderRadius: '9999px', fontSize: '0.8rem', fontWeight: '500'
-                      }}>
-                        {inv.category}
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{inv.unit}</td>
-                    <td style={{ padding: '16px' }}>{inv.added}</td>
-                    <td style={{ padding: '16px' }}>{inv.used}</td>
-                    <td style={{ padding: '16px', fontWeight: '500' }}>{inv.remaining}</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>BDT {inv.unitPrice}</td>
-                    <td style={{ padding: '16px' }}>BDT {inv.totalValue.toLocaleString()}</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{inv.lastUpdate}</td>
-                  </tr>
-                ))}
-              </tbody>
+              ))}</tbody>
             </table>
-            {inventory.length === 0 && (
-              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No items found.</div>
-            )}
           </div>
+        </section>
+      ) : (
+        <div className="stock-workspace">
+          <main>
+            <form ref={formRef} className={`stock-form stock-form-${activeTab}`} onSubmit={submitMovement} onKeyDown={handleFormKeyDown}>
+              <label><span>Date</span><div className={activeTab === 'non-stock' ? 'is-tinted' : ''}><CalendarDays size={17} /><input type="date" value={movement.date} onChange={(e) => setMovement({ ...movement, date: e.target.value })} /><b>{formatDisplayDate(movement.date)}</b></div></label>
+              {activeTab !== 'in' && <label><span>Meal</span><select value={movement.mealPeriod} onChange={(e) => setMovement({ ...movement, mealPeriod: e.target.value })}><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option></select></label>}
+              <label className="stock-item-field"><span>Item</span><ItemPicker items={pickerItems} value={movement.itemId} onChange={(itemId) => setMovement({ ...movement, itemId })} showRemaining={activeTab === 'out'} /></label>
+              <label><span>Quantity</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'non-stock' ? 'eg: 100' : 'eg: 10'} value={movement.quantity} onChange={(e) => setMovement({ ...movement, quantity: e.target.value })} /></label>
+              {(activeTab === 'in' || activeTab === 'non-stock') && <label><span>{activeTab === 'in' ? 'Price Per Unit' : 'Price (per unit)'}</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'in' ? 'eg: 100' : 'eg: 10'} value={movement.rate} onChange={(e) => setMovement({ ...movement, rate: e.target.value })} /></label>}
+              <button className={`stock-submit stock-submit-${activeTab}`} type="submit" disabled={saving}>{activeTab === 'in' ? 'Stock In' : 'Stock Out'}</button>
+            </form>
+          </main>
+          <aside className="stock-summary">
+            <div className="stock-summary-title"><h2>Stock Summary</h2><small>Click row for history</small></div>
+            <div className="stock-summary-search"><Search size={17} /><input placeholder="Search items..." value={summarySearch} onChange={(e) => setSummarySearch(e.target.value)} /></div>
+            <div className="stock-summary-table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
+                <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </aside>
         </div>
       )}
 
-      {/* Table Area for Stock Movements */}
-      {activeTab === 'stock_movements' && (
-        <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Item</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Action</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Quantity</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Cost Effect</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Date</th>
-                  <th style={{ padding: '16px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Admin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {movements.map((mov) => (
-                  <tr key={mov.id} style={{ borderBottom: '1px solid #e2e8f0', color: '#1e293b', fontSize: '0.95rem' }}>
-                    <td style={{ padding: '16px' }}>{mov.item}</td>
-                    <td style={{ padding: '16px' }}>
-                      <span style={{
-                        backgroundColor: mov.action === 'Added' ? '#dcfce7' : '#fee2e2',
-                        color: mov.action === 'Added' ? '#166534' : '#991b1b',
-                        padding: '4px 12px', borderRadius: '9999px', fontSize: '0.8rem', fontWeight: '500'
-                      }}>
-                        {mov.action}
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px' }}>{mov.quantity}</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{mov.costEffect}</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{mov.date}</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{mov.admin}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {movements.length === 0 && (
-              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No items found.</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modals for Dynamic Interaction */}
-      {(isAddModalOpen || isRemoveModalOpen) && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 50,
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <div style={{
-            backgroundColor: 'white', borderRadius: '12px', padding: '24px', width: '400px',
-            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '500', color: '#1e293b' }}>
-                {isAddModalOpen ? 'Add New Stock' : 'Remove Stock'}
-              </h2>
-              <button 
-                onClick={() => { setIsAddModalOpen(false); setIsRemoveModalOpen(false); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+      <Modal isOpen={Boolean(itemModal)} onClose={() => setItemModal(null)} title={itemModal === 'edit' ? 'Edit Item' : 'New Item'} actions={<><Button variant="secondary" onClick={() => setItemModal(null)}>Cancel</Button><Button type="submit" form="stock-item-form" disabled={saving}>Save</Button></>}>
+        <form id="stock-item-form" className="stock-item-form" onSubmit={saveItem}>
+          <label>Name<input value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
+          <label>Unit<input value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} required /></label>
+          <label>Category
+            <select
+              value={itemForm.category}
+              onChange={(e) => setItemForm({
+                ...itemForm,
+                category: e.target.value,
+                linkedOptionId: e.target.value === 'Others' ? itemForm.linkedOptionId : '',
+              })}
+            >
+              <option>Common</option><option>Options</option><option>Others</option>
+            </select>
+          </label>
+          {itemForm.category === 'Others' && (
+            <label>Belongs to Option
+              <select
+                value={itemForm.linkedOptionId}
+                onChange={(e) => setItemForm({ ...itemForm, linkedOptionId: e.target.value })}
+                required
               >
-                <X size={20} />
+                <option value="">Select optional item</option>
+                {optionItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              <small>Its cost will be billed only to students who selected this option.</small>
+            </label>
+          )}
+          <label>Storage Type<select value={itemForm.isStored ? 'stored' : 'non-stored'} onChange={(e) => setItemForm({ ...itemForm, isStored: e.target.value === 'stored' })}><option value="stored">Stored</option><option value="non-stored">Non-Stored</option></select></label>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => !saving && setDeleteTarget(null)}
+        title={deleteTarget?.force ? 'Permanently Delete Item' : 'Delete Item'}
+        actions={(
+          <>
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</Button>
+            <Button variant="danger" onClick={deleteItem} disabled={saving}>
+              {saving ? 'Deleting...' : deleteTarget?.force ? 'Delete Forever' : 'Delete Item'}
+            </Button>
+          </>
+        )}
+      >
+        <div className="stock-delete-dialog">
+          <div className={`stock-delete-dialog__icon ${deleteTarget?.force ? 'is-force' : ''}`}>
+            {deleteTarget?.force ? <Flame size={20} /> : <Trash2 size={20} />}
+          </div>
+          <div className="stock-delete-dialog__content">
+            <p className="stock-delete-dialog__title">
+              {deleteTarget?.force
+                ? `Delete ${deleteTarget?.item?.name} forever?`
+                : `Delete ${deleteTarget?.item?.name}?`}
+            </p>
+            <p className="stock-delete-dialog__text">
+              {deleteTarget?.force
+                ? 'This will remove the item and its full stock history permanently. Use this only when you are sure the record should not stay in the system.'
+                : 'This will remove the item from the active inventory view. You can still keep the rest of your inventory workflow unchanged.'}
+            </p>
+            <div className="stock-delete-dialog__meta">
+              <span>{deleteTarget?.item?.unit?.toUpperCase()}</span>
+              <span>{deleteTarget?.item?.category}</span>
+              <span>{deleteTarget?.item?.isStored ? 'Stored item' : 'Non-stored item'}</span>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Item History Ledger Modal */}
+      <Modal
+        isOpen={Boolean(historyItem)}
+        onClose={() => setHistoryItem(null)}
+        title={
+          <div className="stock-history-header">
+            <div className="stock-history-title">
+              <Package size={20} />
+              <strong>{historyItem?.name}</strong>
+              <span>({historyItem?.unit?.toUpperCase()}) — {historyItem?.isStored ? 'STORED' : 'NON-STORED'}</span>
+            </div>
+            <div className="stock-history-stats">
+              <span className="stat-in">↑ Total In: {formatNumber(historyStats.totalIn)} {historyItem?.unit?.toUpperCase()}</span>
+              <span className="stat-out">↓ Total Out: {formatNumber(historyStats.totalOut)} {historyItem?.unit?.toUpperCase()}</span>
+              <span className="stat-spent">৳ Total Spent: {formatNumber(historyStats.totalSpent)}</span>
+            </div>
+            <div className="stock-history-tabs">
+              <button
+                type="button"
+                className={ledgerTab === 'all' ? 'is-active' : ''}
+                onClick={() => setLedgerTab('all')}
+              >
+                All ({ledgerTransactions.length})
+              </button>
+              <button
+                type="button"
+                className={ledgerTab === 'in' ? 'is-active' : ''}
+                onClick={() => setLedgerTab('in')}
+              >
+                Stock In ({ledgerTransactions.filter((t) => t.transactionType === 'in').length})
+              </button>
+              <button
+                type="button"
+                className={ledgerTab === 'out' ? 'is-active' : ''}
+                onClick={() => setLedgerTab('out')}
+              >
+                Stock Out ({ledgerTransactions.filter((t) => t.transactionType === 'out').length})
               </button>
             </div>
-            
-            <form onSubmit={isAddModalOpen ? handleAddStock : handleRemoveStock} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#64748b', marginBottom: '6px' }}>Item Name (e.g. Rice (Premium))</label>
-                <input 
-                  type="text" name="item" required
-                  value={stockForm.item} onChange={handleStockFormChange}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' }}
-                />
-              </div>
-              
-              {isAddModalOpen && (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#64748b', marginBottom: '6px' }}>Category</label>
-                  <select 
-                    name="category"
-                    value={stockForm.category} onChange={handleStockFormChange}
-                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', backgroundColor: 'white' }}
-                  >
-                    <option value="Common">Common</option>
-                    <option value="Optional">Optional</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#64748b', marginBottom: '6px' }}>Amount to {isAddModalOpen ? 'Add' : 'Deduct'}</label>
-                <input 
-                  type="number" name="amount" required min="1"
-                  value={stockForm.amount} onChange={handleStockFormChange}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div style={{ marginTop: '8px', display: 'flex', gap: '12px' }}>
-                 <button 
-                  type="button" 
-                  onClick={() => { setIsAddModalOpen(false); setIsRemoveModalOpen(false); }}
-                  style={{ flex: 1, padding: '10px', backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontWeight: '500', color: '#64748b', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  style={{ flex: 1, padding: '10px', backgroundColor: isAddModalOpen ? '#10b981' : '#ef4444', border: 'none', borderRadius: '8px', fontWeight: '500', color: 'white', cursor: 'pointer' }}
-                >
-                  {isAddModalOpen ? 'Confirm Add' : 'Confirm Deduct'}
-                </button>
-              </div>
-            </form>
           </div>
+        }
+      >
+        <div className="stock-history-timeline" style={{ minWidth: 'min(620px, 90vw)', maxHeight: '60vh', overflowY: 'auto' }}>
+          {ledgerLoading ? (
+            <div className="stock-loading">Loading timeline ledger...</div>
+          ) : filteredTimeline.length === 0 ? (
+            <div className="stock-no-data">No movements found.</div>
+          ) : (
+            filteredTimeline.map((t) => (
+              <div key={t.id} className={`stock-timeline-item type-${t.transactionType}`}>
+                <div className="stock-timeline-icon">
+                  {t.transactionType === 'in' ? '↓' : '↑'}
+                </div>
+                <div className="stock-timeline-card">
+                  <div className="stock-timeline-card-header">
+                    <div>
+                      <span className={`stock-timeline-badge badge-${t.transactionType}`}>
+                        {t.transactionType === 'in' ? 'IN' : 'OUT'}
+                      </span>
+                      <span className="stock-timeline-date">{formatDisplayDate(t.date)}</span>
+                      {t.mealPeriod && (
+                        <span className="stock-timeline-meal">{t.mealPeriod.toUpperCase()}</span>
+                      )}
+                    </div>
+                    {historyItem?.isStored && (
+                      <span className="stock-timeline-balance">
+                        Balance: {formatNumber(t.runningBalance)} {historyItem?.unit?.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="stock-timeline-card-body">
+                    <span>Qty: <strong>{t.transactionType === 'in' ? '+' : '-'}{formatNumber(t.quantity)} {historyItem?.unit?.toUpperCase()}</strong></span>
+                    <span>Unit: <strong>৳{formatNumber(t.rate || t.wacSnapshot || 0)}</strong></span>
+                    <span>Total: <strong>৳{formatNumber(t.totalCost || 0)}</strong></span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
-      )}
-      
+      </Modal>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import Button from '../ui/Button';
 
-export default function PageHeader({ title, description, actions }) {
+export default function PageHeader({ title, description, actions, aside }) {
   return (
     <header className="page-header">
       <div>
@@ -15,7 +15,7 @@ export default function PageHeader({ title, description, actions }) {
             </Button>
           ))}
         </div>
-      ) : null}
+      ) : aside || null}
     </header>
   );
 }

@@ -1,49 +1,22 @@
-import {
-  Bell,
-  ChartBar,
-  ClipboardList,
-  CreditCard,
-  Gauge,
-  LayoutDashboard,
-  Package,
-  Receipt,
-  ScrollText,
-  Settings,
-  ShieldCheck,
-  Soup,
-  User,
-  Users,
-} from 'lucide-react';
+import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards } from 'lucide-react';
 import { ROUTE_PATHS } from './routePaths';
 
 export const STUDENT_NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', path: ROUTE_PATHS.studentDashboard, icon: LayoutDashboard },
-  { key: 'meals', label: 'Meal Management', path: ROUTE_PATHS.studentMeals, icon: Soup },
+  { key: 'meal-preferences', label: 'Meal Preferences', path: ROUTE_PATHS.studentMeals, icon: Soup },
+  { key: 'meal-snapshot', label: 'Meal Snapshot', path: ROUTE_PATHS.studentMealSnapshot, icon: CalendarDays },
+  { key: 'view-menu', label: 'View Menu', path: ROUTE_PATHS.studentViewMenu, icon: ClipboardList },
   { key: 'billing', label: 'Billing', path: ROUTE_PATHS.studentBilling, icon: Receipt },
   { key: 'payments', label: 'Payments', path: ROUTE_PATHS.studentPayments, icon: CreditCard },
-  { key: 'profile', label: 'Profile', path: ROUTE_PATHS.studentProfile, icon: User },
-  {
-    key: 'notifications',
-    label: 'Notifications',
-    path: ROUTE_PATHS.studentNotifications,
-    icon: Bell,
-  },
 ];
 
 export const ADMIN_NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', path: ROUTE_PATHS.adminDashboard, icon: Gauge },
   { key: 'students', label: 'Student Management', path: ROUTE_PATHS.adminStudents, icon: Users },
   { key: 'meals', label: 'Meal Management', path: ROUTE_PATHS.adminMeals, icon: Soup },
-  { key: 'billing', label: 'Billing Management', path: ROUTE_PATHS.adminBilling, icon: ClipboardList },
-  {
-    key: 'payments',
-    label: 'Payment Verification',
-    path: ROUTE_PATHS.adminPayments,
-    icon: ShieldCheck,
-  },
+  { key: 'meal-sheet', label: 'Meal Sheet', path: ROUTE_PATHS.adminMealSheet, icon: ClipboardList },
   { key: 'inventory', label: 'Inventory', path: ROUTE_PATHS.adminInventory, icon: Package },
-  { key: 'reports', label: 'Reports', path: ROUTE_PATHS.adminReports, icon: ScrollText },
-  { key: 'audit', label: 'Audit Logs', path: ROUTE_PATHS.adminAuditLogs, icon: ChartBar },
-  { key: 'analytics', label: 'Analytics', path: ROUTE_PATHS.adminAnalytics, icon: ChartBar },
-  { key: 'settings', label: 'Settings', path: ROUTE_PATHS.adminSettings, icon: Settings },
+  { key: 'billing', label: 'Bill Management', path: ROUTE_PATHS.adminBilling, icon: ClipboardList },
+  { key: 'due', label: 'Due Bill', path: ROUTE_PATHS.adminDue, icon: WalletCards },
+  { key: 'payments', label: 'Payment Verification', path: ROUTE_PATHS.adminPayments, icon: ShieldCheck },
+  { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.adminDailyCost, icon: CalendarDays },
+  { key: 'settings', label: 'Settings', path: ROUTE_PATHS.adminSettings, icon: Settings, superAdminOnly: true },
 ];

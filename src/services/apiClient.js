@@ -1,5 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5012/api';
 const TOKEN_STORAGE_KEY = 'osmany-hall-access-token-v1';
+export const AUTH_UNAUTHORIZED_EVENT = 'osmany-hall-auth-unauthorized';
 
 export function getAccessToken() {
   return window.localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -14,15 +15,76 @@ export function setAccessToken(token) {
   window.localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
+function notifyUnauthorized(message) {
+  setAccessToken('');
+  window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, {
+    detail: { message },
+  }));
+}
+
+function isTokenExpired(token) {
+  try {
+    const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = encodedPayload.padEnd(
+      encodedPayload.length + ((4 - encodedPayload.length % 4) % 4),
+      '=',
+    );
+    const payload = JSON.parse(window.atob(paddedPayload));
+    return !payload.exp || payload.exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+}
+
 function normalizeValidationErrors(errors = {}) {
   return Object.fromEntries(
-    Object.entries(errors).map(([key, value]) => [key.charAt(0).toLowerCase() + key.slice(1), Array.isArray(value) ? value[0] : value]),
+    Object.entries(errors).map(([key, value]) => {
+      const normalizedKey = key === 'RollNumber'
+        ? 'studentId'
+        : key.charAt(0).toLowerCase() + key.slice(1);
+      return [normalizedKey, Array.isArray(value) ? value[0] : value];
+    }),
   );
+}
+
+function isJsonLikeContentType(contentType) {
+  return contentType.includes('application/json') || contentType.includes('+json');
+}
+
+function firstValidationMessage(errors = {}) {
+  const firstValue = Object.values(errors)[0];
+  if (Array.isArray(firstValue)) return firstValue[0];
+  return firstValue || '';
+}
+
+function humanizeErrorMessage(message) {
+  const text = String(message || '').trim();
+
+  if (!text) return 'Request failed.';
+  if (text.includes('already being used for login')) {
+    return 'This Student ID is already in use. Please enter a different Student ID.';
+  }
+  if (text.includes('student ID already exists') || text.includes('student ID is already exists')) {
+    return 'This Student ID already exists. Please enter a different Student ID.';
+  }
+
+  return text;
 }
 
 export async function apiRequest(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  const token = getAccessToken();
+  let token = getAccessToken();
+  const isLoginRequest = path === '/auth/login';
+
+  if (token && isTokenExpired(token)) {
+    notifyUnauthorized('Your session has expired. Please sign in again.');
+    token = null;
+    if (!isLoginRequest) {
+      const error = new Error('Your session has expired. Please sign in again.');
+      error.status = 401;
+      throw error;
+    }
+  }
 
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
@@ -42,12 +104,22 @@ export async function apiRequest(path, options = {}) {
   }
 
   const contentType = response.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json') ? await response.json() : null;
+  const payload = isJsonLikeContentType(contentType) ? await response.json() : null;
 
   if (!response.ok) {
-    const error = new Error(payload?.message || payload?.title || 'Request failed.');
+    const normalizedErrors = normalizeValidationErrors(payload?.errors);
+    const rawMessage = response.status === 401 && !isLoginRequest
+      ? 'Your session has expired. Please sign in again.'
+      : firstValidationMessage(payload?.errors) || payload?.message || payload?.title || 'Request failed.';
+    const message = humanizeErrorMessage(rawMessage);
+    if (response.status === 401 && !isLoginRequest) {
+      notifyUnauthorized(message);
+    }
+    const error = new Error(message);
     error.status = response.status;
-    error.validationErrors = normalizeValidationErrors(payload?.errors);
+    error.validationErrors = Object.fromEntries(
+      Object.entries(normalizedErrors).map(([key, value]) => [key, humanizeErrorMessage(value)]),
+    );
     throw error;
   }
 

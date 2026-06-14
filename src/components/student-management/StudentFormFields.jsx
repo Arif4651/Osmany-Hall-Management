@@ -4,8 +4,12 @@ import {
   STUDENT_LEVELS,
   STUDENT_STATUSES,
 } from '../../types/student.types';
+import { useAuth } from '../../context/AuthContext';
 
 export default function StudentFormFields({ formData, errors = {}, onChange, includeStatus = true }) {
+  const { user, role } = useAuth();
+  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+
   return (
     <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
       <label className="field-control">
@@ -42,6 +46,39 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
           ))}
         </select>
         {errors.department ? <small className="form-error">{errors.department}</small> : null}
+      </label>
+
+      <label className="field-control">
+        <span>
+          Gender
+          {isWingAdmin && (
+            <small
+              style={{
+                marginLeft: '0.4rem',
+                background: 'var(--color-accent, #4f6bed)',
+                color: '#fff',
+                borderRadius: '4px',
+                padding: '1px 6px',
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                letterSpacing: '0.03em',
+              }}
+            >
+              {user?.wing} Wing
+            </small>
+          )}
+        </span>
+        <select
+          value={formData.gender}
+          onChange={(event) => onChange('gender', event.target.value)}
+          // Wing admins can only create/edit students of their own gender — lock it
+          disabled={isWingAdmin}
+          title={isWingAdmin ? `Locked to ${user?.wing} — your admin wing` : undefined}
+        >
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+        </select>
+        {errors.gender ? <small className="form-error">{errors.gender}</small> : null}
       </label>
 
       <label className="field-control">
@@ -92,17 +129,15 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
         {errors.hallName ? <small className="form-error">{errors.hallName}</small> : null}
       </label>
 
-        <label className="field-control">
-          <span>Room No</span>
-          <input
-            value={formData.roomNo}
-            onChange={(event) => onChange('roomNo', event.target.value)}
-            placeholder="e.g. 210"
-          />
-          {errors.roomNo ? <small className="form-error">{errors.roomNo}</small> : null}
-        </label>
-
-
+      <label className="field-control">
+        <span>Room No</span>
+        <input
+          value={formData.roomNo}
+          onChange={(event) => onChange('roomNo', event.target.value)}
+          placeholder="e.g. 210"
+        />
+        {errors.roomNo ? <small className="form-error">{errors.roomNo}</small> : null}
+      </label>
 
       {includeStatus ? (
         <label className="field-control">

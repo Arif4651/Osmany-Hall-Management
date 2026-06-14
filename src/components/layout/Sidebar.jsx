@@ -24,7 +24,7 @@ export default function Sidebar({ role, navItems, isOpen, onClose }) {
             <img className="brand-logo" src={mistLogo} alt={`${BRANDING.universityShortName} logo`} />
             <span className="brand-text">
               {BRANDING.hallName}
-              <small>{`${BRANDING.universityShortName} · ${role === 'admin' ? 'Admin Console' : 'Student Portal'}`}</small>
+              <small>{`${BRANDING.universityShortName} · ${role === 'admin' ? `${user?.wing ? `${user.wing} Wing ` : ''}Admin Console` : 'Student Portal'}`}</small>
             </span>
           </Link>
           <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close navigation">
@@ -33,7 +33,7 @@ export default function Sidebar({ role, navItems, isOpen, onClose }) {
         </div>
 
         <nav className="sidebar-nav" aria-label={`${role} navigation`}>
-          {navItems.map((item) => {
+          {navItems.filter((item) => !item.superAdminOnly || user?.role === 'super_admin').map((item) => {
             const Icon = item.icon;
             return (
               <NavLink

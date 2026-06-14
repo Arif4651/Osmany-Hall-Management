@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { RefreshCcw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { RefreshCcw, Venus, Mars } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
 import PageSection from '../components/layout/PageSection';
 import Button from '../components/ui/Button';
@@ -15,6 +16,8 @@ import BulkUpdateModal from '../components/student-management/BulkUpdateModal';
 import BulkConfirmationModal from '../components/student-management/BulkConfirmationModal';
 import ReactivateStudentModal from '../components/student-management/ReactivateStudentModal';
 import StudentDetailsDrawer from '../components/student-management/StudentDetailsDrawer';
+import { studentService } from '../services/studentService';
+import { useAuth } from '../context/AuthContext';
 import {
   exportStudentsToCsv,
   exportStudentsToExcel,
@@ -68,7 +71,13 @@ export default function AdminStudentsPage() {
     getFilteredStudentsForExport,
   } = useAdminStudentModule();
 
+  // Wing-admin context — drives gender filter visibility and the header badge
+  const { user, role } = useAuth();
+  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+  const wingLabel = user?.wing ? `${user.wing} Wing` : null;
+
   const [activeStudent, setActiveStudent] = useState(null);
+  const [searchParams] = useSearchParams();
   const [editingStudent, setEditingStudent] = useState(null);
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [reactivateTarget, setReactivateTarget] = useState(null);
@@ -81,6 +90,12 @@ export default function AdminStudentsPage() {
   const [bulkConfirmTitle, setBulkConfirmTitle] = useState('Confirm Bulk Update');
   const [pendingBulkFields, setPendingBulkFields] = useState({});
   const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    const studentId = searchParams.get('student');
+    if (!studentId) return;
+    studentService.getStudentById(studentId).then(setActiveStudent).catch(() => null);
+  }, [searchParams]);
 
   const hasSelection = selectedIds.length > 0;
 
@@ -187,7 +202,16 @@ export default function AdminStudentsPage() {
     <div style={{ display: 'grid', gap: '1rem' }}>
       <PageHeader
         title="Student Management"
-        description="Lifecycle-ready student administration with dynamic filtering, bulk promotion, reactivation, and deletion controls."
+        description={
+          isWingAdmin ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              {user?.wing === 'Female' ? <Venus size={15} /> : <Mars size={15} />}
+              <strong>{wingLabel} Admin</strong> — Showing {user?.wing} students only.
+            </span>
+          ) : (
+            'Lifecycle-ready student administration with dynamic filtering, bulk promotion, reactivation, and deletion controls.'
+          )
+        }
         actions={[
           {
             label: 'Evaluate Lifecycle',
@@ -226,6 +250,7 @@ export default function AdminStudentsPage() {
             halls={filterOptions.halls}
             onChange={updateFilter}
             onReset={resetFilters}
+            isWingAdmin={isWingAdmin}
           />
         </div>
       </PageSection>
@@ -331,14 +356,14 @@ export default function AdminStudentsPage() {
         onUpdate={updateStudent}
       />
 
-    <DeleteStudentModal
-  student={deleteStudent}
-  isOpen={Boolean(deleteStudent)}
-  isSubmitting={isSubmitting}
-  onClose={() => setDeleteStudent(null)}
-  onMarkInactive={markStudentInactive}
-  onDeletePermanent={() => deleteStudentPermanently(deleteStudent.id, false)}
-/>
+      <DeleteStudentModal
+        student={deleteStudent}
+        isOpen={Boolean(deleteStudent)}
+        isSubmitting={isSubmitting}
+        onClose={() => setDeleteStudent(null)}
+        onMarkInactive={markStudentInactive}
+        onDeletePermanent={() => deleteStudentPermanently(deleteStudent.id, false)}
+      />
 
       <ReactivateStudentModal
         student={reactivateTarget}
@@ -371,7 +396,7 @@ export default function AdminStudentsPage() {
         onConfirm={handleBulkConfirm}
       />
 
-    <BulkConfirmationModal
+      <BulkConfirmationModal
         isOpen={isBulkDeleteConfirmOpen}
         title="Permanent Delete by Filtering"
         isSubmitting={isSubmitting}

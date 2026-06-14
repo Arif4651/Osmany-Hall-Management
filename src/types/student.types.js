@@ -13,6 +13,7 @@ export const DEPARTMENTS = ['CSE', 'EECE', 'CE', 'ME', 'IPE', 'ARCH', 'URP','EWC
 export const DEFAULT_STUDENT_FORM = {
   studentName: '',
   studentId: '',
+  gender: 'Male',
   department: '',
   hallId: '',
   mobileNumber: '',
@@ -28,6 +29,7 @@ export const DEFAULT_STUDENT_FILTERS = {
   level: 'all',
   hallName: 'all',
   status: 'all',
+  gender: 'all',
 };
 
 export const BULK_UPDATABLE_FIELDS = [

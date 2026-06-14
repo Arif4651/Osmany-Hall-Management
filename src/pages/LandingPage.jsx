@@ -24,7 +24,7 @@ export default function LandingPage() {
             {isAuthenticated ? (
               <Link to={dashboardPath}>
                 <Button>
-                  Continue to Dashboard <ArrowRight size={16} />
+                  Continue to Portal <ArrowRight size={16} />
                 </Button>
               </Link>
             ) : (

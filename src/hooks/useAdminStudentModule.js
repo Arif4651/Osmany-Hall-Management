@@ -123,12 +123,29 @@ export default function useAdminStudentModule() {
     }
   }, [loadStudents]);
 
-  const createStudent = useCallback((payload) => {
-    return withSubmitState(async () => {
+  const createStudent = useCallback(async (payload) => {
+    setIsSubmitting(true);
+    setErrorMessage('');
+    setSuccessNotice(null);
+
+    try {
       const created = await studentService.createStudent(payload);
-      setSuccessNotice(getCredentialNotice(created.studentId));
-    });
-  }, [withSubmitState]);
+      await loadStudents();
+      return {
+        ok: true,
+        notice: getCredentialNotice(created.studentId),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Operation failed.';
+      return {
+        ok: false,
+        message,
+        validationErrors: error?.validationErrors || {},
+      };
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [loadStudents]);
 
   const updateStudent = useCallback((id, payload) => {
     return withSubmitState(async () => {

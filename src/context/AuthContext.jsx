@@ -1,5 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { apiRequest, setAccessToken } from '../services/apiClient';
+import {
+  apiRequest,
+  AUTH_UNAUTHORIZED_EVENT,
+  setAccessToken,
+} from '../services/apiClient';
 
 const STORAGE_KEY = 'osmany-hall-auth-session-v1';
 
@@ -26,6 +30,15 @@ export function AuthProvider({ children }) {
 
     window.localStorage.removeItem(STORAGE_KEY);
   }, [session]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setSession(null);
+    };
+
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;

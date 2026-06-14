@@ -3,7 +3,7 @@ import mealRepository from '../services/meal/mealRepository';
 import { getTomorrowDayId } from '../constants/mealConfig';
 
 function getItemsCost(items = []) {
-  return items.reduce((sum, item) => sum + item.cost, 0);
+  return items.reduce((sum, item) => sum + Number(item.cost || 0), 0);
 }
 
 function estimateDemand(baseDemand, commonItems, optionalItems, bias = 0) {
@@ -17,7 +17,9 @@ function parseItemsFromText(textValue, idPrefix) {
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map((chunk, index) => {
-      const [namePart, costPart] = chunk.split('-').map((part) => part?.trim());
+      const separatorIndex = chunk.lastIndexOf('-');
+      const namePart = separatorIndex >= 0 ? chunk.slice(0, separatorIndex).trim() : chunk;
+      const costPart = separatorIndex >= 0 ? chunk.slice(separatorIndex + 1).trim() : '';
       const cost = Number(costPart);
       const fallbackId = `${idPrefix}-${index + 1}`;
       return {
@@ -32,7 +34,23 @@ function formatItemsToText(items = []) {
   return items.map((item) => `${item.name}-${item.cost}`).join(', ');
 }
 
-export default function useAdminMealModule() {
+function parseOptionalItems(textValue, idPrefix) {
+  return (textValue || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .map((name, index) => ({
+      id: `${idPrefix}-${name || index + 1}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
+      name,
+      cost: 0,
+    }));
+}
+
+function formatOptionalItemsToText(items = []) {
+  return items.map((item) => item.name).join(', ');
+}
+
+export default function useAdminMealModule(wing) {
   const [moduleData, setModuleData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -42,21 +60,21 @@ export default function useAdminMealModule() {
     setErrorMessage('');
 
     try {
-      const nextState = await mealRepository.getModule();
+      const nextState = await mealRepository.getModule(wing);
       setModuleData(nextState);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load meal module.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [wing]);
 
   useEffect(() => {
     loadModule();
   }, [loadModule]);
 
-  const mealTypes = moduleData?.settings?.mealTypes || [];
-  const days = moduleData?.days || [];
+  const mealTypes = useMemo(() => moduleData?.settings?.mealTypes || [], [moduleData]);
+  const days = useMemo(() => moduleData?.days || [], [moduleData]);
 
   const dayOptions = useMemo(
     () => days.map((day) => ({ id: day.id, label: day.label })),
@@ -157,23 +175,24 @@ export default function useAdminMealModule() {
       dayId,
       mealTypeId,
       commonText: formatItemsToText(meal?.commonItems),
-      optionalText: formatItemsToText(meal?.optionalItems),
+      optionalText: formatOptionalItemsToText(meal?.optionalItems),
     };
   }, [days]);
 
   const saveMealConfiguration = useCallback(async ({ dayId, mealTypeId, commonText, optionalText }) => {
     const commonItems = parseItemsFromText(commonText, `${dayId}-${mealTypeId}-common`);
-    const optionalItems = parseItemsFromText(optionalText, `${dayId}-${mealTypeId}-optional`);
+    const optionalItems = parseOptionalItems(optionalText, `${dayId}-${mealTypeId}-optional`);
 
     const updated = await mealRepository.upsertMealConfiguration({
       dayId,
       mealTypeId,
+      wing,
       commonItems,
       optionalItems,
     });
 
     setModuleData(updated);
-  }, []);
+  }, [wing]);
 
   return {
     isLoading,

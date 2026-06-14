@@ -8,6 +8,7 @@ export function normalizeStudentPayload(payload = {}) {
   return {
     studentName: sanitizeText(payload.studentName),
     studentId: sanitizeText(payload.studentId),
+    gender: sanitizeText(payload.gender),
     department: sanitizeText(payload.department),
     hallId: sanitizeText(payload.hallId),
     mobileNumber: sanitizeText(payload.mobileNumber),
@@ -19,8 +20,6 @@ export function normalizeStudentPayload(payload = {}) {
     expectedGraduationDate: sanitizeText(payload.expectedGraduationDate),
     hallValidityEndDate: sanitizeText(payload.hallValidityEndDate),
     status: sanitizeText(payload.status || 'active'),
-    hasDue: Boolean(payload.hasDue),
-    dueAmount: Number(payload.dueAmount || 0),
   };
 }
 
@@ -36,6 +35,7 @@ export function validateStudentPayload(payload, existingStudents = [], currentSt
 
   if (!normalized.studentName) errors.studentName = 'Student name is required.';
   if (!normalized.studentId) errors.studentId = 'Student ID is required.';
+  if (!['Male', 'Female'].includes(normalized.gender)) errors.gender = 'Select a valid gender.';
   if (!/^[-A-Za-z0-9]{4,20}$/.test(normalized.studentId)) {
     errors.studentId = 'Student ID must be 4-20 characters (letters, numbers, dash).';
   }
@@ -89,6 +89,7 @@ export function applyStudentFilters(students, filters) {
       !search ||
       student.studentName.toLowerCase().includes(search) ||
       student.studentId.toLowerCase().includes(search) ||
+      student.rollNumber.toLowerCase().includes(search) ||
       student.hallId.toLowerCase().includes(search) ||
       student.mobileNumber.toLowerCase().includes(search);
 

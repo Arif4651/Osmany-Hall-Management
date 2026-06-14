@@ -4,28 +4,27 @@ export const ROUTE_PATHS = {
   adminLogin: '/halladmin',
   changePassword: '/change-password',
 
-  studentDashboard: '/student/dashboard',
   studentMeals: '/student/meals',
+  studentMealSnapshot: '/student/meal-snapshot',
+  studentViewMenu: '/student/view-menu',
   studentBilling: '/student/billing',
   studentPayments: '/student/payments',
   studentProfile: '/student/profile',
   studentNotifications: '/student/notifications',
 
-  adminDashboard: '/admin/dashboard',
   adminStudents: '/admin/students',
   adminMeals: '/admin/meals',
+  adminMealSheet: '/admin/meal-sheet',
   adminBilling: '/admin/billing',
   adminPayments: '/admin/payments',
   adminInventory: '/admin/inventory',
-  adminReports: '/admin/reports',
-  adminAuditLogs: '/admin/audit-logs',
-  adminAnalytics: '/admin/analytics',
+  adminDue: '/admin/due',
+  adminDailyCost: '/admin/daily-cost',
   adminSettings: '/admin/settings',
-
   notFound: '*',
 };
 
 export const DEFAULT_REDIRECTS = {
-  student: ROUTE_PATHS.studentDashboard,
-  admin: ROUTE_PATHS.adminDashboard,
+  student: ROUTE_PATHS.studentMeals,
+  admin: ROUTE_PATHS.adminStudents,
 };

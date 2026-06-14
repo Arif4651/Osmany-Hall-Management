@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { ROUTE_PATHS } from '../constants/routePaths';
+import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
 import { useAuth } from '../context/AuthContext';
 
 export function ProtectedRoute({ children, role }) {
@@ -11,15 +11,18 @@ export function ProtectedRoute({ children, role }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={ROUTE_PATHS.login} replace state={{ from: location }} />;
+    const loginPath = role === 'admin' ? ROUTE_PATHS.adminLogin : ROUTE_PATHS.login;
+    return <Navigate to={loginPath} replace state={{ from: location }} />;
   }
 
   if (mustChangePassword && location.pathname !== ROUTE_PATHS.changePassword) {
     return <Navigate to={ROUTE_PATHS.changePassword} replace />;
   }
 
-  if (role && loggedRole !== role) {
-    const fallback = loggedRole === 'admin' ? ROUTE_PATHS.adminDashboard : ROUTE_PATHS.studentDashboard;
+  const adminRoles = ['admin', 'super_admin', 'male_wing_admin', 'female_wing_admin'];
+  const isAllowedRole = !role || loggedRole === role || (role === 'admin' && adminRoles.includes(loggedRole));
+  if (!isAllowedRole) {
+    const fallback = adminRoles.includes(loggedRole) ? DEFAULT_REDIRECTS.admin : DEFAULT_REDIRECTS.student;
     return <Navigate to={fallback} replace />;
   }
 
@@ -41,5 +44,5 @@ export function PublicOnlyRoute({ children }) {
     return <Navigate to={ROUTE_PATHS.changePassword} replace />;
   }
 
-  return <Navigate to={role === 'admin' ? ROUTE_PATHS.adminDashboard : ROUTE_PATHS.studentDashboard} replace />;
+  return <Navigate to={['admin', 'super_admin', 'male_wing_admin', 'female_wing_admin'].includes(role) ? DEFAULT_REDIRECTS.admin : DEFAULT_REDIRECTS.student} replace />;
 }

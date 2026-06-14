@@ -5,6 +5,12 @@ import {
   STUDENT_STATUSES,
 } from '../../types/student.types';
 
+const GENDER_OPTIONS = [
+  { label: 'All', value: 'all' },
+  { label: 'Male', value: 'Male' },
+  { label: 'Female', value: 'Female' },
+];
+
 function toOptionList(values = []) {
   return values.filter(Boolean).map((value) => ({ label: value, value }));
 }
@@ -26,6 +32,8 @@ export default function StudentFilters({
   halls,
   onChange,
   onReset,
+  // wing admins have a fixed wing — hide gender filter for them
+  isWingAdmin = false,
 }) {
   const departmentOptions = mergeOptionValues(DEPARTMENTS, departments);
   const hallOptions = mergeOptionValues(HALL_NAMES, halls);
@@ -41,7 +49,6 @@ export default function StudentFilters({
       label: 'Level / Year',
       options: [{ label: 'All', value: 'all' }, ...toOptionList(STUDENT_LEVELS)],
     },
-  
     {
       key: 'hallName',
       label: 'Hall Name',
@@ -69,7 +76,22 @@ export default function StudentFilters({
             </select>
           </label>
         ))}
+
+        {/* Gender filter — only shown to super_admin / admin, not wing admins */}
+        {!isWingAdmin && (
+          <label className="field-control">
+            <span>Gender</span>
+            <select value={filters.gender ?? 'all'} onChange={(event) => onChange('gender', event.target.value)}>
+              {GENDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
+
       <div className="inline-actions">
         <button type="button" className="btn btn-ghost" onClick={onReset}>
           Reset Filters

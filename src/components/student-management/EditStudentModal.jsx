@@ -8,6 +8,7 @@ function toFormData(student) {
   return {
     studentName: student.studentName || '',
     studentId: student.studentId || '',
+    gender: student.gender || 'Male',
     department: student.department || '',
     hallId: student.hallId || '',
     mobileNumber: student.mobileNumber || '',
