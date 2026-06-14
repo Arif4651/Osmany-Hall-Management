@@ -35,6 +35,9 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
         var overrides = await db.GlobalMealOverrides.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && x.EffectiveTo >= from)
             .ToListAsync(cancellationToken);
+        var subsidies = await db.DswSubsidies.AsNoTracking()
+            .Where(x => x.Date >= from && x.Date <= to && !x.IsReversed)
+            .ToListAsync(cancellationToken);
         var rows = new List<DailyCostRowDto>();
         for (var date = from; date <= to; date = date.AddDays(1))
         {
@@ -45,6 +48,12 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                         && x.MealPeriod == period
                         && (effectiveGender == "All" || x.Item != null && x.Item.Wing == effectiveGender))
                     .Sum(x => x.TotalCost);
+                var subsidyAmount = subsidies
+                    .Where(x => x.Date == date
+                        && x.MealPeriod == period
+                        && (effectiveGender == "All" || x.Wing == effectiveGender))
+                    .Sum(x => x.SubsidyAmount);
+                var netCost = transactionCost - subsidyAmount;
                 var participants = students.Where(student =>
                 {
                     var mealOverride = overrides
@@ -62,8 +71,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                             .FirstOrDefault()?.IsOn == true;
                 }).ToList();
                 var filtered = effectiveGender == "All" ? participants : participants.Where(x => x.Gender == effectiveGender).ToList();
-                // transactionCost is already filtered by wing, so no proportional split needed
-                return new DailyCostMealDto(transactionCost, filtered.Count, filtered.Count == 0 ? 0m : transactionCost / filtered.Count);
+                return new DailyCostMealDto(netCost, filtered.Count, filtered.Count == 0 ? 0m : netCost / filtered.Count);
             }
             var breakfast = Meal("breakfast");
             var lunch = Meal("lunch");
