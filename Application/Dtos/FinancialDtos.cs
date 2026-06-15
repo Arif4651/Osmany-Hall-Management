@@ -10,7 +10,8 @@ public sealed record StockTransactionDto(
     decimal TotalCost, string? Note, bool IsLocked);
 public sealed record SaveStockTransactionRequest(
     Guid ItemId, string TransactionType, DateOnly Date, string? MealPeriod,
-    decimal Quantity, decimal? Rate, string? Note, string? Wing);
+    decimal Quantity, decimal? Rate, string? Note, string? Wing, decimal? TotalPrice = null);
+
 
 public sealed record MealPreferenceStateDto(string MealPeriod, bool IsOn, Guid? OptionItemId, string? OptionName = null, int GuestCount = 0);
 public sealed record SaveMealPreferenceStateRequest(
@@ -69,6 +70,15 @@ public sealed record StudentBillSubsidyAdjustmentDto(
     DateOnly Date,
     string MealPeriod,
     decimal Amount,
+    string? Notes);
+public sealed record DswSubsidyDto(
+    Guid Id,
+    string Wing,
+    decimal SubsidyAmount,
+    DateOnly Date,
+    string MealPeriod,
+    int EligibleStudentCount,
+    decimal PerStudentSubsidy,
     string? Notes);
 public sealed record AdminStudentMealControlDto(
     Guid StudentRecordId,

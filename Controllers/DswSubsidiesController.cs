@@ -110,6 +110,134 @@ public sealed class DswSubsidiesController(
         }
     }
 
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<DswSubsidyDto>>> GetSubsidies(
+        [FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
+    {
+        var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+        var from = new DateOnly(year, month, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+        var query = db.DswSubsidies.AsNoTracking().Where(x => x.Wing == selectedWing && x.Date >= from && x.Date <= to && !x.IsReversed);
+        
+        return await query.OrderByDescending(x => x.Date).ThenBy(x => x.MealPeriod)
+            .Select(x => new DswSubsidyDto(x.Id, x.Wing, x.SubsidyAmount, x.Date, x.MealPeriod, x.EligibleStudentCount, x.PerStudentSubsidy, x.Notes))
+            .ToListAsync(cancellationToken);
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, CreateDswSubsidyRequest request, CancellationToken cancellationToken)
+    {
+        var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (subsidy is null) return NotFound();
+        
+        if (request.SubsidyAmount <= 0m)
+            return BadRequest(new { message = "Subsidy amount must be greater than zero." });
+        if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
+            return BadRequest(new { message = "Invalid meal period." });
+
+        await periods.EnsureOpenAsync(subsidy.Date, cancellationToken);
+        await periods.EnsureOpenAsync(request.Date, cancellationToken);
+
+        var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
+        
+        var students = await db.Students.AsNoTracking()
+            .Where(x => x.Status == "active" && x.Gender == selectedWing)
+            .OrderBy(x => x.StudentName)
+            .ToListAsync(cancellationToken);
+        var studentIds = students.Select(x => x.Id).ToList();
+        var statuses = await db.MealStatusHistory.AsNoTracking()
+            .Where(x => studentIds.Contains(x.StudentId)
+                && x.EffectiveFrom <= request.Date
+                && (x.EffectiveTo == null || x.EffectiveTo >= request.Date))
+            .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == selectedWing
+                && x.MealPeriod == request.MealPeriod
+                && x.EffectiveFrom <= request.Date
+                && x.EffectiveTo >= request.Date)
+            .OrderByDescending(x => x.EffectiveFrom)
+            .ToListAsync(cancellationToken);
+
+        var activeOverride = overrides.FirstOrDefault();
+        var eligibleStudents = students
+            .Where(student => activeOverride is not null
+                ? activeOverride.IsOn
+                : statuses
+                    .Where(x => x.StudentId == student.Id && x.MealPeriod == request.MealPeriod)
+                    .OrderByDescending(x => x.EffectiveFrom)
+                    .FirstOrDefault()?.IsOn == true)
+            .ToList();
+
+        if (eligibleStudents.Count == 0)
+            return BadRequest(new { message = "No eligible meal-active students were found for the selected date and meal." });
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var oldDistributions = await db.DswSubsidyDistributions.Where(x => x.SubsidyId == id).ToListAsync(cancellationToken);
+            db.DswSubsidyDistributions.RemoveRange(oldDistributions);
+
+            var perStudentSubsidy = request.SubsidyAmount / eligibleStudents.Count;
+            
+            subsidy.Wing = selectedWing;
+            subsidy.SubsidyAmount = request.SubsidyAmount;
+            var oldDate = subsidy.Date;
+            subsidy.Date = request.Date;
+            subsidy.MealPeriod = request.MealPeriod;
+            subsidy.EligibleStudentCount = eligibleStudents.Count;
+            subsidy.PerStudentSubsidy = perStudentSubsidy;
+            subsidy.Notes = request.Notes?.Trim();
+            
+            db.DswSubsidyDistributions.AddRange(eligibleStudents.Select(student => new DswSubsidyDistribution
+            {
+                SubsidyId = subsidy.Id,
+                StudentId = student.Id,
+                Date = request.Date,
+                MealPeriod = request.MealPeriod,
+                SubsidyAmount = perStudentSubsidy,
+            }));
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var minDate = oldDate < request.Date ? oldDate : request.Date;
+            await billing.RecalculateForwardAsync(minDate.Month, minDate.Year, cancellationToken);
+
+            return Ok(new
+            {
+                subsidy.Id,
+                subsidy.Wing,
+                subsidy.Date,
+                subsidy.MealPeriod,
+                subsidy.SubsidyAmount,
+                subsidy.EligibleStudentCount,
+                subsidy.PerStudentSubsidy,
+            });
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException postgres && postgres.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Conflict(new { message = "A DSW subsidy is already active for this wing, date, and meal period." });
+        }
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (subsidy is null) return NotFound();
+        
+        await periods.EnsureOpenAsync(subsidy.Date, cancellationToken);
+        
+        var distributions = await db.DswSubsidyDistributions.Where(x => x.SubsidyId == id).ToListAsync(cancellationToken);
+        db.DswSubsidyDistributions.RemoveRange(distributions);
+        db.DswSubsidies.Remove(subsidy);
+        
+        await db.SaveChangesAsync(cancellationToken);
+        await billing.RecalculateForwardAsync(subsidy.Date.Month, subsidy.Date.Year, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("recalculate")]
     public async Task<IActionResult> Recalculate(
         [FromQuery] int month,

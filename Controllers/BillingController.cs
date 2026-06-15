@@ -174,6 +174,18 @@ public sealed class BillingController(
         => await db.BillingPeriods.AsNoTracking().OrderByDescending(x => x.Year).ThenByDescending(x => x.Month)
             .Select(x => new BillingPeriodDto(x.Month, x.Year, x.IsLocked, x.LockedAtUtc)).ToListAsync(cancellationToken);
 
+    [HttpGet("service-bills")]
+    [Authorize(Roles = Roles.HallAdministrators)]
+    public async Task<ActionResult<decimal>> GetServiceBill([FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    {
+        var service = await db.ServiceBills.AsNoTracking()
+            .Where(x => x.Month == month && x.Year == year)
+            .OrderByDescending(x => x.Version)
+            .Select(x => x.AmountPerStudent)
+            .FirstOrDefaultAsync(cancellationToken);
+        return Ok(service);
+    }
+
     private static MonthlyBillDto ToDto(MonthlyBillCache x, bool overridden, bool locked)
     {
         var status = x.DueBill == 0m ? "Paid" : x.DueBill == x.TotalBill ? "Unpaid" : "Partial Paid";

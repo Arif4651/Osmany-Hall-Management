@@ -243,29 +243,53 @@ public sealed class InventoryController(
     public async Task<ActionResult<StockTransactionDto>> CreateTransaction(SaveStockTransactionRequest request, CancellationToken cancellationToken)
     {
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
-        var validation = await ValidateTransactionAsync(request, selectedWing, cancellationToken);
+        var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.ItemId && !x.IsDeleted, cancellationToken);
+        if (item is null) return BadRequest(new { message = "Inventory item was not found." });
+
+        bool isStockInOrNonStock = (item.IsStored && request.TransactionType == "in") || (!item.IsStored && request.TransactionType == "out");
+        decimal? computedRate = request.Rate;
+
+        if (isStockInOrNonStock)
+        {
+            if (request.Quantity <= 0m)
+            {
+                return BadRequest(new { message = "Quantity must be greater than zero." });
+            }
+            if (!request.TotalPrice.HasValue)
+            {
+                return BadRequest(new { message = "Total Price is required." });
+            }
+            if (request.TotalPrice.Value <= 0m)
+            {
+                return BadRequest(new { message = "Total Price must be greater than zero." });
+            }
+            computedRate = request.TotalPrice.Value / request.Quantity;
+        }
+
+        var updatedRequest = request with { Rate = computedRate };
+        var validation = await ValidateTransactionAsync(updatedRequest, selectedWing, cancellationToken);
         if (validation is not null) return BadRequest(new { message = validation });
         try
         {
-            await periods.EnsureOpenAsync(request.Date, cancellationToken);
+            await periods.EnsureOpenAsync(updatedRequest.Date, cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var row = new StockTransaction
             {
-                ItemId = request.ItemId,
-                TransactionType = request.TransactionType,
-                Date = request.Date,
-                MealPeriod = request.TransactionType == "out" ? request.MealPeriod : null,
-                Quantity = request.Quantity,
-                Rate = request.Rate ?? 0m,
-                Note = request.Note?.Trim(),
+                ItemId = updatedRequest.ItemId,
+                TransactionType = updatedRequest.TransactionType,
+                Date = updatedRequest.Date,
+                MealPeriod = updatedRequest.TransactionType == "out" ? updatedRequest.MealPeriod : null,
+                Quantity = updatedRequest.Quantity,
+                Rate = updatedRequest.Rate ?? 0m,
+                Note = updatedRequest.Note?.Trim(),
                 CreatedById = currentUser.UserId,
             };
             db.StockTransactions.Add(row);
             await db.SaveChangesAsync(cancellationToken);
-            await inventory.RebuildItemAsync(request.ItemId, cancellationToken);
+            await inventory.RebuildItemAsync(updatedRequest.ItemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            await billing.RecalculateForwardAsync(request.Date.Month, request.Date.Year, cancellationToken);
+            await billing.RecalculateForwardAsync(updatedRequest.Date.Month, updatedRequest.Date.Year, cancellationToken);
             await db.Entry(row).Reference(x => x.Item).LoadAsync(cancellationToken);
             return CreatedAtAction(nameof(GetTransactions), ToDto(row, false));
         }
@@ -281,29 +305,54 @@ public sealed class InventoryController(
         if (row is null) return NotFound();
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
         if (row.Item?.Wing != selectedWing) return Forbid();
-        var validation = await ValidateTransactionAsync(request, selectedWing, cancellationToken);
+
+        var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.ItemId && !x.IsDeleted, cancellationToken);
+        if (item is null) return BadRequest(new { message = "Inventory item was not found." });
+
+        bool isStockInOrNonStock = (item.IsStored && request.TransactionType == "in") || (!item.IsStored && request.TransactionType == "out");
+        decimal? computedRate = request.Rate;
+
+        if (isStockInOrNonStock)
+        {
+            if (request.Quantity <= 0m)
+            {
+                return BadRequest(new { message = "Quantity must be greater than zero." });
+            }
+            if (!request.TotalPrice.HasValue)
+            {
+                return BadRequest(new { message = "Total Price is required." });
+            }
+            if (request.TotalPrice.Value <= 0m)
+            {
+                return BadRequest(new { message = "Total Price must be greater than zero." });
+            }
+            computedRate = request.TotalPrice.Value / request.Quantity;
+        }
+
+        var updatedRequest = request with { Rate = computedRate };
+        var validation = await ValidateTransactionAsync(updatedRequest, selectedWing, cancellationToken);
         if (validation is not null) return BadRequest(new { message = validation });
         try
         {
             await periods.EnsureOpenAsync(row.Date, cancellationToken);
-            await periods.EnsureOpenAsync(request.Date, cancellationToken);
+            await periods.EnsureOpenAsync(updatedRequest.Date, cancellationToken);
             var oldItemId = row.ItemId;
             var oldDate = row.Date;
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            row.ItemId = request.ItemId;
-            row.TransactionType = request.TransactionType;
-            row.Date = request.Date;
-            row.MealPeriod = request.TransactionType == "out" ? request.MealPeriod : null;
-            row.Quantity = request.Quantity;
-            row.Rate = request.Rate ?? 0m;
-            row.Note = request.Note?.Trim();
+            row.ItemId = updatedRequest.ItemId;
+            row.TransactionType = updatedRequest.TransactionType;
+            row.Date = updatedRequest.Date;
+            row.MealPeriod = updatedRequest.TransactionType == "out" ? updatedRequest.MealPeriod : null;
+            row.Quantity = updatedRequest.Quantity;
+            row.Rate = updatedRequest.Rate ?? 0m;
+            row.Note = updatedRequest.Note?.Trim();
             row.UpdatedById = currentUser.UserId;
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(oldItemId, cancellationToken);
-            if (oldItemId != request.ItemId) await inventory.RebuildItemAsync(request.ItemId, cancellationToken);
+            if (oldItemId != updatedRequest.ItemId) await inventory.RebuildItemAsync(updatedRequest.ItemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            var first = oldDate.Year * 12 + oldDate.Month <= request.Date.Year * 12 + request.Date.Month ? oldDate : request.Date;
+            var first = oldDate.Year * 12 + oldDate.Month <= updatedRequest.Date.Year * 12 + updatedRequest.Date.Month ? oldDate : updatedRequest.Date;
             await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
             return ToDto(row, false);
         }
