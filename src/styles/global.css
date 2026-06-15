@@ -3828,3 +3828,14 @@ button {
   margin-top: 0.5rem;
 }
 
+.billing-control-grid > .is-full {
+  grid-column: span 2 / span 2;
+}
+
+@media (max-width: 768px) {
+  .billing-control-grid > .is-full {
+    grid-column: auto;
+  }
+}
+
+

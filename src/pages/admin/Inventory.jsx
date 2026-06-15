@@ -14,7 +14,7 @@ const tabs = [
   { id: 'items', label: 'Items' },
 ];
 
-const emptyMovement = { date: todayLocal(), mealPeriod: 'breakfast', itemId: '', quantity: '', rate: '' };
+const emptyMovement = { date: todayLocal(), mealPeriod: 'breakfast', itemId: '', quantity: '', rate: '', totalPrice: '' };
 const emptyItem = { id: '', name: '', unit: 'KG', category: 'Common', linkedOptionId: '', isStored: true };
 const formatNumber = (value) => money(value).toFixed(2);
 const formatDisplayDate = (value) => new Intl.DateTimeFormat('en-GB', {
@@ -160,6 +160,80 @@ export default function Inventory() {
   const [ledgerTransactions, setLedgerTransactions] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerTab, setLedgerTab] = useState('all');
+  const [editTransaction, setEditTransaction] = useState(null);
+  const [editForm, setEditForm] = useState({ date: '', mealPeriod: 'breakfast', quantity: '', totalPrice: '' });
+  const [deleteTransaction, setDeleteTransaction] = useState(null);
+
+  const openEditTransactionModal = (t) => {
+    setEditTransaction(t);
+    setEditForm({
+      date: t.date,
+      mealPeriod: t.mealPeriod || 'breakfast',
+      quantity: t.quantity.toString(),
+      totalPrice: (t.totalCost || (t.quantity * t.rate)).toString()
+    });
+  };
+
+  const handleSaveEditTransaction = async (e) => {
+    e.preventDefault();
+    if (money(editForm.quantity).lessThanOrEqualTo(0)) {
+      return alert('Quantity must be greater than zero.');
+    }
+    const isStockInOrNonStock = editTransaction.transactionType === 'in' || (editTransaction.transactionType === 'out' && !historyItem.isStored);
+    if (isStockInOrNonStock && (!editForm.totalPrice || money(editForm.totalPrice).lessThanOrEqualTo(0))) {
+      return alert('Total Purchase Price must be greater than zero.');
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        itemId: editTransaction.itemId,
+        wing: gender,
+        transactionType: editTransaction.transactionType,
+        date: editForm.date,
+        mealPeriod: editTransaction.transactionType === 'in' ? null : editForm.mealPeriod,
+        quantity: Number(editForm.quantity),
+        totalPrice: isStockInOrNonStock ? Number(editForm.totalPrice) : null,
+        note: editTransaction.note,
+      };
+      await adminDataService.updateInventoryMovement(editTransaction.id, payload);
+      setEditTransaction(null);
+      await loadItems();
+      if (historyItem) {
+        const data = await adminDataService.getInventoryLedger({ itemId: historyItem.id, wing: gender });
+        setLedgerTransactions(Array.isArray(data) ? data : []);
+      }
+      setMessage('Transaction updated successfully.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to update transaction.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTransaction = async () => {
+    if (!deleteTransaction) return;
+    setSaving(true);
+    try {
+      await adminDataService.deleteInventoryMovement(deleteTransaction.id);
+      setDeleteTransaction(null);
+      await loadItems();
+      if (historyItem) {
+        const data = await adminDataService.getInventoryLedger({ itemId: historyItem.id, wing: gender });
+        setLedgerTransactions(Array.isArray(data) ? data : []);
+      }
+      setMessage('Transaction deleted successfully.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to delete transaction.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editCalcUnitPrice = useMemo(() => {
+    const qty = Number(editForm.quantity || 0);
+    const total = Number(editForm.totalPrice || 0);
+    return qty > 0 ? (total / qty) : 0;
+  }, [editForm.quantity, editForm.totalPrice]);
 
   const formRef = useRef(null);
 
@@ -178,6 +252,12 @@ export default function Inventory() {
   const pickerItems = activeTab === 'non-stock' ? items.filter((item) => !item.isStored) : storedItems;
   const summaryItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(summarySearch.toLowerCase())), [items, summarySearch]);
   const visibleItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(itemSearch.toLowerCase())), [items, itemSearch]);
+
+  const calcUnitPrice = useMemo(() => {
+    const qty = Number(movement.quantity || 0);
+    const total = Number(movement.totalPrice || 0);
+    return qty > 0 ? (total / qty) : 0;
+  }, [movement.quantity, movement.totalPrice]);
 
   // Compute stats for history ledger modal
   const historyStats = useMemo(() => {
@@ -278,6 +358,12 @@ export default function Inventory() {
     if (activeTab === 'out' && money(movement.quantity).greaterThan(money(item.currentStockQty))) {
       return setMessage(`Only ${formatNumber(item.currentStockQty)} ${item.unit} is available.`);
     }
+    const isStockInOrNonStock = activeTab === 'in' || activeTab === 'non-stock';
+    if (isStockInOrNonStock) {
+      if (!movement.totalPrice || money(movement.totalPrice).lessThanOrEqualTo(0)) {
+        return setMessage('Total Price must be greater than zero.');
+      }
+    }
     setSaving(true);
     setMessage('');
     try {
@@ -288,7 +374,7 @@ export default function Inventory() {
         date: movement.date,
         mealPeriod: activeTab === 'in' ? null : movement.mealPeriod,
         quantity: Number(movement.quantity),
-        rate: activeTab === 'in' || activeTab === 'non-stock' ? Number(movement.rate) : null,
+        totalPrice: isStockInOrNonStock ? Number(movement.totalPrice) : null,
         note: null,
       });
       setMovement(emptyMovement);
@@ -433,7 +519,40 @@ export default function Inventory() {
               {activeTab !== 'in' && <label><span>Meal</span><select value={movement.mealPeriod} onChange={(e) => setMovement({ ...movement, mealPeriod: e.target.value })}><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option></select></label>}
               <label className="stock-item-field"><span>Item</span><ItemPicker items={pickerItems} value={movement.itemId} onChange={(itemId) => setMovement({ ...movement, itemId })} showRemaining={activeTab === 'out'} /></label>
               <label><span>Quantity</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'non-stock' ? 'eg: 100' : 'eg: 10'} value={movement.quantity} onChange={(e) => setMovement({ ...movement, quantity: e.target.value })} /></label>
-              {(activeTab === 'in' || activeTab === 'non-stock') && <label><span>{activeTab === 'in' ? 'Price Per Unit' : 'Price (per unit)'}</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'in' ? 'eg: 100' : 'eg: 10'} value={movement.rate} onChange={(e) => setMovement({ ...movement, rate: e.target.value })} /></label>}
+              {(activeTab === 'in' || activeTab === 'non-stock') && (
+                <>
+                  <label>
+                    <span>Total Purchase Price</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      placeholder="eg: 2500"
+                      value={movement.totalPrice || ''}
+                      onChange={(e) => setMovement({ ...movement, totalPrice: e.target.value })}
+                    />
+                  </label>
+                  <div className="stock-calc-preview" style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    gap: '0.2rem',
+                    height: '46px',
+                    padding: '0 1rem',
+                    background: '#f8fafc',
+                    border: '1px dashed #cbd5e1',
+                    borderRadius: '7px',
+                    fontSize: '0.85rem',
+                    color: '#475569',
+                    minWidth: '200px'
+                  }}>
+                    <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
+                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                      ৳{formatNumber(calcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {items.find(x => x.id === movement.itemId)?.unit?.toUpperCase() || 'unit'}</span>
+                    </strong>
+                  </div>
+                </>
+              )}
               <button className={`stock-submit stock-submit-${activeTab}`} type="submit" disabled={saving}>{activeTab === 'in' ? 'Stock In' : 'Stock Out'}</button>
             </form>
           </main>
@@ -584,11 +703,33 @@ export default function Inventory() {
                         <span className="stock-timeline-meal">{t.mealPeriod.toUpperCase()}</span>
                       )}
                     </div>
-                    {historyItem?.isStored && (
-                      <span className="stock-timeline-balance">
-                        Balance: {formatNumber(t.runningBalance)} {historyItem?.unit?.toUpperCase()}
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      {!t.isLocked && (
+                        <div className="stock-timeline-actions" style={{ display: 'flex', gap: '0.45rem' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openEditTransactionModal(t); }}
+                            style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#1e40af', display: 'inline-flex', alignItems: 'center' }}
+                            title="Edit transaction"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setDeleteTransaction(t); }}
+                            style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#b91c1c', display: 'inline-flex', alignItems: 'center' }}
+                            title="Delete transaction"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      )}
+                      {historyItem?.isStored && (
+                        <span className="stock-timeline-balance">
+                          Balance: {formatNumber(t.runningBalance)} {historyItem?.unit?.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="stock-timeline-card-body">
                     <span>Qty: <strong>{t.transactionType === 'in' ? '+' : '-'}{formatNumber(t.quantity)} {historyItem?.unit?.toUpperCase()}</strong></span>
@@ -600,6 +741,124 @@ export default function Inventory() {
             ))
           )}
         </div>
+      </Modal>
+
+      {/* Delete Transaction Modal */}
+      <Modal
+        isOpen={Boolean(deleteTransaction)}
+        onClose={() => !saving && setDeleteTransaction(null)}
+        title="Delete Transaction"
+        actions={(
+          <>
+            <Button variant="secondary" onClick={() => setDeleteTransaction(null)} disabled={saving}>Cancel</Button>
+            <Button variant="danger" onClick={handleDeleteTransaction} disabled={saving}>
+              {saving ? 'Deleting...' : 'Delete'}
+            </Button>
+          </>
+        )}
+      >
+        <div className="stock-delete-dialog">
+          <div className="stock-delete-dialog__icon">
+            <Trash2 size={20} />
+          </div>
+          <div className="stock-delete-dialog__content">
+            <p className="stock-delete-dialog__title">Delete this transaction?</p>
+            <p className="stock-delete-dialog__text">
+              Are you sure you want to delete this {deleteTransaction?.transactionType === 'in' ? 'Stock In' : 'Stock Out'} transaction of {formatNumber(deleteTransaction?.quantity)} {historyItem?.unit?.toUpperCase()} on {deleteTransaction && formatDisplayDate(deleteTransaction.date)}?
+            </p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Transaction Modal */}
+      <Modal
+        isOpen={Boolean(editTransaction)}
+        onClose={() => !saving && setEditTransaction(null)}
+        title="Edit Transaction"
+        actions={(
+          <>
+            <Button variant="secondary" onClick={() => setEditTransaction(null)} disabled={saving}>Cancel</Button>
+            <Button type="submit" form="stock-edit-transaction-form" disabled={saving}>Save Changes</Button>
+          </>
+        )}
+      >
+        {editTransaction && (
+          <form id="stock-edit-transaction-form" className="stock-item-form" onSubmit={handleSaveEditTransaction}>
+            <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
+              Date
+              <input
+                type="date"
+                value={editForm.date}
+                onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                required
+                style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
+              />
+            </label>
+
+            {editTransaction.transactionType === 'out' && historyItem?.isStored && (
+              <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
+                Meal
+                <select
+                  value={editForm.mealPeriod}
+                  onChange={(e) => setEditForm({ ...editForm, mealPeriod: e.target.value })}
+                  required
+                  style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
+                >
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                </select>
+              </label>
+            )}
+
+            <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
+              Quantity
+              <input
+                type="number"
+                min="0.0001"
+                step="0.0001"
+                value={editForm.quantity}
+                onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                required
+                style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
+              />
+            </label>
+
+            {(editTransaction.transactionType === 'in' || (editTransaction.transactionType === 'out' && !historyItem?.isStored)) && (
+              <>
+                <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
+                  Total Purchase Price
+                  <input
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                    value={editForm.totalPrice}
+                    onChange={(e) => setEditForm({ ...editForm, totalPrice: e.target.value })}
+                    required
+                    style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
+                  />
+                </label>
+                <div className="stock-calc-preview" style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  gap: '0.2rem',
+                  padding: '0.75rem 1rem',
+                  background: '#f8fafc',
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: '7px',
+                  fontSize: '0.85rem',
+                  color: '#475569'
+                }}>
+                  <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
+                  <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                    ৳{formatNumber(editCalcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {historyItem?.unit?.toUpperCase() || 'unit'}</span>
+                  </strong>
+                </div>
+              </>
+            )}
+          </form>
+        )}
       </Modal>
     </div>
   );

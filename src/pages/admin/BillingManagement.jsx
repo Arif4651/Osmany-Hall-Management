@@ -27,6 +27,18 @@ export default function BillingManagement() {
   const [filters, setFilters] = useState(initialFilters);
   const [rows, setRows] = useState([]);
   const [serviceAmount, setServiceAmount] = useState('');
+  const [hasServiceBill, setHasServiceBill] = useState(false);
+  const [dswSubsidies, setDswSubsidies] = useState([]);
+  const [editingSubsidy, setEditingSubsidy] = useState(null);
+  const [editSubsidyForm, setEditSubsidyForm] = useState({
+    id: '',
+    wing: 'Male',
+    subsidyAmount: '',
+    date: '',
+    mealPeriod: 'breakfast',
+    notes: ''
+  });
+  const [savingEditSubsidy, setSavingEditSubsidy] = useState(false);
   const [subsidyForm, setSubsidyForm] = useState(() => ({
     ...emptySubsidyForm,
     wing: user?.wing || 'Male',
@@ -53,13 +65,135 @@ export default function BillingManagement() {
     setLoading(true);
     try {
       setRows(await adminDataService.getBillingRecords(filters));
+      
+      // Fetch service bill
+      try {
+        const sBill = await adminDataService.getServiceBill({
+          month: parseInt(filters.month, 10),
+          year: parseInt(filters.year, 10)
+        });
+        if (sBill > 0) {
+          setServiceAmount(String(sBill));
+          setHasServiceBill(true);
+        } else {
+          setServiceAmount('');
+          setHasServiceBill(false);
+        }
+      } catch (sbErr) {
+        setServiceAmount('');
+        setHasServiceBill(false);
+      }
+
+      // Fetch DSW subsidies
+      try {
+        const currentWing = user?.wing || filters.gender;
+        let subsidies = [];
+        if (currentWing === 'All') {
+          const [maleSubs, femaleSubs] = await Promise.all([
+            adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Male' }),
+            adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Female' })
+          ]);
+          subsidies = [...(maleSubs || []), ...(femaleSubs || [])];
+        } else {
+          subsidies = await adminDataService.getDswSubsidies({
+            month: parseInt(filters.month, 10),
+            year: parseInt(filters.year, 10),
+            wing: currentWing
+          });
+        }
+        setDswSubsidies(subsidies || []);
+      } catch (dswErr) {
+        setDswSubsidies([]);
+      }
+
       setError('');
     } catch (loadError) {
       setError(loadError.message);
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, user?.wing]);
+
+  const deleteServiceBill = async () => {
+    if (true) {
+      setSavingService(true);
+      setMessage("Deleting service bill, please wait...");
+      setError("");
+      try {
+        await adminDataService.deleteServiceBill({
+          month: parseInt(filters.month, 10),
+          year: parseInt(filters.year, 10)
+        });
+        setMessage('Service bill deleted successfully and bills recalculated.');
+        setError('');
+        setServiceAmount('');
+        setHasServiceBill(false);
+        await load();
+      } catch (err) {
+        setError(err.message);
+        setMessage("");
+      } finally {
+        setSavingService(false);
+      }
+    }
+  };
+
+  const deleteSubsidy = async (id) => {
+    if (true) {
+      setMessage("Deleting DSW subsidy, please wait...");
+      setError("");
+      try {
+        await adminDataService.deleteDswSubsidy(id);
+        setMessage("DSW subsidy deleted successfully and bills recalculated.");
+        setError("");
+        await load();
+      } catch (err) {
+        setError(err.message);
+        setMessage("");
+      }
+    }
+  };
+
+  const openEditSubsidy = (sub) => {
+    setEditingSubsidy(sub);
+    setEditSubsidyForm({
+      id: sub.id,
+      wing: sub.wing,
+      subsidyAmount: String(sub.subsidyAmount),
+      date: sub.date,
+      mealPeriod: sub.mealPeriod,
+      notes: sub.notes || ''
+    });
+  };
+
+  const submitEditSubsidy = async () => {
+    if (!editSubsidyForm.subsidyAmount || Number(editSubsidyForm.subsidyAmount) <= 0) {
+      alert('Enter a valid subsidy amount.');
+      return;
+    }
+    if (!editSubsidyForm.date) {
+      alert('Select a subsidy date.');
+      return;
+    }
+    setSavingEditSubsidy(true);
+    try {
+      await adminDataService.updateDswSubsidy(editSubsidyForm.id, {
+        wing: editSubsidyForm.wing,
+        subsidyAmount: Number(editSubsidyForm.subsidyAmount),
+        date: editSubsidyForm.date,
+        mealPeriod: editSubsidyForm.mealPeriod,
+        notes: editSubsidyForm.notes.trim() || null,
+      });
+      setMessage('DSW subsidy updated successfully and bills recalculated.');
+      setError('');
+      setEditingSubsidy(null);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingEditSubsidy(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -227,8 +361,8 @@ export default function BillingManagement() {
         {user?.role === 'super_admin' && <button onClick={unlockPeriod}>Emergency Unlock</button>}
       </section>
 
-      <div className="billing-management-layout is-tabbed-card">
-        <div className="financial-card billing-control-card">
+      <div className="billing-management-layout is-tabbed-card" style={{ gridTemplateColumns: '1fr', width: '100%', maxWidth: '800px', margin: '0 auto 1.5rem' }}>
+        <div className="financial-card billing-control-card" style={{ width: '100%', boxSizing: 'border-box' }}>
           <nav className="billing-tabs">
             <button
               type="button"
@@ -265,10 +399,20 @@ export default function BillingManagement() {
                 </label>
               </div>
               <div className="billing-control-footer">
-                <div className="inline-actions">
+                <div className="inline-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <button className="primary-action" type="submit" disabled={savingService}>
                     {savingService ? 'Saving...' : 'Save Service Bill'}
                   </button>
+                  {hasServiceBill && (
+                    <button
+                      type="button"
+                      className="danger-action"
+                      onClick={deleteServiceBill}
+                      disabled={savingService}
+                    >
+                      Delete Service Bill
+                    </button>
+                  )}
                   <button type="button" onClick={exportCsv}>CSV</button>
                   <button type="button" onClick={exportExcel}>Excel</button>
                   <button type="button" onClick={exportPdf}>PDF</button>
@@ -343,6 +487,72 @@ export default function BillingManagement() {
                 >
                   {savingSubsidy ? 'Applying...' : 'Save Subsidy'}
                 </button>
+              </div>
+
+              {/* Applied DSW Subsidies List */}
+              <div className="applied-subsidies-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--primary)' }}>
+                  Applied DSW Subsidies for {filters.month}/{filters.year}
+                </h3>
+                <div className="table-wrap" style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
+                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', minWidth: '720px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                        <th style={{ padding: '0.5rem', textAlign: 'left' }}>Date</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'left' }}>Wing</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'left' }}>Meal</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'right' }}>Total Subsidy</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'center' }}>Students</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'right' }}>Per Student</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'left' }}>Notes</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'center' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dswSubsidies.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" style={{ textAlign: 'center', padding: '1rem', color: 'var(--muted)' }}>
+                            No applied DSW subsidies found for this period.
+                          </td>
+                        </tr>
+                      ) : (
+                        dswSubsidies.map((sub) => (
+                          <tr key={sub.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '0.5rem', textAlign: 'left' }}>{sub.date}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'left' }}>{sub.wing}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'left', textTransform: 'capitalize' }}>{sub.mealPeriod}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: '600' }}>{formatCurrency(sub.subsidyAmount)}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'center' }}>{sub.eligibleStudentCount}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', color: '#047857', fontWeight: '600' }}>{formatCurrency(sub.perStudentSubsidy)}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'left', color: 'var(--muted)', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sub.notes || ''}>
+                              {sub.notes || '-'}
+                            </td>
+                            <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-xs"
+                                  style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', height: 'auto', minHeight: '0' }}
+                                  onClick={() => openEditSubsidy(sub)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger-action"
+                                  style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', borderRadius: '4px', height: 'auto', minHeight: '0' }}
+                                  onClick={() => deleteSubsidy(sub.id)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -424,6 +634,76 @@ export default function BillingManagement() {
           <p style={{ margin: 0, color: 'var(--muted)', lineHeight: 1.6 }}>
             This will distribute <strong>{formatCurrency(Number(subsidyForm.subsidyAmount || 0))}</strong> across all meal-active students in the <strong>{subsidyForm.wing}</strong> wing for <strong>{subsidyForm.date}</strong> during <strong style={{ textTransform: 'capitalize' }}>{subsidyForm.mealPeriod}</strong>.
           </p>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(editingSubsidy)}
+        onClose={() => !savingEditSubsidy && setEditingSubsidy(null)}
+        title="Edit DSW Subsidy"
+        actions={(
+          <>
+            <Button variant="secondary" onClick={() => setEditingSubsidy(null)} disabled={savingEditSubsidy}>Cancel</Button>
+            <Button onClick={submitEditSubsidy} disabled={savingEditSubsidy}>
+              {savingEditSubsidy ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </>
+        )}
+      >
+        <div style={{ display: 'grid', gap: '0.85rem' }}>
+          <label className="billing-control-field">
+            <strong>Wing</strong>
+            {!user?.wing ? (
+              <select
+                value={editSubsidyForm.wing}
+                onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, wing: e.target.value })}
+              >
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
+            ) : (
+              <input value={`${user.wing} Wing`} disabled className="field-control" style={{ background: '#f1f5f9' }} />
+            )}
+          </label>
+          <label className="billing-control-field">
+            <strong>Subsidy Amount</strong>
+            <input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={editSubsidyForm.subsidyAmount}
+              onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, subsidyAmount: e.target.value })}
+              required
+            />
+          </label>
+          <label className="billing-control-field">
+            <strong>Date</strong>
+            <input
+              type="date"
+              value={editSubsidyForm.date}
+              onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, date: e.target.value })}
+              required
+            />
+          </label>
+          <label className="billing-control-field">
+            <strong>Meal Period</strong>
+            <select
+              value={editSubsidyForm.mealPeriod}
+              onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, mealPeriod: e.target.value })}
+            >
+              <option value="breakfast">Breakfast</option>
+              <option value="lunch">Lunch</option>
+              <option value="dinner">Dinner</option>
+            </select>
+          </label>
+          <label className="billing-control-field">
+            <strong>Notes / Description (Optional)</strong>
+            <input
+              value={editSubsidyForm.notes}
+              onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, notes: e.target.value })}
+              placeholder="Optional notes"
+            />
+          </label>
         </div>
       </Modal>
     </div>
