@@ -30,6 +30,7 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
     public DbSet<BillingPeriodUnlockAudit> BillingPeriodUnlockAudits => Set<BillingPeriodUnlockAudit>();
     public DbSet<GlobalMealOverride> GlobalMealOverrides => Set<GlobalMealOverride>();
     public DbSet<GuestMealRequest> GuestMealRequests => Set<GuestMealRequest>();
+    public DbSet<Notice> Notices => Set<Notice>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +141,15 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.ToTable("notifications");
             entity.Property(x => x.Title).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(500).IsRequired();
+        });
+
+        modelBuilder.Entity<Notice>(entity =>
+        {
+            entity.ToTable("notices", table => table.HasCheckConstraint("ck_notices_wing", "\"TargetWing\" IN ('All','Male','Female')"));
+            entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Content).HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.TargetWing).HasMaxLength(20).IsRequired();
+            entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuditLog>(entity =>
