@@ -57,6 +57,7 @@ export default function MealManagement() {
     minutesUntilCutoff,
     tomorrowMenu,
     preferences,
+    moduleDays,
     clearErrorMessage,
     updatePreference,
     savePreferences,
@@ -122,6 +123,23 @@ export default function MealManagement() {
   }, [minutesUntilCutoff]);
   const handleSave = async () => {
     setPreferenceFeedback(null);
+
+    // Validation: if enabled and options exist, optionItemId must be chosen
+    for (const mealType of mealTypes) {
+      const pref = preferences[mealType.id] || { enabled: false, optionItemId: '' };
+      if (pref.enabled) {
+        const options = getMealOptions(mealType.id);
+        if (options && options.length > 0 && !pref.optionItemId) {
+          setPreferenceFeedback({
+            type: 'error',
+            title: 'Option Required',
+            message: `Please select an optional choice for ${mealType.label} before saving.`,
+          });
+          return;
+        }
+      }
+    }
+
     setIsSaving(true);
     try {
       await savePreferences();
@@ -159,10 +177,33 @@ export default function MealManagement() {
     }
   };
 
+  const getGuestMealOptions = (dateStr, mealPeriod) => {
+    if (!dateStr || !mealPeriod || !moduleDays || moduleDays.length === 0) return [];
+    const date = new Date(`${dateStr}T00:00:00`);
+    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayCode = dayNames[date.getDay()];
+    const dayData = moduleDays.find((d) => d.id === dayCode);
+    if (!dayData) return [];
+    const meal = dayData.meals.find((m) => m.mealTypeId === mealPeriod);
+    return meal?.optionalItems || [];
+  };
+
   const handleGuestSubmit = async (event) => {
     event.preventDefault();
     setGuestError('');
     setGuestMessage('');
+
+    // Validation for guest meal options
+    const guestOptions = getGuestMealOptions(guestForm.date, guestForm.mealPeriod);
+    if (guestOptions && guestOptions.length > 0) {
+      // Check tomorrow's preference for this meal period as the active choice
+      const pref = preferences[guestForm.mealPeriod] || { enabled: false, optionItemId: '' };
+      if (!pref.enabled || !pref.optionItemId) {
+        setGuestError(`To book a guest meal for ${mealTypes.find(m => m.id === guestForm.mealPeriod)?.label || guestForm.mealPeriod}, you must enable your own meal and select an optional choice for that period first.`);
+        return;
+      }
+    }
+
     setIsGuestSaving(true);
     try {
       await financialService.saveGuestMeal({

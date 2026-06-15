@@ -14,13 +14,13 @@ const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'Jul
 export default function DailyCost() {
   useDocumentTitle('Daily Cost');
   const { user, role } = useAuth();
-  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+  const isLockedToWing = role === 'male_wing_admin' || role === 'female_wing_admin' || role === 'student';
 
-  // Wing admins are locked to their wing gender; super_admin/admin default to 'All'
+  // Wing admins and students are locked to their wing gender; super_admin/admin default to 'All'
   const [filters, setFilters] = useState({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
-    gender: (role === 'male_wing_admin' || role === 'female_wing_admin') ? (user?.wing || 'All') : 'All',
+    gender: isLockedToWing ? (user?.wing || 'All') : 'All',
   });
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
@@ -63,7 +63,7 @@ export default function DailyCost() {
     return years;
   }, []);
 
-  const selectedWingLabel = isWingAdmin ? `${user?.wing} Wing` : filters.gender === 'All' ? 'All Wings' : `${filters.gender} Wing`;
+  const selectedWingLabel = isLockedToWing ? `${user?.wing} Wing` : filters.gender === 'All' ? 'All Wings' : `${filters.gender} Wing`;
 
   const moveMonth = (direction) => {
     setFilters((prev) => {
@@ -84,19 +84,167 @@ export default function DailyCost() {
     }));
   };
 
-  const flatRows = () => (report?.rows || []).map((row) => ({
-    Date: row.date,
-    'Breakfast Cost': row.breakfast.cost,
-    'B. Students': row.breakfast.students,
-    'B. /Head': row.breakfast.perHead,
-    'Lunch Cost': row.lunch.cost,
-    'L. Students': row.lunch.students,
-    'L. /Head': row.lunch.perHead,
-    'Dinner Cost': row.dinner.cost,
-    'D. Students': row.dinner.students,
-    'D. /Head': row.dinner.perHead,
-    'Total /Head': row.totalPerHead,
-  }));
+  const flatRows = () => (report?.rows || []).map((row) => {
+    const formatBreakdown = (meal) => {
+      if (!meal.options || meal.options.length === 0) return '';
+      return ' (' + meal.options.map(o => `${o.name}: ${formatCurrency(o.cost)} [${o.students} std, ${formatCurrency(o.perHead)}/h]`).join(', ') + ')';
+    };
+    const formatHeaderBreakdown = (meal) => {
+      if (!meal.options || meal.options.length === 0) return formatCurrency(meal.perHead);
+      return meal.options.map(o => `${o.name}: ${formatCurrency(o.perHead)}`).join(' | ');
+    };
+    return {
+      Date: row.date,
+      'Breakfast Cost': `${formatCurrency(row.breakfast.cost)}${formatBreakdown(row.breakfast)}`,
+      'B. Students': row.breakfast.students,
+      'B. /Head': formatHeaderBreakdown(row.breakfast),
+      'Lunch Cost': `${formatCurrency(row.lunch.cost)}${formatBreakdown(row.lunch)}`,
+      'L. Students': row.lunch.students,
+      'L. /Head': formatHeaderBreakdown(row.lunch),
+      'Dinner Cost': `${formatCurrency(row.dinner.cost)}${formatBreakdown(row.dinner)}`,
+      'D. Students': row.dinner.students,
+      'D. /Head': formatHeaderBreakdown(row.dinner),
+      'Total /Head': row.options && row.options.length > 0
+        ? row.options.map(o => `${o.name}: ${formatCurrency(o.perHead)}`).join(' | ')
+        : formatCurrency(row.totalPerHead),
+    };
+  });
+
+  const renderCardBreakdown = (meal, hasNoMainValues = false) => {
+    if (!meal.options || meal.options.length === 0) return null;
+    return (
+      <div className={`daily-cost-card-breakdown${hasNoMainValues ? ' no-border' : ''}`}>
+        {meal.options.map((opt) => (
+          <div key={opt.name} className="daily-cost-card-breakdown-row">
+            <span className="opt-name">{opt.name}:</span>
+            <span className="opt-val">
+              {formatCurrency(opt.cost)} ({formatCurrency(opt.perHead)}/h)
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const getBadgeClass = (name) => {
+    const lower = name.toLowerCase();
+    if (lower.includes('egg')) return 'egg';
+    if (lower.includes('fish')) return 'fish';
+    if (lower.includes('chicken')) return 'chicken';
+    if (lower.includes('common') || lower.includes('no option')) return 'common';
+    return 'other';
+  };
+
+  const renderStudentsCell = (meal) => {
+    return (
+      <td className="cell-student">
+        <strong style={{ fontSize: '1rem', color: '#1e293b' }}>{meal.students}</strong>
+        {meal.options && meal.options.length > 0 && (
+          <div className="daily-cost-option-badge-list">
+            {meal.options.map((opt) => (
+              <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
+                {opt.name}: <b>{opt.students}</b>
+              </span>
+            ))}
+          </div>
+        )}
+      </td>
+    );
+  };
+
+  const renderCostCell = (meal, cellClass) => {
+    return (
+      <td className={cellClass}>
+        <strong style={{ fontSize: '0.95rem' }}>{formatCurrency(meal.cost)}</strong>
+        {meal.options && meal.options.length > 0 && (
+          <div className="cell-option-breakdown">
+            {meal.options.map((opt) => (
+              <div key={opt.name} className="cell-option-row">
+                <span className="opt-name">{opt.name}:</span>
+                <span className="opt-val">{formatCurrency(opt.cost)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </td>
+    );
+  };
+
+  const renderPerHeadCell = (meal, cellClass) => {
+    return (
+      <td className={cellClass}>
+        {meal.options && meal.options.length > 0 ? (
+          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+            {meal.options.map((opt) => (
+              <div key={opt.name} className="cell-option-row">
+                <span className="opt-name">{opt.name}:</span>
+                <span className="opt-val" style={{ fontWeight: 700 }}>{formatCurrency(opt.perHead)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <strong>{formatCurrency(meal.perHead)}</strong>
+        )}
+      </td>
+    );
+  };
+
+  const renderRowTotalPerHeadCell = (row) => {
+    return (
+      <td className="cell-total">
+        {row.options && row.options.length > 0 ? (
+          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+            {row.options.map((opt) => (
+              <div key={opt.name} className="cell-option-row">
+                <span className="opt-name">{opt.name}:</span>
+                <span className="opt-val" style={{ fontWeight: 800 }}>{formatCurrency(opt.perHead)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <strong>{formatCurrency(row.totalPerHead)}</strong>
+        )}
+      </td>
+    );
+  };
+
+  const renderFooterPerHeadCell = (meal, cellClass) => {
+    return (
+      <td className={cellClass} style={{ fontWeight: '750' }}>
+        {meal.options && meal.options.length > 0 ? (
+          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+            {meal.options.map((opt) => (
+              <div key={opt.name} className="cell-option-row">
+                <span className="opt-name" style={{ color: 'inherit' }}>{opt.name}:</span>
+                <span className="opt-val" style={{ fontWeight: 800, color: 'inherit' }}>{formatCurrency(opt.perHead)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          formatCurrency(meal.perHead)
+        )}
+      </td>
+    );
+  };
+
+  const renderFooterGrandTotalCell = (grand) => {
+    return (
+      <td className="cell-total" style={{ fontWeight: '800' }}>
+        {grand.options && grand.options.length > 0 ? (
+          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+            {grand.options.map((opt) => (
+              <div key={opt.name} className="cell-option-row">
+                <span className="opt-name" style={{ color: 'inherit' }}>{opt.name}:</span>
+                <span className="opt-val" style={{ fontWeight: 900, color: 'inherit' }}>{formatCurrency(opt.perHead)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          formatCurrency(grand.perHead)
+        )}
+      </td>
+    );
+  };
 
   const excel = () => {
     const book = utils.book_new();
@@ -137,7 +285,7 @@ export default function DailyCost() {
           <p>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
         </div>
         <div className="header-actions">
-          {isWingAdmin ? (
+          {isLockedToWing ? (
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -249,23 +397,47 @@ export default function DailyCost() {
           <section className="daily-cost-cards">
             <div className="daily-cost-card breakfast">
               <span className="card-label">BREAKFAST</span>
-              <strong className="card-value">{formatCurrency(report.breakfast.cost)}</strong>
-              <p className="card-subtext">{formatCurrency(report.breakfast.perHead)} / head</p>
+              {(!report.breakfast.options || report.breakfast.options.length === 0) ? (
+                <>
+                  <strong className="card-value">{formatCurrency(report.breakfast.cost)}</strong>
+                  <p className="card-subtext">{formatCurrency(report.breakfast.perHead)} / head</p>
+                </>
+              ) : (
+                renderCardBreakdown(report.breakfast, true)
+              )}
             </div>
             <div className="daily-cost-card lunch">
               <span className="card-label">LUNCH</span>
-              <strong className="card-value">{formatCurrency(report.lunch.cost)}</strong>
-              <p className="card-subtext">{formatCurrency(report.lunch.perHead)} / head</p>
+              {(!report.lunch.options || report.lunch.options.length === 0) ? (
+                <>
+                  <strong className="card-value">{formatCurrency(report.lunch.cost)}</strong>
+                  <p className="card-subtext">{formatCurrency(report.lunch.perHead)} / head</p>
+                </>
+              ) : (
+                renderCardBreakdown(report.lunch, true)
+              )}
             </div>
             <div className="daily-cost-card dinner">
               <span className="card-label">DINNER</span>
-              <strong className="card-value">{formatCurrency(report.dinner.cost)}</strong>
-              <p className="card-subtext">{formatCurrency(report.dinner.perHead)} / head</p>
+              {(!report.dinner.options || report.dinner.options.length === 0) ? (
+                <>
+                  <strong className="card-value">{formatCurrency(report.dinner.cost)}</strong>
+                  <p className="card-subtext">{formatCurrency(report.dinner.perHead)} / head</p>
+                </>
+              ) : (
+                renderCardBreakdown(report.dinner, true)
+              )}
             </div>
             <div className="daily-cost-card grand-total">
               <span className="card-label">GRAND TOTAL</span>
-              <strong className="card-value">{formatCurrency(report.grandTotal.cost)}</strong>
-              <p className="card-subtext">{formatCurrency(report.grandTotal.perHead)} / head</p>
+              {(!report.grandTotal.options || report.grandTotal.options.length === 0) ? (
+                <>
+                  <strong className="card-value">{formatCurrency(report.grandTotal.cost)}</strong>
+                  <p className="card-subtext">{formatCurrency(report.grandTotal.perHead)} / head</p>
+                </>
+              ) : (
+                renderCardBreakdown(report.grandTotal, true)
+              )}
             </div>
           </section>
 
@@ -302,16 +474,16 @@ export default function DailyCost() {
                           <span className="date-label">{dateLabel}</span>
                         </div>
                       </td>
-                      <td className="cell-breakfast">{formatCurrency(row.breakfast.cost)}</td>
-                      <td className="cell-student">{row.breakfast.students}</td>
-                      <td className="cell-breakfast">{formatCurrency(row.breakfast.perHead)}</td>
-                      <td className="cell-lunch">{formatCurrency(row.lunch.cost)}</td>
-                      <td className="cell-student">{row.lunch.students}</td>
-                      <td className="cell-lunch">{formatCurrency(row.lunch.perHead)}</td>
-                      <td className="cell-dinner">{formatCurrency(row.dinner.cost)}</td>
-                      <td className="cell-student">{row.dinner.students}</td>
-                      <td className="cell-dinner">{formatCurrency(row.dinner.perHead)}</td>
-                      <td className="cell-total">{formatCurrency(row.totalPerHead)}</td>
+                      {renderCostCell(row.breakfast, 'cell-breakfast')}
+                      {renderStudentsCell(row.breakfast)}
+                      {renderPerHeadCell(row.breakfast, 'cell-breakfast')}
+                      {renderCostCell(row.lunch, 'cell-lunch')}
+                      {renderStudentsCell(row.lunch)}
+                      {renderPerHeadCell(row.lunch, 'cell-lunch')}
+                      {renderCostCell(row.dinner, 'cell-dinner')}
+                      {renderStudentsCell(row.dinner)}
+                      {renderPerHeadCell(row.dinner, 'cell-dinner')}
+                      {renderRowTotalPerHeadCell(row)}
                     </tr>
                   );
                 })}
@@ -321,14 +493,14 @@ export default function DailyCost() {
                   <td style={{ fontWeight: '700', color: '#1e293b' }}>TOTAL</td>
                   <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
-                  <td className="cell-breakfast" style={{ fontWeight: '700' }}>{formatCurrency(report.breakfast.perHead)}</td>
+                  {renderFooterPerHeadCell(report.breakfast, 'cell-breakfast')}
                   <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
-                  <td className="cell-lunch" style={{ fontWeight: '700' }}>{formatCurrency(report.lunch.perHead)}</td>
+                  {renderFooterPerHeadCell(report.lunch, 'cell-lunch')}
                   <td className="cell-student">-</td>
                   <td className="cell-student">-</td>
-                  <td className="cell-dinner" style={{ fontWeight: '700' }}>{formatCurrency(report.dinner.perHead)}</td>
-                  <td className="cell-total" style={{ fontWeight: '800' }}>{formatCurrency(report.grandTotal.perHead)}</td>
+                  {renderFooterPerHeadCell(report.dinner, 'cell-dinner')}
+                  {renderFooterGrandTotalCell(report.grandTotal)}
                 </tr>
               </tfoot>
             </table>

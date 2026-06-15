@@ -3838,4 +3838,126 @@ button {
   }
 }
 
+/* Daily Cost Option Breakdowns */
+.daily-cost-option-badge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+  margin-top: 0.3rem;
+}
 
+.daily-cost-option-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.daily-cost-option-badge.egg {
+  background-color: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.daily-cost-option-badge.fish {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
+}
+
+.daily-cost-option-badge.chicken {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.daily-cost-option-badge.common {
+  background-color: #f3f4f6;
+  color: #4b5563;
+  border-color: #e5e7eb;
+}
+
+.daily-cost-option-badge.other {
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  border-color: #e9d5ff;
+}
+
+.daily-cost-card-breakdown {
+  margin-top: 0.5rem;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.daily-cost-card-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.76rem;
+  color: #475569;
+}
+
+.daily-cost-card-breakdown-row .opt-name {
+  font-weight: 600;
+}
+
+.daily-cost-card-breakdown-row .opt-val {
+  color: #0f172a;
+  font-family: monospace;
+}
+
+.cell-option-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  margin-top: 0.2rem;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 0.2rem;
+}
+
+.cell-option-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  color: #64748b;
+}
+
+.cell-option-row .opt-name {
+  font-weight: 500;
+  text-align: left;
+}
+
+.cell-option-row .opt-val {
+  font-weight: 600;
+  color: #334155;
+  text-align: right;
+}
+
+/* Daily Cost Card Breakdown layout tweaks when main total/per-head is hidden */
+.daily-cost-card-breakdown.no-border {
+  border-top: none;
+  margin-top: 0.6rem;
+  padding-top: 0;
+  gap: 0.45rem;
+}
+
+.daily-cost-card-breakdown.no-border .daily-cost-card-breakdown-row {
+  font-size: 0.82rem;
+  color: #334155;
+  line-height: 1.4;
+}
+
+.daily-cost-card-breakdown.no-border .daily-cost-card-breakdown-row .opt-val {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}

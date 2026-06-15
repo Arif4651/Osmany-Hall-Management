@@ -65,6 +65,7 @@ export default function AppRouter() {
         <Route path="view-menu" element={<ViewMenu />} />
         <Route path="billing" element={<Billing />} />
         <Route path="payments" element={<Payments />} />
+        <Route path="daily-cost" element={<DailyCost />} />
       </Route>
 
       <Route

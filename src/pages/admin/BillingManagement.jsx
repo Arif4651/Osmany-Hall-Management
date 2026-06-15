@@ -115,42 +115,40 @@ export default function BillingManagement() {
   }, [filters, user?.wing]);
 
   const deleteServiceBill = async () => {
-    if (true) {
-      setSavingService(true);
-      setMessage("Deleting service bill, please wait...");
-      setError("");
-      try {
-        await adminDataService.deleteServiceBill({
-          month: parseInt(filters.month, 10),
-          year: parseInt(filters.year, 10)
-        });
-        setMessage('Service bill deleted successfully and bills recalculated.');
-        setError('');
-        setServiceAmount('');
-        setHasServiceBill(false);
-        await load();
-      } catch (err) {
-        setError(err.message);
-        setMessage("");
-      } finally {
-        setSavingService(false);
-      }
+    if (!window.confirm(`Are you sure you want to delete the service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
+    setSavingService(true);
+    setMessage("Deleting service bill, please wait...");
+    setError("");
+    try {
+      await adminDataService.deleteServiceBill({
+        month: parseInt(filters.month, 10),
+        year: parseInt(filters.year, 10)
+      });
+      setMessage('Service bill deleted successfully and bills recalculated.');
+      setError('');
+      setServiceAmount('');
+      setHasServiceBill(false);
+      await load();
+    } catch (err) {
+      setError(err.message);
+      setMessage("");
+    } finally {
+      setSavingService(false);
     }
   };
 
   const deleteSubsidy = async (id) => {
-    if (true) {
-      setMessage("Deleting DSW subsidy, please wait...");
+    if (!window.confirm("Are you sure you want to delete this DSW subsidy? This will recalculate all affected student bills.")) return;
+    setMessage("Deleting DSW subsidy, please wait...");
+    setError("");
+    try {
+      await adminDataService.deleteDswSubsidy(id);
+      setMessage("DSW subsidy deleted successfully and bills recalculated.");
       setError("");
-      try {
-        await adminDataService.deleteDswSubsidy(id);
-        setMessage("DSW subsidy deleted successfully and bills recalculated.");
-        setError("");
-        await load();
-      } catch (err) {
-        setError(err.message);
-        setMessage("");
-      }
+      await load();
+    } catch (err) {
+      setError(err.message);
+      setMessage("");
     }
   };
 

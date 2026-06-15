@@ -7,6 +7,7 @@ export const STUDENT_NAV_ITEMS = [
   { key: 'view-menu', label: 'View Menu', path: ROUTE_PATHS.studentViewMenu, icon: ClipboardList },
   { key: 'billing', label: 'Billing', path: ROUTE_PATHS.studentBilling, icon: Receipt },
   { key: 'payments', label: 'Payments', path: ROUTE_PATHS.studentPayments, icon: CreditCard },
+  { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.studentDailyCost, icon: CalendarDays },
 ];
 
 export const ADMIN_NAV_ITEMS = [

@@ -164,6 +164,12 @@ export default function Inventory() {
   const [editForm, setEditForm] = useState({ date: '', mealPeriod: 'breakfast', quantity: '', totalPrice: '' });
   const [deleteTransaction, setDeleteTransaction] = useState(null);
 
+  const [studentsCount, setStudentsCount] = useState(0);
+  const [loadingStudentsCount, setLoadingStudentsCount] = useState(false);
+
+  const [editStudentsCount, setEditStudentsCount] = useState(0);
+  const [loadingEditStudentsCount, setLoadingEditStudentsCount] = useState(false);
+
   const openEditTransactionModal = (t) => {
     setEditTransaction(t);
     setEditForm({
@@ -247,10 +253,66 @@ export default function Inventory() {
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
+  useEffect(() => {
+    if (activeTab === 'non-stock' && movement.itemId && movement.date && movement.mealPeriod) {
+      let active = true;
+      setLoadingStudentsCount(true);
+      adminDataService.getParticipantCount({
+        date: movement.date,
+        mealPeriod: movement.mealPeriod,
+        itemId: movement.itemId,
+        wing: gender
+      }).then(count => {
+        if (active) {
+          setStudentsCount(count);
+          setLoadingStudentsCount(false);
+        }
+      }).catch(err => {
+        console.error(err);
+        if (active) setLoadingStudentsCount(false);
+      });
+      return () => { active = false; };
+    } else {
+      setStudentsCount(0);
+    }
+  }, [activeTab, movement.itemId, movement.date, movement.mealPeriod, gender]);
+
+  useEffect(() => {
+    if (editTransaction && historyItem && !historyItem.isStored && editForm.date && editForm.mealPeriod) {
+      let active = true;
+      setLoadingEditStudentsCount(true);
+      adminDataService.getParticipantCount({
+        date: editForm.date,
+        mealPeriod: editForm.mealPeriod,
+        itemId: editTransaction.itemId,
+        wing: gender
+      }).then(count => {
+        if (active) {
+          setEditStudentsCount(count);
+          setLoadingEditStudentsCount(false);
+        }
+      }).catch(err => {
+        console.error(err);
+        if (active) setLoadingEditStudentsCount(false);
+      });
+      return () => { active = false; };
+    } else {
+      setEditStudentsCount(0);
+    }
+  }, [editTransaction, historyItem, editForm.date, editForm.mealPeriod, gender]);
+
   const storedItems = items.filter((item) => item.isStored);
   const optionItems = items.filter((item) => item.category === 'Options' && item.id !== itemForm.id);
   const pickerItems = activeTab === 'non-stock' ? items.filter((item) => !item.isStored) : storedItems;
-  const summaryItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(summarySearch.toLowerCase())), [items, summarySearch]);
+  const summaryItems = useMemo(() => {
+    let list = items;
+    if (activeTab === 'non-stock') {
+      list = items.filter(item => !item.isStored);
+    } else if (activeTab === 'in' || activeTab === 'out') {
+      list = items.filter(item => item.isStored);
+    }
+    return list.filter((item) => item.name.toLowerCase().includes(summarySearch.toLowerCase()));
+  }, [items, summarySearch, activeTab]);
   const visibleItems = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(itemSearch.toLowerCase())), [items, itemSearch]);
 
   const calcUnitPrice = useMemo(() => {
@@ -546,10 +608,27 @@ export default function Inventory() {
                     color: '#475569',
                     minWidth: '200px'
                   }}>
-                    <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
-                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
-                      ৳{formatNumber(calcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {items.find(x => x.id === movement.itemId)?.unit?.toUpperCase() || 'unit'}</span>
-                    </strong>
+                    {activeTab === 'non-stock' ? (
+                      <>
+                        <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Per Person Price</span>
+                        <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                          {loadingStudentsCount ? (
+                            <span style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 'normal' }}>Loading students...</span>
+                          ) : (
+                            <>
+                              ৳{formatNumber(studentsCount > 0 ? (Number(movement.totalPrice || 0) / studentsCount) : 0)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per person ({studentsCount} students)</span>
+                            </>
+                          )}
+                        </strong>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
+                        <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                          ৳{formatNumber(calcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {items.find(x => x.id === movement.itemId)?.unit?.toUpperCase() || 'unit'}</span>
+                        </strong>
+                      </>
+                    )}
                   </div>
                 </>
               )}
@@ -561,8 +640,17 @@ export default function Inventory() {
             <div className="stock-summary-search"><Search size={17} /><input placeholder="Search items..." value={summarySearch} onChange={(e) => setSummarySearch(e.target.value)} /></div>
             <div className="stock-summary-table-wrap">
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
-                <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                {activeTab === 'non-stock' ? (
+                  <>
+                    <thead><tr><th>Item name</th><th>Students number</th><th>Unit</th><th>Avrg price</th></tr></thead>
+                    <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{Math.round(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                  </>
+                ) : (
+                  <>
+                    <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
+                    <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                  </>
+                )}
               </table>
             </div>
           </aside>
@@ -733,7 +821,14 @@ export default function Inventory() {
                   </div>
                   <div className="stock-timeline-card-body">
                     <span>Qty: <strong>{t.transactionType === 'in' ? '+' : '-'}{formatNumber(t.quantity)} {historyItem?.unit?.toUpperCase()}</strong></span>
-                    <span>Unit: <strong>৳{formatNumber(t.rate || t.wacSnapshot || 0)}</strong></span>
+                    {historyItem && !historyItem.isStored ? (
+                      <>
+                        <span>Per Person: <strong>৳{formatNumber(t.rate || 0)}</strong></span>
+                        <span>Students: <strong>{t.participantCount ?? 0}</strong></span>
+                      </>
+                    ) : (
+                      <span>Unit: <strong>৳{formatNumber(t.rate || t.wacSnapshot || 0)}</strong></span>
+                    )}
                     <span>Total: <strong>৳{formatNumber(t.totalCost || 0)}</strong></span>
                   </div>
                 </div>
@@ -795,7 +890,7 @@ export default function Inventory() {
               />
             </label>
 
-            {editTransaction.transactionType === 'out' && historyItem?.isStored && (
+            {editTransaction.transactionType === 'out' && (
               <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
                 Meal
                 <select
@@ -850,10 +945,27 @@ export default function Inventory() {
                   fontSize: '0.85rem',
                   color: '#475569'
                 }}>
-                  <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
-                  <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
-                    ৳{formatNumber(editCalcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {historyItem?.unit?.toUpperCase() || 'unit'}</span>
-                  </strong>
+                  {historyItem && !historyItem.isStored ? (
+                    <>
+                      <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Per Person Price</span>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                        {loadingEditStudentsCount ? (
+                          <span style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 'normal' }}>Loading students...</span>
+                        ) : (
+                          <>
+                            ৳{formatNumber(editStudentsCount > 0 ? (Number(editForm.totalPrice || 0) / editStudentsCount) : 0)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per person ({editStudentsCount} students)</span>
+                          </>
+                        )}
+                      </strong>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Calculated Unit Price</span>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                        ৳{formatNumber(editCalcUnitPrice)} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>per {historyItem?.unit?.toUpperCase() || 'unit'}</span>
+                      </strong>
+                    </>
+                  )}
                 </div>
               </>
             )}

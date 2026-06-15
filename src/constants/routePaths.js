@@ -9,6 +9,7 @@ export const ROUTE_PATHS = {
   studentViewMenu: '/student/view-menu',
   studentBilling: '/student/billing',
   studentPayments: '/student/payments',
+  studentDailyCost: '/student/daily-cost',
   studentProfile: '/student/profile',
   studentNotifications: '/student/notifications',
 

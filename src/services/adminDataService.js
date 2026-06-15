@@ -2,6 +2,7 @@ import { apiRequest, toQueryString } from './apiClient';
 
 export const adminDataService = {
   getInventory: async (includeDeleted = false, wing) => apiRequest(`/inventory/items${toQueryString({ includeDeleted, wing })}`),
+  getParticipantCount: async ({ date, mealPeriod, itemId, wing }) => apiRequest(`/inventory/participant-count${toQueryString({ date, mealPeriod, itemId, wing })}`),
   createInventoryItem: async (payload) => apiRequest('/inventory/items', { method: 'POST', body: JSON.stringify(payload) }),
   updateInventoryItem: async (id, payload) => apiRequest(`/inventory/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteInventoryItem: async (id) => apiRequest(`/inventory/items/${id}`, { method: 'DELETE' }),
