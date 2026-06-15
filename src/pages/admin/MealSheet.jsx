@@ -223,22 +223,84 @@ export default function MealSheet() {
 
   const exportPdf = () => {
     const doc = new jsPDF();
-    doc.text(`Meal Sheet Report - ${date}`, 14, 15);
+    
+    // Title of the report
+    doc.setFontSize(16);
+    doc.setTextColor(20, 26, 122); // Cohesive brand blue
+    doc.text(`Meal Sheet Report`, 14, 15);
+    
+    // Sub-header info
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Date: ${date}  |  Total Students: ${filteredRows.length}`, 14, 21);
+
     const headers = [['Hall ID', 'Student ID', 'Student Name', 'Room No', 'Gender', 'Meals (B/L/D)', 'Guest Meals']];
-    const body = filteredRows.map((row) => [
-      row.hallId,
-      row.studentId,
-      row.name,
-      row.room,
-      row.gender,
-      `${row.breakfastOn ? `B${row.breakfastOptionName ? `:${row.breakfastOptionName}` : ''}` : '-'} / ${row.lunchOn ? `L${row.lunchOptionName ? `:${row.lunchOptionName}` : ''}` : '-'} / ${row.dinnerOn ? `D${row.dinnerOptionName ? `:${row.dinnerOptionName}` : ''}` : '-'}`,
-      formatGuestMeal(row) || '-'
-    ]);
-    autoTable(doc, {
-      startY: 22,
-      head: headers,
-      body: body
+    
+    const body = filteredRows.map((row) => {
+      // Format Meals nicely
+      const mealParts = [];
+      if (row.breakfastOn) {
+        mealParts.push(`Breakfast: ${row.breakfastOptionName || 'Standard'}`);
+      }
+      if (row.lunchOn) {
+        mealParts.push(`Lunch: ${row.lunchOptionName || 'Standard'}`);
+      }
+      if (row.dinnerOn) {
+        mealParts.push(`Dinner: ${row.dinnerOptionName || 'Standard'}`);
+      }
+      const mealsFormatted = mealParts.length > 0 ? mealParts.join('\n') : 'No meals';
+
+      // Format Guest Meals nicely
+      const guestParts = [];
+      if (row.breakfastGuestCount > 0) {
+        guestParts.push(`B: ${row.breakfastGuestCount} guest${row.breakfastGuestCount === 1 ? '' : 's'}`);
+      }
+      if (row.lunchGuestCount > 0) {
+        guestParts.push(`L: ${row.lunchGuestCount} guest${row.lunchGuestCount === 1 ? '' : 's'}`);
+      }
+      if (row.dinnerGuestCount > 0) {
+        guestParts.push(`D: ${row.dinnerGuestCount} guest${row.dinnerGuestCount === 1 ? '' : 's'}`);
+      }
+      const guestsFormatted = guestParts.length > 0 ? guestParts.join('\n') : 'None';
+
+      return [
+        row.hallId,
+        row.studentId,
+        row.name,
+        row.room || '-',
+        row.gender || '-',
+        mealsFormatted,
+        guestsFormatted
+      ];
     });
+
+    autoTable(doc, {
+      startY: 26,
+      head: headers,
+      body: body,
+      theme: 'striped',
+      styles: {
+        fontSize: 8.5,
+        cellPadding: 4,
+        valign: 'middle',
+        overflow: 'linebreak'
+      },
+      headStyles: {
+        fillColor: [32, 42, 122], // Cohesive brand blue #202a7a
+        textColor: [255, 255, 255],
+        fontStyle: 'bold'
+      },
+      columnStyles: {
+        0: { cellWidth: 16 }, // Hall ID
+        1: { cellWidth: 24 }, // Student ID
+        2: { cellWidth: 40 }, // Student Name
+        3: { cellWidth: 16 }, // Room No
+        4: { cellWidth: 16 }, // Gender
+        5: { cellWidth: 42 }, // Meals (B/L/D)
+        6: { cellWidth: 28 }  // Guest Meals
+      }
+    });
+
     doc.save(`meal-sheet-${date}.pdf`);
   };
 
