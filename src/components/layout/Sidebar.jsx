@@ -11,6 +11,12 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const devProfileItem = navItems.find((item) => item.key === 'dev-profile');
+  const filteredNavItems = navItems.filter(
+    (item) => item.key !== 'dev-profile' && (!item.superAdminOnly || user?.role === 'super_admin')
+  );
+  const DevIcon = devProfileItem?.icon;
+
   const handleLogout = () => {
     logout();
     navigate(ROUTE_PATHS.login, { replace: true });
@@ -33,7 +39,7 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
         </div>
 
         <nav className="sidebar-nav" aria-label={`${role} navigation`}>
-          {navItems.filter((item) => !item.superAdminOnly || user?.role === 'super_admin').map((item) => {
+          {filteredNavItems.map((item) => {
             const Icon = item.icon;
             const isNoticeBoard = item.key === 'notice-board';
             const showBadge = isNoticeBoard && role === 'student' && hasNewNotices;
@@ -42,7 +48,7 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
               <NavLink
                 key={item.key}
                 to={item.path}
-                className={({ isActive }) => clsx('nav-item', { 'is-active': isActive })}
+                className={({ isActive }) => clsx('nav-item', { 'is-active': isActive }, item.className)}
                 onClick={() => {
                   if (isNoticeBoard) {
                     setHasNewNotices(false);
@@ -59,6 +65,20 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
             );
           })}
         </nav>
+
+        {devProfileItem && (
+          <div className="sidebar-dev-profile">
+            <NavLink
+              to={devProfileItem.path}
+              className={({ isActive }) => clsx('nav-item dev-profile-nav', { 'is-active': isActive })}
+              onClick={onClose}
+              title={devProfileItem.label}
+            >
+              {DevIcon && <DevIcon size={14} />}
+              <span>{devProfileItem.label}</span>
+            </NavLink>
+          </div>
+        )}
 
         <div className="sidebar-account">
           <p>{user?.fullName || 'Authenticated User'}</p>

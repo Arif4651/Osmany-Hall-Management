@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopHeader from './TopHeader';
 import { useAppShell } from '../../context/AppShellContext';
@@ -90,6 +90,11 @@ export default function AppLayout({ role, navItems }) {
         </main>
         <footer className="app-footer">
           <p>{`${BRANDING.hallName} · ${BRANDING.universityShortName}`}</p>
+          {role === 'admin' && (
+            <Link to={ROUTE_PATHS.adminDeveloperProfile} className="footer-dev-link">
+              Developer Profile
+            </Link>
+          )}
           <small>{BRANDING.motto}</small>
         </footer>
       </div>

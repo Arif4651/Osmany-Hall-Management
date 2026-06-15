@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone } from 'lucide-react';
+import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone, Terminal } from 'lucide-react';
 import { ROUTE_PATHS } from './routePaths';
 
 export const STUDENT_NAV_ITEMS = [
@@ -9,6 +9,7 @@ export const STUDENT_NAV_ITEMS = [
   { key: 'payments', label: 'Payments', path: ROUTE_PATHS.studentPayments, icon: CreditCard },
   { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.studentDailyCost, icon: CalendarDays },
   { key: 'notice-board', label: 'Notice Board', path: ROUTE_PATHS.studentNoticeBoard, icon: Megaphone },
+  { key: 'dev-profile', label: 'Developer Profile', path: ROUTE_PATHS.studentDeveloperProfile, icon: Terminal, className: 'dev-profile-nav' },
 ];
 
 export const ADMIN_NAV_ITEMS = [
