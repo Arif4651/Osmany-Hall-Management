@@ -7,7 +7,7 @@ import { BRANDING } from '../../constants/branding';
 import { useAuth } from '../../context/AuthContext';
 import { ROUTE_PATHS } from '../../constants/routePaths';
 
-export default function Sidebar({ role, navItems, isOpen, onClose }) {
+export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices, setHasNewNotices }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -35,16 +35,26 @@ export default function Sidebar({ role, navItems, isOpen, onClose }) {
         <nav className="sidebar-nav" aria-label={`${role} navigation`}>
           {navItems.filter((item) => !item.superAdminOnly || user?.role === 'super_admin').map((item) => {
             const Icon = item.icon;
+            const isNoticeBoard = item.key === 'notice-board';
+            const showBadge = isNoticeBoard && role === 'student' && hasNewNotices;
+
             return (
               <NavLink
                 key={item.key}
                 to={item.path}
                 className={({ isActive }) => clsx('nav-item', { 'is-active': isActive })}
-                onClick={onClose}
+                onClick={() => {
+                  if (isNoticeBoard) {
+                    setHasNewNotices(false);
+                    localStorage.setItem('lastNoticeBoardVisit', new Date().toISOString());
+                  }
+                  onClose();
+                }}
                 title={item.label}
               >
                 <Icon size={18} />
                 <span>{item.label}</span>
+                {showBadge && <span className="nav-badge-dot" />}
               </NavLink>
             );
           })}

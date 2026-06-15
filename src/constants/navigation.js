@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards } from 'lucide-react';
+import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone } from 'lucide-react';
 import { ROUTE_PATHS } from './routePaths';
 
 export const STUDENT_NAV_ITEMS = [
@@ -8,6 +8,7 @@ export const STUDENT_NAV_ITEMS = [
   { key: 'billing', label: 'Billing', path: ROUTE_PATHS.studentBilling, icon: Receipt },
   { key: 'payments', label: 'Payments', path: ROUTE_PATHS.studentPayments, icon: CreditCard },
   { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.studentDailyCost, icon: CalendarDays },
+  { key: 'notice-board', label: 'Notice Board', path: ROUTE_PATHS.studentNoticeBoard, icon: Megaphone },
 ];
 
 export const ADMIN_NAV_ITEMS = [
@@ -19,5 +20,6 @@ export const ADMIN_NAV_ITEMS = [
   { key: 'due', label: 'Due Bill', path: ROUTE_PATHS.adminDue, icon: WalletCards },
   { key: 'payments', label: 'Payment Verification', path: ROUTE_PATHS.adminPayments, icon: ShieldCheck },
   { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.adminDailyCost, icon: CalendarDays },
+  { key: 'notice-board', label: 'Notice Board', path: ROUTE_PATHS.adminNoticeBoard, icon: Megaphone },
   { key: 'settings', label: 'Settings', path: ROUTE_PATHS.adminSettings, icon: Settings, superAdminOnly: true },
 ];

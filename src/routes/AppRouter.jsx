@@ -18,6 +18,8 @@ import Inventory from '../pages/admin/Inventory';
 import DueBill from '../pages/admin/DueBill';
 import DailyCost from '../pages/admin/DailyCost';
 import AdminSettings from '../pages/admin/AdminSettings';
+import AdminNoticeBoard from '../pages/admin/AdminNoticeBoard';
+import StudentNoticeBoard from '../pages/student/StudentNoticeBoard';
 import { ADMIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '../constants/navigation';
 import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
 import { ProtectedRoute, PublicOnlyRoute } from './RouteGuards';
@@ -66,6 +68,7 @@ export default function AppRouter() {
         <Route path="billing" element={<Billing />} />
         <Route path="payments" element={<Payments />} />
         <Route path="daily-cost" element={<DailyCost />} />
+        <Route path="notice-board" element={<StudentNoticeBoard />} />
       </Route>
 
       <Route
@@ -85,6 +88,7 @@ export default function AppRouter() {
         <Route path="inventory" element={<Inventory />} />
         <Route path="due" element={<DueBill />} />
         <Route path="daily-cost" element={<DailyCost />} />
+        <Route path="notice-board" element={<AdminNoticeBoard />} />
         <Route path="settings" element={<ProtectedRoute role="super_admin"><AdminSettings /></ProtectedRoute>} />
       </Route>
 

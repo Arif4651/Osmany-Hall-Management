@@ -10,6 +10,7 @@ export const ROUTE_PATHS = {
   studentBilling: '/student/billing',
   studentPayments: '/student/payments',
   studentDailyCost: '/student/daily-cost',
+  studentNoticeBoard: '/student/notice-board',
   studentProfile: '/student/profile',
   studentNotifications: '/student/notifications',
 
@@ -21,6 +22,7 @@ export const ROUTE_PATHS = {
   adminInventory: '/admin/inventory',
   adminDue: '/admin/due',
   adminDailyCost: '/admin/daily-cost',
+  adminNoticeBoard: '/admin/notice-board',
   adminSettings: '/admin/settings',
   notFound: '*',
 };
