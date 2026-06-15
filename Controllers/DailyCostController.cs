@@ -167,7 +167,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                 var participantPreferences = participants.Select(student =>
                 {
                     var selectedOptionId = preferences
-                        .Where(x => x.StudentId == student.Id && x.MealPeriod == period && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+                        .Where(x => x.StudentId == student.Id && x.MealPeriod == period && x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
                         .OrderByDescending(x => x.EffectiveFrom)
                         .FirstOrDefault()?.OptionItemId;
                     return new { Student = student, OptionId = selectedOptionId };

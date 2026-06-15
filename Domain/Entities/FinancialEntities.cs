@@ -30,6 +30,7 @@ public sealed class MealPreferenceHistory : Entity
     public InventoryItem? OptionItem { get; set; }
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
+    public DayOfWeek DayOfWeek { get; set; }
 }
 
 public sealed class MealStatusHistory : Entity

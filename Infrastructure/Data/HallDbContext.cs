@@ -194,9 +194,9 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
                 table.HasCheckConstraint("ck_meal_preference_period", "\"MealPeriod\" IN ('breakfast','lunch','dinner')");
                 table.HasCheckConstraint("ck_meal_preference_dates", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" >= \"EffectiveFrom\"");
             });
-            entity.HasIndex(x => new { x.StudentId, x.MealPeriod, x.EffectiveFrom });
-            entity.HasIndex(x => new { x.StudentId, x.MealPeriod, x.EffectiveTo });
-            entity.HasIndex(x => new { x.StudentId, x.MealPeriod }).IsUnique().HasFilter("\"EffectiveTo\" IS NULL");
+            entity.HasIndex(x => new { x.StudentId, x.MealPeriod, x.DayOfWeek, x.EffectiveFrom });
+            entity.HasIndex(x => new { x.StudentId, x.MealPeriod, x.DayOfWeek, x.EffectiveTo });
+            entity.HasIndex(x => new { x.StudentId, x.MealPeriod, x.DayOfWeek }).IsUnique().HasFilter("\"EffectiveTo\" IS NULL");
             entity.Property(x => x.MealPeriod).HasMaxLength(20).IsRequired();
             entity.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.OptionItem).WithMany().HasForeignKey(x => x.OptionItemId).OnDelete(DeleteBehavior.Restrict);

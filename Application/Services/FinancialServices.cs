@@ -91,7 +91,7 @@ public sealed class InventoryTransactionService(
                         }
 
                         var selected = preferences
-                            .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
+                            .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.DayOfWeek == transaction.Date.DayOfWeek && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
                             .OrderByDescending(x => x.EffectiveFrom)
                             .FirstOrDefault()?.OptionItemId;
 
@@ -178,8 +178,10 @@ public sealed class MealHistoryService(HallDbContext db)
             throw new InvalidOperationException("The selected option item is not active.");
         }
 
+        var targetDayOfWeek = effectiveFrom.DayOfWeek;
+
         var current = await db.MealPreferenceHistory
-            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveTo == null)
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.DayOfWeek == targetDayOfWeek && x.EffectiveTo == null)
             .ToListAsync(cancellationToken);
         if (current.Any(x => x.EffectiveFrom > effectiveFrom))
             throw new InvalidOperationException("A newer meal preference already exists.");
@@ -196,6 +198,7 @@ public sealed class MealHistoryService(HallDbContext db)
             MealPeriod = mealPeriod,
             OptionItemId = optionItemId,
             EffectiveFrom = effectiveFrom,
+            DayOfWeek = targetDayOfWeek,
         });
     }
 
@@ -340,8 +343,10 @@ public sealed class MealHistoryService(HallDbContext db)
             throw new InvalidOperationException("The selected option item is not active.");
         }
 
+        var targetDayOfWeek = targetDate.DayOfWeek;
+
         var allOpen = await db.MealPreferenceHistory
-            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveTo == null)
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.DayOfWeek == targetDayOfWeek && x.EffectiveTo == null)
             .ToListAsync(cancellationToken);
 
         var hasFuture = allOpen.Any(x => x.EffectiveFrom > targetDate);
@@ -356,6 +361,7 @@ public sealed class MealHistoryService(HallDbContext db)
         var bounded = await db.MealPreferenceHistory
             .Where(x => x.StudentId == studentId
                 && x.MealPeriod == mealPeriod
+                && x.DayOfWeek == targetDayOfWeek
                 && x.EffectiveFrom == targetDate
                 && x.EffectiveTo == targetDate)
             .FirstOrDefaultAsync(cancellationToken);
@@ -367,7 +373,7 @@ public sealed class MealHistoryService(HallDbContext db)
         }
 
         var sameStart = await db.MealPreferenceHistory
-            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.EffectiveFrom == targetDate)
+            .Where(x => x.StudentId == studentId && x.MealPeriod == mealPeriod && x.DayOfWeek == targetDayOfWeek && x.EffectiveFrom == targetDate)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (sameStart is not null)
@@ -394,6 +400,7 @@ public sealed class MealHistoryService(HallDbContext db)
                 OptionItemId = optionItemId,
                 EffectiveFrom = targetDate,
                 EffectiveTo = targetDate,
+                DayOfWeek = targetDayOfWeek,
             });
 
             // Restore original preference from targetDate+1 only if no future record already covers it.
@@ -408,6 +415,7 @@ public sealed class MealHistoryService(HallDbContext db)
                     OptionItemId = originalOptionItemId,
                     EffectiveFrom = prefRestoreDate,
                     EffectiveTo = null,
+                    DayOfWeek = targetDayOfWeek,
                 });
             }
         }
@@ -420,6 +428,7 @@ public sealed class MealHistoryService(HallDbContext db)
                 OptionItemId = optionItemId,
                 EffectiveFrom = targetDate,
                 EffectiveTo = targetDate,
+                DayOfWeek = targetDayOfWeek,
             });
         }
     }

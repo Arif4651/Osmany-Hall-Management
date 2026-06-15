@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("HallBackend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8ea12fe358d5efdce4db3ce7d3352b7c5d3f5e81")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b28513f113095645a93d6554416eb1b4beedbfad")]
 [assembly: System.Reflection.AssemblyProductAttribute("HallBackend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HallBackend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

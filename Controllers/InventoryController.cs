@@ -238,7 +238,7 @@ public sealed class InventoryController(
             .Where(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
             .ToListAsync(cancellationToken);
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+            .Where(x => x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
             .ToListAsync(cancellationToken);
 
         var count = students.Count(student =>
@@ -265,7 +265,7 @@ public sealed class InventoryController(
             }
 
             var selected = preferences
-                .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+                .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
                 .OrderByDescending(x => x.EffectiveFrom)
                 .FirstOrDefault()?.OptionItemId;
 
