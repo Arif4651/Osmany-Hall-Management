@@ -84,31 +84,64 @@ export default function DailyCost() {
     }));
   };
 
-  const flatRows = () => (report?.rows || []).map((row) => {
-    const formatBreakdown = (meal) => {
-      if (!meal.options || meal.options.length === 0) return '';
-      return ' (' + meal.options.map(o => `${o.name}: ${formatCurrency(o.cost)} [${o.students} std, ${formatCurrency(o.perHead)}/h]`).join(', ') + ')';
-    };
-    const formatHeaderBreakdown = (meal) => {
-      if (!meal.options || meal.options.length === 0) return formatCurrency(meal.perHead);
-      return meal.options.map(o => `${o.name}: ${formatCurrency(o.perHead)}`).join(' | ');
-    };
-    return {
-      Date: row.date,
-      'Breakfast Cost': `${formatCurrency(row.breakfast.cost)}${formatBreakdown(row.breakfast)}`,
-      'B. Students': row.breakfast.students,
-      'B. /Head': formatHeaderBreakdown(row.breakfast),
-      'Lunch Cost': `${formatCurrency(row.lunch.cost)}${formatBreakdown(row.lunch)}`,
-      'L. Students': row.lunch.students,
-      'L. /Head': formatHeaderBreakdown(row.lunch),
-      'Dinner Cost': `${formatCurrency(row.dinner.cost)}${formatBreakdown(row.dinner)}`,
-      'D. Students': row.dinner.students,
-      'D. /Head': formatHeaderBreakdown(row.dinner),
-      'Total /Head': row.options && row.options.length > 0
-        ? row.options.map(o => `${o.name}: ${formatCurrency(o.perHead)}`).join(' | ')
-        : formatCurrency(row.totalPerHead),
-    };
-  });
+  const flatRows = () => {
+    const fmt = (amount) => `Tk ${Number(amount || 0).toFixed(2)}`;
+
+    const rowsData = (report?.rows || []).map((row) => {
+      const formatBreakdown = (meal) => {
+        if (!meal.options || meal.options.length === 0) return '';
+        return ' (' + meal.options.map(o => `${o.name}: ${fmt(o.cost)} [${o.students} std, ${fmt(o.perHead)}/h]`).join(', ') + ')';
+      };
+      const formatHeaderBreakdown = (meal) => {
+        if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
+        return meal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ');
+      };
+      return {
+        Date: row.date,
+        'Breakfast Cost': `${fmt(row.breakfast.cost)}${formatBreakdown(row.breakfast)}`,
+        'B. Students': row.breakfast.students,
+        'B. /Head': formatHeaderBreakdown(row.breakfast),
+        'Lunch Cost': `${fmt(row.lunch.cost)}${formatBreakdown(row.lunch)}`,
+        'L. Students': row.lunch.students,
+        'L. /Head': formatHeaderBreakdown(row.lunch),
+        'Dinner Cost': `${fmt(row.dinner.cost)}${formatBreakdown(row.dinner)}`,
+        'D. Students': row.dinner.students,
+        'D. /Head': formatHeaderBreakdown(row.dinner),
+        'Total /Head': row.options && row.options.length > 0
+          ? row.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ')
+          : fmt(row.totalPerHead),
+      };
+    });
+
+    if (report && rowsData.length > 0) {
+      const formatTotalBreakdown = (meal) => {
+        if (!meal.options || meal.options.length === 0) return '';
+        return ' (' + meal.options.map(o => `${o.name}: ${fmt(o.cost)} [${o.students} std, ${fmt(o.perHead)}/h]`).join(', ') + ')';
+      };
+      const formatTotalHeaderBreakdown = (meal) => {
+        if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
+        return meal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ');
+      };
+
+      rowsData.push({
+        Date: 'TOTAL / AVERAGE',
+        'Breakfast Cost': `${fmt(report.breakfast.cost)}${formatTotalBreakdown(report.breakfast)}`,
+        'B. Students': report.breakfast.students,
+        'B. /Head': formatTotalHeaderBreakdown(report.breakfast),
+        'Lunch Cost': `${fmt(report.lunch.cost)}${formatTotalBreakdown(report.lunch)}`,
+        'L. Students': report.lunch.students,
+        'L. /Head': formatTotalHeaderBreakdown(report.lunch),
+        'Dinner Cost': `${fmt(report.dinner.cost)}${formatTotalBreakdown(report.dinner)}`,
+        'D. Students': report.dinner.students,
+        'D. /Head': formatTotalHeaderBreakdown(report.dinner),
+        'Total /Head': report.grandTotal.options && report.grandTotal.options.length > 0
+          ? report.grandTotal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ')
+          : fmt(report.grandTotal.perHead),
+      });
+    }
+
+    return rowsData;
+  };
 
   const renderCardBreakdown = (meal, hasNoMainValues = false) => {
     if (!meal.options || meal.options.length === 0) return null;
@@ -253,9 +286,28 @@ export default function DailyCost() {
   };
 
   const pdf = () => {
-    const doc = new jsPDF({ orientation: 'landscape' });
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    
+    // Add visual page header
+    doc.setFontSize(16);
+    doc.setTextColor(23, 50, 100);
+    doc.text(`Daily Cost Report - ${selectedWingLabel}`, 40, 40);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 110, 130);
+    doc.text(`Month: ${currentMonthLabel} | Exported: ${new Date().toLocaleDateString('en-GB')}`, 40, 55);
+
     const data = flatRows();
-    autoTable(doc, { head: [Object.keys(data[0] || {})], body: data.map(Object.values) });
+    autoTable(doc, {
+      startY: 70,
+      head: [Object.keys(data[0] || {})],
+      body: data.map(Object.values),
+      styles: { fontSize: 7, cellPadding: 4 },
+      headStyles: { fillColor: [23, 50, 100], textColor: [255, 255, 255] },
+      alternateRowStyles: { fillColor: [247, 249, 253] },
+      theme: 'grid'
+    });
+    
     doc.save(`daily-cost-${filters.year}-${filters.month}.pdf`);
   };
 
