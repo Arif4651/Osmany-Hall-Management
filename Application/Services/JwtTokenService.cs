@@ -40,6 +40,6 @@ public sealed class JwtTokenService(IConfiguration configuration)
         return new LoginResponse(
             new JwtSecurityTokenHandler().WriteToken(token),
             expiresAt,
-            new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Wing, user.StudentId, user.MustChangePassword));
+            new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword));
     }
 }

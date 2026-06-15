@@ -39,49 +39,113 @@ public sealed class InventoryTransactionService(
             .ThenBy(x => x.Id)
             .ToListAsync(cancellationToken);
 
-        decimal quantity = 0m;
-        decimal wac = 0m;
-        foreach (var transaction in transactions)
-        {
-            if (transaction.Quantity <= 0m) throw new InvalidOperationException("Quantity must be greater than zero.");
-            
-            if (!item.IsStored)
-            {
-                transaction.WacSnapshot = transaction.Rate;
-                transaction.TotalCost = transaction.Quantity * transaction.Rate;
-            }
-            else if (transaction.TransactionType == "in")
-            {
-                if (transaction.Rate < 0m) throw new InvalidOperationException("Rate cannot be negative.");
-                var nextQuantity = quantity + transaction.Quantity;
-                wac = FinancialMath.WeightedAverageCost(quantity, wac, transaction.Quantity, transaction.Rate);
-                quantity = nextQuantity;
-                transaction.WacSnapshot = wac;
-                transaction.TotalCost = transaction.Quantity * transaction.Rate;
-            }
-            else
-            {
-                if (transaction.Quantity > quantity)
-                {
-                    throw new InvalidOperationException($"Stock-out quantity exceeds available stock for {item.Item} on {transaction.Date:yyyy-MM-dd}.");
-                }
-                transaction.Rate = wac;
-                transaction.WacSnapshot = wac;
-                transaction.TotalCost = transaction.Quantity * wac;
-                quantity -= transaction.Quantity;
-            }
-        }
-
         if (!item.IsStored)
         {
-            item.CurrentStockQuantity = 0m;
-            item.CurrentWac = 0m;
-            item.Stock = 0m;
-            item.AveragePrice = 0m;
-            item.TotalStockValue = 0m;
+            if (transactions.Count > 0)
+            {
+                var minDate = transactions.Min(x => x.Date);
+                var maxDate = transactions.Max(x => x.Date);
+                var students = await db.Students.AsNoTracking().Where(x => x.Gender == item.Wing).ToListAsync(cancellationToken);
+                var overrides = await db.GlobalMealOverrides.AsNoTracking()
+                    .Where(x => x.Wing == item.Wing && x.EffectiveFrom <= maxDate && x.EffectiveTo >= minDate)
+                    .ToListAsync(cancellationToken);
+                var statuses = await db.MealStatusHistory.AsNoTracking()
+                    .Where(x => x.EffectiveFrom <= maxDate && (x.EffectiveTo == null || x.EffectiveTo >= minDate))
+                    .ToListAsync(cancellationToken);
+                var preferences = await db.MealPreferenceHistory.AsNoTracking()
+                    .Where(x => x.EffectiveFrom <= maxDate && (x.EffectiveTo == null || x.EffectiveTo >= minDate))
+                    .ToListAsync(cancellationToken);
+
+                foreach (var transaction in transactions)
+                {
+                    if (transaction.Quantity <= 0m) throw new InvalidOperationException("Quantity must be greater than zero.");
+                    if (string.IsNullOrWhiteSpace(transaction.MealPeriod))
+                    {
+                        transaction.ParticipantCount = 0;
+                        transaction.Rate = 0m;
+                        transaction.WacSnapshot = 0m;
+                        continue;
+                    }
+
+                    var participantsCount = students.Count(student =>
+                    {
+                        var globalOverride = overrides
+                            .Where(x => x.Wing == student.Gender
+                                && x.MealPeriod == transaction.MealPeriod
+                                && x.EffectiveFrom <= transaction.Date
+                                && x.EffectiveTo >= transaction.Date)
+                            .OrderByDescending(x => x.EffectiveFrom)
+                            .FirstOrDefault();
+
+                        bool on;
+                        if (globalOverride is not null)
+                        {
+                            on = globalOverride.IsOn;
+                        }
+                        else
+                        {
+                            on = statuses
+                                .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
+                                .OrderByDescending(x => x.EffectiveFrom)
+                                .FirstOrDefault()?.IsOn ?? false;
+                        }
+
+                        var selected = preferences
+                            .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
+                            .OrderByDescending(x => x.EffectiveFrom)
+                            .FirstOrDefault()?.OptionItemId;
+
+                        return FinancialMath.IsChargeParticipant(
+                            item.Category,
+                            item.Id,
+                            item.LinkedOptionId,
+                            on,
+                            selected);
+                    });
+
+                    transaction.ParticipantCount = participantsCount;
+                    transaction.Rate = participantsCount > 0 ? (transaction.TotalCost / participantsCount) : 0m;
+                    transaction.WacSnapshot = transaction.Rate;
+                }
+            }
+
+            var lastTx = transactions.LastOrDefault();
+            item.CurrentStockQuantity = lastTx != null ? (decimal)(lastTx.ParticipantCount ?? 0) : 0m;
+            item.CurrentWac = lastTx != null ? lastTx.Rate : 0m;
+            item.Stock = item.CurrentStockQuantity;
+            item.AveragePrice = item.CurrentWac;
+            item.TotalStockValue = transactions.Sum(x => x.TotalCost);
         }
         else
         {
+            decimal quantity = 0m;
+            decimal wac = 0m;
+            foreach (var transaction in transactions)
+            {
+                if (transaction.Quantity <= 0m) throw new InvalidOperationException("Quantity must be greater than zero.");
+                
+                if (transaction.TransactionType == "in")
+                {
+                    if (transaction.Rate < 0m) throw new InvalidOperationException("Rate cannot be negative.");
+                    var nextQuantity = quantity + transaction.Quantity;
+                    wac = FinancialMath.WeightedAverageCost(quantity, wac, transaction.Quantity, transaction.Rate);
+                    quantity = nextQuantity;
+                    transaction.WacSnapshot = wac;
+                    transaction.TotalCost = transaction.Quantity * transaction.Rate;
+                }
+                else
+                {
+                    if (transaction.Quantity > quantity)
+                    {
+                        throw new InvalidOperationException($"Stock-out quantity exceeds available stock for {item.Item} on {transaction.Date:yyyy-MM-dd}.");
+                    }
+                    transaction.Rate = wac;
+                    transaction.WacSnapshot = wac;
+                    transaction.TotalCost = transaction.Quantity * wac;
+                    quantity -= transaction.Quantity;
+                }
+            }
+
             item.CurrentStockQuantity = quantity;
             item.CurrentWac = wac;
             item.Stock = quantity;
@@ -377,7 +441,10 @@ public sealed record MonthlyBillResult(
     decimal DueBill,
     decimal TotalBill);
 
-public sealed class BillingCalculationService(HallDbContext db, BillingPeriodService periods)
+public sealed class BillingCalculationService(
+    HallDbContext db,
+    BillingPeriodService periods,
+    InventoryTransactionService inventory)
 {
     public async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(int month, int year, CancellationToken cancellationToken)
     {
@@ -389,6 +456,19 @@ public sealed class BillingCalculationService(HallDbContext db, BillingPeriodSer
 
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
+
+        var nonStoredItemIds = await db.StockTransactions.AsNoTracking()
+            .Include(x => x.Item)
+            .Where(x => x.Date >= from && x.Date <= to && x.Item != null && !x.Item.IsStored)
+            .Select(x => x.ItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var itemId in nonStoredItemIds)
+        {
+            await inventory.RebuildItemAsync(itemId, cancellationToken);
+        }
+
         var students = await db.Students.AsNoTracking().ToListAsync(cancellationToken);
         var transactions = await db.StockTransactions.AsNoTracking()
             .Include(x => x.Item)

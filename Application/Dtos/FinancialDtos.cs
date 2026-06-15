@@ -7,7 +7,7 @@ public sealed record SaveInventoryItemRequest(string Name, string Category, stri
 public sealed record StockTransactionDto(
     Guid Id, Guid ItemId, string ItemName, string Wing, string Category, string TransactionType,
     DateOnly Date, string? MealPeriod, decimal Quantity, decimal Rate, decimal WacSnapshot,
-    decimal TotalCost, string? Note, bool IsLocked);
+    decimal TotalCost, string? Note, bool IsLocked, int? ParticipantCount = null);
 public sealed record SaveStockTransactionRequest(
     Guid ItemId, string TransactionType, DateOnly Date, string? MealPeriod,
     decimal Quantity, decimal? Rate, string? Note, string? Wing, decimal? TotalPrice = null);
@@ -49,13 +49,30 @@ public sealed record DueRowDto(
 public sealed record SaveDueAdjustmentRequest(
     Guid StudentId, int BillingMonth, int BillingYear, decimal AdjustedAmount, string? Note);
 
-public sealed record DailyCostMealDto(decimal Cost, int Students, decimal PerHead);
+public sealed record DailyCostOptionBreakdownDto(Guid OptionId, string Name, decimal Cost, int Students, decimal PerHead);
+
+public sealed record DailyCostMealDto(
+    decimal Cost,
+    int Students,
+    decimal PerHead,
+    IReadOnlyList<DailyCostOptionBreakdownDto> Options);
+
 public sealed record DailyCostRowDto(
-    DateOnly Date, DailyCostMealDto Breakfast, DailyCostMealDto Lunch,
-    DailyCostMealDto Dinner, decimal TotalPerHead);
+    DateOnly Date,
+    DailyCostMealDto Breakfast,
+    DailyCostMealDto Lunch,
+    DailyCostMealDto Dinner,
+    decimal TotalPerHead,
+    IReadOnlyList<DailyCostOptionBreakdownDto> Options);
+
 public sealed record DailyCostReportDto(
-    int Month, int Year, string Gender, IReadOnlyList<DailyCostRowDto> Rows,
-    DailyCostMealDto Breakfast, DailyCostMealDto Lunch, DailyCostMealDto Dinner,
+    int Month,
+    int Year,
+    string Gender,
+    IReadOnlyList<DailyCostRowDto> Rows,
+    DailyCostMealDto Breakfast,
+    DailyCostMealDto Lunch,
+    DailyCostMealDto Dinner,
     DailyCostMealDto GrandTotal);
 
 public sealed record StudentSearchResultDto(Guid Id, string Name, string RollNumber, string HallId, string StudentId);

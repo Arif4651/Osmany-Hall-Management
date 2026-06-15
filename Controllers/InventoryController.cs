@@ -217,6 +217,69 @@ public sealed class InventoryController(
         }
     }
 
+    [HttpGet("participant-count")]
+    public async Task<ActionResult<int>> GetParticipantCount(
+        [FromQuery] DateOnly date,
+        [FromQuery] string mealPeriod,
+        [FromQuery] Guid itemId,
+        [FromQuery] string? wing = null,
+        CancellationToken cancellationToken = default)
+    {
+        var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+        var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(x => x.Id == itemId, cancellationToken);
+        if (item is null) return NotFound("Item not found");
+        if (item.Wing != selectedWing) return Forbid();
+
+        var students = await db.Students.AsNoTracking().Where(x => x.Gender == selectedWing).ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= date && x.EffectiveTo >= date)
+            .ToListAsync(cancellationToken);
+        var statuses = await db.MealStatusHistory.AsNoTracking()
+            .Where(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+            .ToListAsync(cancellationToken);
+        var preferences = await db.MealPreferenceHistory.AsNoTracking()
+            .Where(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+            .ToListAsync(cancellationToken);
+
+        var count = students.Count(student =>
+        {
+            var globalOverride = overrides
+                .Where(x => x.Wing == student.Gender
+                    && x.MealPeriod == mealPeriod
+                    && x.EffectiveFrom <= date
+                    && x.EffectiveTo >= date)
+                .OrderByDescending(x => x.EffectiveFrom)
+                .FirstOrDefault();
+
+            bool on;
+            if (globalOverride is not null)
+            {
+                on = globalOverride.IsOn;
+            }
+            else
+            {
+                on = statuses
+                    .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+                    .OrderByDescending(x => x.EffectiveFrom)
+                    .FirstOrDefault()?.IsOn ?? false;
+            }
+
+            var selected = preferences
+                .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+                .OrderByDescending(x => x.EffectiveFrom)
+                .FirstOrDefault()?.OptionItemId;
+
+            return FinancialMath.IsChargeParticipant(
+                item.Category,
+                item.Id,
+                item.LinkedOptionId,
+                on,
+                selected);
+        });
+
+        return Ok(count);
+    }
+
     [HttpGet("transactions")]
     [HttpGet("ledger")]
     public async Task<IReadOnlyList<StockTransactionDto>> GetTransactions(
@@ -281,6 +344,7 @@ public sealed class InventoryController(
                 MealPeriod = updatedRequest.TransactionType == "out" ? updatedRequest.MealPeriod : null,
                 Quantity = updatedRequest.Quantity,
                 Rate = updatedRequest.Rate ?? 0m,
+                TotalCost = isStockInOrNonStock ? (updatedRequest.TotalPrice ?? 0m) : 0m,
                 Note = updatedRequest.Note?.Trim(),
                 CreatedById = currentUser.UserId,
             };
@@ -345,6 +409,7 @@ public sealed class InventoryController(
             row.MealPeriod = updatedRequest.TransactionType == "out" ? updatedRequest.MealPeriod : null;
             row.Quantity = updatedRequest.Quantity;
             row.Rate = updatedRequest.Rate ?? 0m;
+            row.TotalCost = isStockInOrNonStock ? (updatedRequest.TotalPrice ?? 0m) : 0m;
             row.Note = updatedRequest.Note?.Trim();
             row.UpdatedById = currentUser.UserId;
             await db.SaveChangesAsync(cancellationToken);
@@ -433,5 +498,5 @@ public sealed class InventoryController(
     private static StockTransactionDto ToDto(StockTransaction x, bool locked)
         => new(x.Id, x.ItemId, x.Item?.Item ?? string.Empty, x.Item?.Wing ?? "Male", x.Item?.Category ?? string.Empty,
             x.TransactionType, x.Date, x.MealPeriod, x.Quantity, x.Rate, x.WacSnapshot,
-            x.TotalCost, x.Note, locked);
+            x.TotalCost, x.Note, locked, x.ParticipantCount);
 }

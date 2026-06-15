@@ -15,12 +15,14 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         var identifier = request.Email.Trim().ToUpperInvariant();
-        var user = await db.Users.FirstOrDefaultAsync(
-            x => (x.NormalizedEmail == identifier || x.NormalizedUserName == identifier)
-                && (x.Role == request.Role || (request.Role == "admin"
-                    && (x.Role == "super_admin" || x.Role == "admin"
-                        || x.Role == "male_wing_admin" || x.Role == "female_wing_admin"))),
-            cancellationToken);
+        var user = await db.Users
+            .Include(x => x.Student)
+            .FirstOrDefaultAsync(
+                x => (x.NormalizedEmail == identifier || x.NormalizedUserName == identifier)
+                    && (x.Role == request.Role || (request.Role == "admin"
+                        && (x.Role == "super_admin" || x.Role == "admin"
+                            || x.Role == "male_wing_admin" || x.Role == "female_wing_admin"))),
+                cancellationToken);
 
         if (user is null || !user.IsActive)
         {
@@ -87,12 +89,14 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
             return Unauthorized();
         }
 
-        var user = await db.Users.FindAsync([id], cancellationToken);
+        var user = await db.Users
+            .Include(x => x.Student)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (user is null)
         {
             return Unauthorized();
         }
 
-        return new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Wing, user.StudentId, user.MustChangePassword);
+        return new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword);
     }
 }

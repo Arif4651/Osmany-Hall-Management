@@ -18,6 +18,7 @@ public sealed class StockTransaction : Entity
     public AppUser? CreatedBy { get; set; }
     public Guid? UpdatedById { get; set; }
     public AppUser? UpdatedBy { get; set; }
+    public int? ParticipantCount { get; set; }
 }
 
 public sealed class MealPreferenceHistory : Entity
