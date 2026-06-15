@@ -153,6 +153,7 @@ export default function Inventory() {
   const [itemForm, setItemForm] = useState(emptyItem);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [message, setMessage] = useState('');
+  const [modalError, setModalError] = useState('');
   const [saving, setSaving] = useState(false);
 
   // History ledger state variables
@@ -171,6 +172,7 @@ export default function Inventory() {
   const [loadingEditStudentsCount, setLoadingEditStudentsCount] = useState(false);
 
   const openEditTransactionModal = (t) => {
+    setModalError('');
     setEditTransaction(t);
     setEditForm({
       date: t.date,
@@ -183,13 +185,14 @@ export default function Inventory() {
   const handleSaveEditTransaction = async (e) => {
     e.preventDefault();
     if (money(editForm.quantity).lessThanOrEqualTo(0)) {
-      return alert('Quantity must be greater than zero.');
+      return setModalError('Quantity must be greater than zero.');
     }
     const isStockInOrNonStock = editTransaction.transactionType === 'in' || (editTransaction.transactionType === 'out' && !historyItem.isStored);
     if (isStockInOrNonStock && (!editForm.totalPrice || money(editForm.totalPrice).lessThanOrEqualTo(0))) {
-      return alert('Total Purchase Price must be greater than zero.');
+      return setModalError('Total Purchase Price must be greater than zero.');
     }
     setSaving(true);
+    setModalError('');
     try {
       const payload = {
         itemId: editTransaction.itemId,
@@ -210,7 +213,7 @@ export default function Inventory() {
       }
       setMessage('Transaction updated successfully.');
     } catch (error) {
-      setMessage(error.message || 'Unable to update transaction.');
+      setModalError(error.message || 'Unable to update transaction.');
     } finally {
       setSaving(false);
     }
@@ -219,6 +222,7 @@ export default function Inventory() {
   const handleDeleteTransaction = async () => {
     if (!deleteTransaction) return;
     setSaving(true);
+    setModalError('');
     try {
       await adminDataService.deleteInventoryMovement(deleteTransaction.id);
       setDeleteTransaction(null);
@@ -229,7 +233,7 @@ export default function Inventory() {
       }
       setMessage('Transaction deleted successfully.');
     } catch (error) {
-      setMessage(error.message || 'Unable to delete transaction.');
+      setModalError(error.message || 'Unable to delete transaction.');
     } finally {
       setSaving(false);
     }
@@ -378,11 +382,12 @@ export default function Inventory() {
     setLedgerTransactions([]);
     setLedgerLoading(true);
     setLedgerTab('all');
+    setModalError('');
     try {
       const data = await adminDataService.getInventoryLedger({ itemId: item.id, wing: gender });
       setLedgerTransactions(Array.isArray(data) ? data : []);
     } catch (error) {
-      setMessage(error.message || 'Unable to load stock history.');
+      setModalError(error.message || 'Unable to load stock history.');
     } finally {
       setLedgerLoading(false);
     }
@@ -450,6 +455,7 @@ export default function Inventory() {
   };
 
   const openItemModal = (item = null) => {
+    setModalError('');
     setItemForm(item ? {
       id: item.id, name: item.name, unit: item.unit, category: item.category,
       linkedOptionId: item.linkedOptionId || '', isStored: item.isStored,
@@ -460,10 +466,11 @@ export default function Inventory() {
   const saveItem = async (event) => {
     event.preventDefault();
     if (itemForm.category === 'Others' && !itemForm.linkedOptionId) {
-      setMessage('Please select which optional item this item belongs to.');
+      setModalError('Please select which optional item this item belongs to.');
       return;
     }
     setSaving(true);
+    setModalError('');
     try {
       const payload = {
         name: itemForm.name,
@@ -477,14 +484,16 @@ export default function Inventory() {
       else await adminDataService.createInventoryItem(payload);
       setItemModal(null);
       await loadItems();
+      setMessage(itemForm.id ? 'Item updated successfully.' : 'Item created successfully.');
     } catch (error) {
-      setMessage(error.message || 'Unable to save item.');
+      setModalError(error.message || 'Unable to save item.');
     } finally {
       setSaving(false);
     }
   };
 
   const openDeleteDialog = (item, force = false) => {
+    setModalError('');
     setDeleteTarget({ item, force });
   };
 
@@ -492,14 +501,14 @@ export default function Inventory() {
     if (!deleteTarget?.item) return;
     try {
       setSaving(true);
-      setMessage('');
+      setModalError('');
       if (deleteTarget.force) await adminDataService.forceDeleteInventoryItem(deleteTarget.item.id);
       else await adminDataService.deleteInventoryItem(deleteTarget.item.id);
       setDeleteTarget(null);
       await loadItems();
       setMessage(deleteTarget.force ? 'Item was permanently deleted.' : 'Item deleted successfully.');
     } catch (error) {
-      setMessage(error.message || 'Unable to delete item.');
+      setModalError(error.message || 'Unable to delete item.');
     } finally {
       setSaving(false);
     }
@@ -659,6 +668,7 @@ export default function Inventory() {
 
       <Modal isOpen={Boolean(itemModal)} onClose={() => setItemModal(null)} title={itemModal === 'edit' ? 'Edit Item' : 'New Item'} actions={<><Button variant="secondary" onClick={() => setItemModal(null)}>Cancel</Button><Button type="submit" form="stock-item-form" disabled={saving}>Save</Button></>}>
         <form id="stock-item-form" className="stock-item-form" onSubmit={saveItem}>
+          {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
           <label>Name<input value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
           <label>Unit<input value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} required /></label>
           <label>Category
@@ -703,6 +713,7 @@ export default function Inventory() {
           </>
         )}
       >
+        {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
         <div className="stock-delete-dialog">
           <div className={`stock-delete-dialog__icon ${deleteTarget?.force ? 'is-force' : ''}`}>
             {deleteTarget?.force ? <Flame size={20} /> : <Trash2 size={20} />}
@@ -770,6 +781,7 @@ export default function Inventory() {
         }
       >
         <div className="stock-history-timeline" style={{ minWidth: 'min(620px, 90vw)', maxHeight: '60vh', overflowY: 'auto' }}>
+          {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
           {ledgerLoading ? (
             <div className="stock-loading">Loading timeline ledger...</div>
           ) : filteredTimeline.length === 0 ? (
@@ -804,7 +816,7 @@ export default function Inventory() {
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); setDeleteTransaction(t); }}
+                            onClick={(e) => { e.stopPropagation(); setModalError(''); setDeleteTransaction(t); }}
                             style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#b91c1c', display: 'inline-flex', alignItems: 'center' }}
                             title="Delete transaction"
                           >
@@ -852,6 +864,7 @@ export default function Inventory() {
           </>
         )}
       >
+        {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
         <div className="stock-delete-dialog">
           <div className="stock-delete-dialog__icon">
             <Trash2 size={20} />
@@ -879,6 +892,7 @@ export default function Inventory() {
       >
         {editTransaction && (
           <form id="stock-edit-transaction-form" className="stock-item-form" onSubmit={handleSaveEditTransaction}>
+            {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
             <label style={{ display: 'grid', gap: '0.4rem', color: '#626c7f' }}>
               Date
               <input

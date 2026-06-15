@@ -466,7 +466,12 @@ export default function AdminMealManagement() {
 
       <nav className="admin-meal-tabs">
         <button type="button" className={activeSection === 'menu' ? 'is-active' : ''} onClick={() => setActiveSection('menu')}>Weekly Menu</button>
-        <button type="button" className={activeSection === 'counts' ? 'is-active' : ''} onClick={() => setActiveSection('counts')}>Daily Meal Count</button>
+        <button type="button" className={activeSection === 'counts' ? 'is-active' : ''} onClick={() => {
+          setActiveSection('counts');
+          if (countDate > tomorrowLocal()) {
+            setCountDate(tomorrowLocal());
+          }
+        }}>Daily Meal Count</button>
         <button type="button" className={activeSection === 'controls' ? 'is-active' : ''} onClick={() => setActiveSection('controls')}>Global Meal Controls</button>
       </nav>
 
@@ -500,10 +505,24 @@ export default function AdminMealManagement() {
             <div className="admin-meal-section-head">
               <div><h2>Daily Meal Count</h2><p>Complete meal participation and option-choice details.</p></div>
               <div className="admin-meal-count-actions">
-                <label><CalendarDays size={16} /><input type="date" value={countDate} onChange={(event) => setCountDate(event.target.value)} /></label>
+                <label>
+                  <CalendarDays size={16} />
+                  <input
+                    type="date"
+                    value={countDate}
+                    max={tomorrowLocal()}
+                    onChange={(event) => setCountDate(event.target.value)}
+                  />
+                </label>
                 <Button variant="secondary" onClick={() => loadOperations()}><Users size={16} /> Refresh</Button>
               </div>
             </div>
+            {countDate > tomorrowLocal() && (
+              <div className="admin-meal-message" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #ffeeba', backgroundColor: '#fff3cd', color: '#856404', margin: '0 0 1rem 0' }}>
+                <AlertCircle size={18} />
+                <span>Meal counts for dates beyond tomorrow are not displayed as student choices are subject to change.</span>
+              </div>
+            )}
             <div className="admin-meal-count-grid">
               {(counts?.meals || []).map((meal) => {
                 const onPercent = meal.totalStudents ? Math.round((meal.enabledStudents / meal.totalStudents) * 100) : 0;
