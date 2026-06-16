@@ -11,24 +11,16 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
     {
         if (await db.Users.AnyAsync(cancellationToken))
         {
-            if (!await db.Users.AnyAsync(x => x.Role == Roles.SuperAdmin, cancellationToken))
-            {
-                var existingDatabaseSuperAdmin = User("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "Super Administrator");
-                existingDatabaseSuperAdmin.PasswordHash = passwords.Hash("Admin@123");
-                db.Users.Add(existingDatabaseSuperAdmin);
-            }
+            await EnsureUserExistsAsync("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "super1234", "Super Administrator", null, cancellationToken);
+            await EnsureUserExistsAsync("Male Wing Administrator", "admin.male", "admin.male@mist.ac.bd", Roles.MaleWingAdmin, "male1234", "Male Wing Administrator", "Male", cancellationToken);
+            await EnsureUserExistsAsync("Female Wing Administrator", "admin.female", "admin.female@mist.ac.bd", Roles.FemaleWingAdmin, "female1234", "Female Wing Administrator", "Female", cancellationToken);
+
             var legacyAdmins = await db.Users.Where(x => x.Role == Roles.Admin).ToListAsync(cancellationToken);
             foreach (var legacyAdmin in legacyAdmins)
             {
                 legacyAdmin.Role = Roles.MaleWingAdmin;
                 legacyAdmin.Wing = "Male";
                 legacyAdmin.Designation = "Male Wing Administrator";
-            }
-            if (!await db.Users.AnyAsync(x => x.Role == Roles.FemaleWingAdmin, cancellationToken))
-            {
-                var existingDatabaseFemaleAdmin = User("Female Wing Administrator", "femaleadmin", "femaleadmin@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
-                existingDatabaseFemaleAdmin.PasswordHash = passwords.Hash("Admin@123");
-                db.Users.Add(existingDatabaseFemaleAdmin);
             }
             if (!await db.PaymentCategories.AnyAsync(cancellationToken))
             {
@@ -199,18 +191,17 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
         }
 
         // Admin user only - students will be added dynamically through the admin panel
-        var admin = User("Male Wing Administrator", "admin", "admin@mist.ac.bd", Roles.MaleWingAdmin, "Male Wing Administrator", "Male");
-        admin.PasswordHash = passwords.Hash("Admin@123");
+        var admin = User("Male Wing Administrator", "admin.male", "admin.male@mist.ac.bd", Roles.MaleWingAdmin, "Male Wing Administrator", "Male");
+        admin.PasswordHash = passwords.Hash("male1234");
         var superAdmin = User("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "Super Administrator");
-        superAdmin.PasswordHash = passwords.Hash("Admin@123");
-        var femaleAdmin = User("Female Wing Administrator", "femaleadmin", "femaleadmin@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
-        femaleAdmin.PasswordHash = passwords.Hash("Admin@123");
+        superAdmin.PasswordHash = passwords.Hash("super1234");
+        var femaleAdmin = User("Female Wing Administrator", "admin.female", "admin.female@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
+        femaleAdmin.PasswordHash = passwords.Hash("female1234");
 
         db.Users.AddRange(admin, femaleAdmin, superAdmin);
         db.PaymentCategories.AddRange(
             new PaymentCategory { Name = "bKash" },
             new PaymentCategory { Name = "Bank Transfer" });
-
         var mealTypes = new[]
         {
             new MealType { Code = "breakfast", Label = "Breakfast", SortOrder = 1, StartsAt = new TimeOnly(7, 30), EndsAt = new TimeOnly(9, 0) },
@@ -278,6 +269,30 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
         db.AuditLogs.AddRange(
             new AuditLog { Actor = "Admin User", Action = "System initialized", Module = "System", Date = DateOnly.FromDateTime(DateTime.Today) });
 
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureUserExistsAsync(string fullName, string userName, string email, string role, string plainPassword, string designation, string? wing, CancellationToken cancellationToken)
+    {
+        var normalizedEmail = email.Trim().ToUpperInvariant();
+        var user = await db.Users.FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (user == null)
+        {
+            user = User(fullName, userName, email, role, designation, wing);
+            user.PasswordHash = passwords.Hash(plainPassword);
+            db.Users.Add(user);
+        }
+        else
+        {
+            user.FullName = fullName;
+            user.UserName = userName;
+            user.NormalizedUserName = userName.Trim().ToUpperInvariant();
+            user.Role = role;
+            user.Designation = designation;
+            user.Wing = wing;
+            user.PasswordHash = passwords.Hash(plainPassword);
+            db.Entry(user).State = EntityState.Modified;
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
