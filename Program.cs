@@ -78,6 +78,16 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
 
+//added new fro render..
+var port = Environment.GetEnvironmentVariable("PORT");
+
+if (!string.IsNullOrEmpty(port))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
+
+//untill
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
