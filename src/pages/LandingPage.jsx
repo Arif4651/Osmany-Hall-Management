@@ -4,13 +4,9 @@ import Button from '../components/ui/Button';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 import mistLogo from '../assets/images/mist-logo.png';
 import { BRAND_COPY, BRANDING } from '../constants/branding';
-import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
   useDocumentTitle('Home');
-
-  const { isAuthenticated, role } = useAuth();
-  const dashboardPath = role === 'admin' ? '/admin/dashboard' : '/student/dashboard';
 
   return (
     <div className="landing-page">
@@ -21,19 +17,11 @@ export default function LandingPage() {
           <p>{BRAND_COPY.heroDescription}</p>
 
           <div className="hero-actions">
-            {isAuthenticated ? (
-              <Link to={dashboardPath}>
-                <Button>
-                  Continue to Portal <ArrowRight size={16} />
-                </Button>
-              </Link>
-            ) : (
-              <Link to="/login">
-                <Button>
-                  Student Login <ArrowRight size={16} />
-                </Button>
-              </Link>
-            )}
+            <Link to="/login">
+              <Button>
+                Student Login <ArrowRight size={16} />
+              </Button>
+            </Link>
           </div>
         </div>
 
@@ -44,11 +32,6 @@ export default function LandingPage() {
           <small>{BRANDING.motto}</small>
         </aside>
       </section>
-
-
-
-
-
     </div>
   );
 }
