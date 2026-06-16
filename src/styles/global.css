@@ -200,13 +200,82 @@ button {
   gap: 0.36rem;
 }
 
-.sidebar-account p {
+.sidebar-profile-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  text-align: left;
+  padding: 0.52rem 0.58rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  color: inherit;
+  transition: all var(--transition-fast);
+  gap: 0.5rem;
+}
+
+.sidebar-profile-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(184, 201, 232, 0.18);
+}
+
+.sidebar-profile-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.sidebar-profile-btn .profile-info {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.sidebar-profile-btn p {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #f8fbff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-profile-btn small {
+  color: #b9cae9;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.change-password-icon {
+  color: #b9cae9;
+  opacity: 0.5;
+  flex-shrink: 0;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.sidebar-profile-btn:hover .change-password-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.sidebar-profile-static {
+  padding: 0.52rem 0.58rem;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.sidebar-profile-static p {
+  margin: 0;
   font-size: 0.86rem;
   font-weight: 600;
   color: #f8fbff;
 }
 
-.sidebar-account small {
+.sidebar-profile-static small {
   color: #b9cae9;
   font-size: 0.75rem;
 }
@@ -219,6 +288,12 @@ button {
 
 .sidebar-account .btn:hover {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.app-shell.is-sidebar-collapsed .sidebar-profile-btn,
+.app-shell.is-sidebar-collapsed .sidebar-profile-static,
+.app-shell.is-sidebar-collapsed .change-password-icon {
+  display: none;
 }
 
 .nav-item {

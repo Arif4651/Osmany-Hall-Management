@@ -1,15 +1,18 @@
+import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { X, LogOut } from 'lucide-react';
+import { X, LogOut, Key } from 'lucide-react';
 import Button from '../ui/Button';
 import mistLogo from '../../assets/images/mist-logo.png';
 import { BRANDING } from '../../constants/branding';
 import { useAuth } from '../../context/AuthContext';
 import { ROUTE_PATHS } from '../../constants/routePaths';
+import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices, setHasNewNotices }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const devProfileItem = navItems.find((item) => item.key === 'dev-profile');
   const filteredNavItems = navItems.filter(
@@ -81,8 +84,25 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
         )}
 
         <div className="sidebar-account">
-          <p>{user?.fullName || 'Authenticated User'}</p>
-          <small>{user?.designation || 'Osmany Hall Member'}</small>
+          {role === 'student' ? (
+            <button
+              type="button"
+              className="sidebar-profile-btn"
+              onClick={() => setIsChangePasswordOpen(true)}
+              title="Change Password"
+            >
+              <div className="profile-info">
+                <p>{user?.fullName || 'Authenticated User'}</p>
+                <small>{user?.designation || 'Osmany Hall Member'}</small>
+              </div>
+              <Key size={14} className="change-password-icon" />
+            </button>
+          ) : (
+            <div className="sidebar-profile-static">
+              <p>{user?.fullName || 'Authenticated User'}</p>
+              <small>{user?.designation || 'Osmany Hall Member'}</small>
+            </div>
+          )}
           <Button variant="ghost" onClick={handleLogout}>
             <LogOut size={14} />
             <span className="sidebar-signout-label">Sign Out</span>
@@ -92,6 +112,11 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
       {isOpen ? (
         <button type="button" aria-label="Close sidebar" className="sidebar-overlay" onClick={onClose} />
       ) : null}
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </>
   );
 }
