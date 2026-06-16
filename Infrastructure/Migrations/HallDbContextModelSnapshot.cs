@@ -3,20 +3,17 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace HallBackend.Infrastructure.Data.Migrations
+namespace HallBackend.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    [Migration("20260615081104_AddParticipantCount")]
-    partial class AddParticipantCount
+    partial class HallDbContextModelSnapshot : ModelSnapshot
     {
-        /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -720,6 +717,9 @@ namespace HallBackend.Infrastructure.Data.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
                     b.Property<DateOnly>("EffectiveFrom")
                         .HasColumnType("date");
 
@@ -744,13 +744,14 @@ namespace HallBackend.Infrastructure.Data.Migrations
 
                     b.HasIndex("OptionItemId");
 
-                    b.HasIndex("StudentId", "MealPeriod")
+                    b.HasIndex("StudentId", "MealPeriod", "DayOfWeek")
                         .IsUnique()
                         .HasFilter("\"EffectiveTo\" IS NULL");
 
-                    b.HasIndex("StudentId", "MealPeriod", "EffectiveFrom");
+                    b.HasIndex("StudentId", "MealPeriod", "DayOfWeek", "EffectiveFrom");
 
-                    b.HasIndex("StudentId", "MealPeriod", "EffectiveTo");
+                    b.HasIndex("StudentId", "MealPeriod", "DayOfWeek", "EffectiveTo")
+                        .HasDatabaseName("IX_meal_preference_history_StudentId_MealPeriod_DayOfWeek_Eff~1");
 
                     b.ToTable("meal_preference_history", null, t =>
                         {
@@ -936,6 +937,46 @@ namespace HallBackend.Infrastructure.Data.Migrations
                     b.ToTable("monthly_bill_cache", null, t =>
                         {
                             t.HasCheckConstraint("ck_monthly_bill_cache_month", "\"Month\" BETWEEN 1 AND 12");
+                        });
+                });
+
+            modelBuilder.Entity("HallBackend.Domain.Entities.Notice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetWing")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.ToTable("notices", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_notices_wing", "\"TargetWing\" IN ('All','Male','Female')");
                         });
                 });
 
@@ -1495,6 +1536,17 @@ namespace HallBackend.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Student");
+                });
+
+            modelBuilder.Entity("HallBackend.Domain.Entities.Notice", b =>
+                {
+                    b.HasOne("HallBackend.Domain.Entities.AppUser", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedBy");
                 });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.Notification", b =>
