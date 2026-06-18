@@ -197,10 +197,9 @@ public sealed class InventoryController(
 
             if (earliestBilledDate.HasValue)
             {
-                await billing.RecalculateForwardAsync(
+                billing.QueueRecalculateForward(
                     earliestBilledDate.Value.Month,
-                    earliestBilledDate.Value.Year,
-                    cancellationToken);
+                    earliestBilledDate.Value.Year);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -353,7 +352,7 @@ public sealed class InventoryController(
             await inventory.RebuildItemAsync(updatedRequest.ItemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            await billing.RecalculateForwardAsync(updatedRequest.Date.Month, updatedRequest.Date.Year, cancellationToken);
+            billing.QueueRecalculateForward(updatedRequest.Date.Month, updatedRequest.Date.Year);
             await db.Entry(row).Reference(x => x.Item).LoadAsync(cancellationToken);
             return CreatedAtAction(nameof(GetTransactions), ToDto(row, false));
         }
@@ -418,7 +417,7 @@ public sealed class InventoryController(
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             var first = oldDate.Year * 12 + oldDate.Month <= updatedRequest.Date.Year * 12 + updatedRequest.Date.Month ? oldDate : updatedRequest.Date;
-            await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
+            billing.QueueRecalculateForward(first.Month, first.Year);
             return ToDto(row, false);
         }
         catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
@@ -442,7 +441,7 @@ public sealed class InventoryController(
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(itemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
-            await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
+            billing.QueueRecalculateForward(date.Month, date.Year);
             return NoContent();
         }
         catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }

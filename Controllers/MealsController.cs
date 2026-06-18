@@ -15,7 +15,6 @@ namespace HallBackend.Controllers;
 public sealed class MealsController(
     HallDbContext db,
     CurrentUserService currentUser,
-    ItemCatalogService catalog,
     MealHistoryService history,
     BillingCalculationService billing) : ControllerBase
 {
@@ -26,19 +25,34 @@ public sealed class MealsController(
         var setting = await db.MealSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken) ?? new MealSetting();
         var mealTypes = await db.MealTypes.AsNoTracking().OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
         var days = await db.MealDays.AsNoTracking()
-            .Include(x => x.Configurations).ThenInclude(x => x.MealType)
-            .Include(x => x.Configurations).ThenInclude(x => x.Items).ThenInclude(x => x.InventoryItem)
             .OrderBy(x => x.SortOrder)
+            .Select(day => new MealDayDto(
+                day.Code,
+                day.Label,
+                day.SortOrder,
+                day.Configurations
+                    .Where(config => config.Wing == selectedWing)
+                    .OrderBy(config => config.MealType!.SortOrder)
+                    .Select(config => new MealEntryDto(
+                        config.MealType!.Code,
+                        config.Items
+                            .Where(item => !item.IsOptional)
+                            .Select(item => new MealItemDto(item.InventoryItemId ?? item.Id, item.Name, item.Cost))
+                            .ToList(),
+                        config.Items
+                            .Where(item => item.IsOptional
+                                && item.InventoryItem != null
+                                && item.InventoryItem.Category == "Options"
+                                && !item.InventoryItem.IsDeleted)
+                            .Select(item => new MealItemDto(item.InventoryItemId!.Value, item.Name, item.Cost))
+                            .ToList(),
+                        config.Status))
+                    .ToList()))
             .ToListAsync(cancellationToken);
 
         return new MealModuleDto(
             new MealSettingsDto(setting.CutoffTime, mealTypes.Select(x => new MealTypeDto(x.Code, x.Label, x.SortOrder, x.StartsAt, x.EndsAt)).ToList(), setting.ForecastMaxOptions),
-            days.Select(day => new MealDayDto(
-                day.Code,
-                day.Label,
-                day.SortOrder,
-                day.Configurations.Where(x => x.Wing == selectedWing)
-                    .OrderBy(x => x.MealType!.SortOrder).Select(ToMealEntry).ToList())).ToList());
+            days);
     }
 
     [HttpPut("settings/cutoff")]
@@ -94,14 +108,21 @@ public sealed class MealsController(
             return BadRequest(new { message = $"{duplicate.First().Input.Name.Trim()} is listed more than once." });
         }
 
+        var inventoryItems = await db.InventoryItems.AsNoTracking()
+            .Where(x => !x.IsDeleted
+                && x.Wing == selectedWing
+                && (x.Category == "Common" || x.Category == "Options"))
+            .ToListAsync(cancellationToken);
+        var inventoryByCategoryAndName = inventoryItems
+            .GroupBy(x => (x.Category, Name: ItemCatalogService.NormalizeName(x.Item)))
+            .ToDictionary(x => x.Key, x => x.First());
+
         var resolvedInputs = new List<(MealItemInput Input, bool IsOptional, InventoryItem? InventoryItem)>();
         foreach (var entry in inputs)
         {
-            var inventoryItem = await catalog.FindActiveItemAsync(
-                entry.Input.Name,
-                entry.Category,
-                selectedWing,
-                cancellationToken);
+            inventoryByCategoryAndName.TryGetValue(
+                (entry.Category, ItemCatalogService.NormalizeName(entry.Input.Name)),
+                out var inventoryItem);
             if (entry.IsOptional && inventoryItem is null)
             {
                 return BadRequest(new
@@ -112,32 +133,22 @@ public sealed class MealsController(
             resolvedInputs.Add((entry.Input, entry.IsOptional, inventoryItem));
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        try
+        var nextItems = new List<MealItem>();
+        foreach (var entry in resolvedInputs)
         {
-            var nextItems = new List<MealItem>();
-            foreach (var entry in resolvedInputs)
+            nextItems.Add(new MealItem
             {
-                nextItems.Add(new MealItem
-                {
-                    MealConfigurationId = config.Id,
-                    InventoryItemId = entry.InventoryItem?.Id,
-                    Name = entry.Input.Name.Trim(),
-                    Cost = Math.Max(0m, entry.Input.Cost),
-                    IsOptional = entry.IsOptional,
-                });
-            }
+                MealConfigurationId = config.Id,
+                InventoryItemId = entry.InventoryItem?.Id,
+                Name = entry.Input.Name.Trim(),
+                Cost = Math.Max(0m, entry.Input.Cost),
+                IsOptional = entry.IsOptional,
+            });
+        }
 
-            db.MealItems.AddRange(nextItems);
-            await db.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return await GetModule(selectedWing, cancellationToken);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
-        }
+        db.MealItems.AddRange(nextItems);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetModule(selectedWing, cancellationToken);
     }
 
     [HttpGet("counts")]
@@ -167,14 +178,19 @@ public sealed class MealsController(
             return new MealCountsForDateDto(target, dayCode, emptyCounts);
         }
 
-        var activeStudentIds = await db.Students.AsNoTracking()
+        var activeStudents = await db.Students.AsNoTracking()
             .Where(x => x.Status == "active" && x.Gender == selectedWing)
-            .Select(x => x.Id)
             .ToListAsync(cancellationToken);
+        var activeStudentIds = activeStudents.Select(x => x.Id).ToList();
         var statuses = await db.MealStatusHistory.AsNoTracking()
             .Where(x => activeStudentIds.Contains(x.StudentId)
                 && x.EffectiveFrom <= target
                 && (x.EffectiveTo == null || x.EffectiveTo >= target))
+            .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == selectedWing
+                && x.EffectiveFrom <= target
+                && x.EffectiveTo >= target)
             .ToListAsync(cancellationToken);
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
             .Where(x => activeStudentIds.Contains(x.StudentId)
@@ -194,10 +210,16 @@ public sealed class MealsController(
 
         var counts = mealTypes.Select(type =>
         {
-            var enabledStudents = activeStudentIds.Where(studentId =>
-                statuses.Where(x => x.StudentId == studentId && x.MealPeriod == type.Code)
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault()?.IsOn == true).ToList();
+            var enabledStudents = activeStudents
+                .Where(student => MealHistoryService.GetEffectiveStatus(
+                    student.Id,
+                    student.Gender,
+                    type.Code,
+                    target,
+                    statuses,
+                    overrides))
+                .Select(student => student.Id)
+                .ToList();
             var selectedOptionCounts = enabledStudents
                 .Select(studentId => preferences
                     .Where(x => x.StudentId == studentId && x.MealPeriod == type.Code)
@@ -238,9 +260,9 @@ public sealed class MealsController(
             return new MealCountDto(
                 type.Code,
                 type.Label,
-                activeStudentIds.Count,
+                activeStudents.Count,
                 enabledStudents.Count,
-                activeStudentIds.Count - enabledStudents.Count,
+                activeStudents.Count - enabledStudents.Count,
                 choices);
         }).ToList();
 
@@ -298,7 +320,6 @@ public sealed class MealsController(
             await AdminForceOptionPreferenceAsync(student.Id, selectedWing, request.MealPeriod, request.OptionItemId, request.EffectiveFrom, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
             return await BuildStudentMealControlAsync(student, selectedWing, request.EffectiveFrom, cancellationToken);
         }
         catch (InvalidOperationException ex)
@@ -352,8 +373,15 @@ public sealed class MealsController(
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
         var target = date ?? DateOnly.FromDateTime(DateTime.Today);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
         var statuses = await db.MealStatusHistory.AsNoTracking()
             .Where(x => x.StudentId == studentId && x.EffectiveFrom <= target && (x.EffectiveTo == null || x.EffectiveTo >= target))
+            .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == wing && x.EffectiveFrom <= target && x.EffectiveTo >= target)
             .ToListAsync(cancellationToken);
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
             .Where(x => x.StudentId == studentId && x.DayOfWeek == target.DayOfWeek && x.EffectiveFrom <= target && (x.EffectiveTo == null || x.EffectiveTo >= target))
@@ -363,7 +391,7 @@ public sealed class MealsController(
             .ToDictionaryAsync(x => x.Id, x => x.Item, cancellationToken);
         return MealHistoryService.MealPeriods.Select(period => new MealPreferenceStateDto(
             period,
-            statuses.Where(x => x.MealPeriod == period).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.IsOn ?? false,
+            MealHistoryService.GetEffectiveStatus(studentId, wing, period, target, statuses, overrides),
             preferences.Where(x => x.MealPeriod == period).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.OptionItemId,
             optionNames.GetValueOrDefault(preferences.Where(x => x.MealPeriod == period).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.OptionItemId ?? Guid.Empty))).ToList();
     }
@@ -457,8 +485,15 @@ public sealed class MealsController(
         if (from > to || to.DayNumber - from.DayNumber > 366)
             return BadRequest(new { message = "Select a valid date range of up to one year." });
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
         var statuses = await db.MealStatusHistory.AsNoTracking()
             .Where(x => x.StudentId == studentId && x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
+            .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == wing && x.EffectiveFrom <= to && x.EffectiveTo >= from)
             .ToListAsync(cancellationToken);
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
             .Where(x => x.StudentId == studentId && x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
@@ -471,16 +506,38 @@ public sealed class MealsController(
             .Where(x => x.StudentId == studentId && x.Date >= from && x.Date <= to)
             .ToListAsync(cancellationToken);
 
+        // Pre-group/index status, preference, and guest meals lists to avoid O(N) linear scans inside loop
+        var statusesGrouped = statuses
+            .GroupBy(x => x.MealPeriod)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+
+        var preferencesGrouped = preferences
+            .GroupBy(x => new { x.MealPeriod, x.DayOfWeek })
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+
+        var guestMealsLookup = guestMeals
+            .ToDictionary(x => new { x.Date, x.MealPeriod }, x => x.GuestCount);
+
         var rows = new List<MealSnapshotRowDto>();
         for (var date = from; date <= to; date = date.AddDays(1))
         {
-            rows.Add(new MealSnapshotRowDto(date, MealHistoryService.MealPeriods.Select(period =>
+            var dateVal = date;
+            rows.Add(new MealSnapshotRowDto(dateVal, MealHistoryService.MealPeriods.Select(period =>
             {
-                var preference = preferences.Where(x => x.MealPeriod == period && x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date)).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault();
-                var guestCount = guestMeals.FirstOrDefault(x => x.Date == date && x.MealPeriod == period)?.GuestCount ?? 0;
+                MealPreferenceHistory? preference = null;
+                if (preferencesGrouped.TryGetValue(new { MealPeriod = period, DayOfWeek = dateVal.DayOfWeek }, out var prefsList))
+                {
+                    preference = prefsList.FirstOrDefault(x => x.EffectiveFrom <= dateVal && (x.EffectiveTo == null || x.EffectiveTo >= dateVal));
+                }
+
+                var guestCount = guestMealsLookup.GetValueOrDefault(new { Date = dateVal, MealPeriod = period });
+
+                var statusList = statusesGrouped.GetValueOrDefault(period) ?? [];
+                var isOn = MealHistoryService.GetEffectiveStatus(studentId, wing, period, dateVal, statusList, overrides);
+
                 return new MealPreferenceStateDto(
                     period,
-                    statuses.Where(x => x.MealPeriod == period && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date)).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.IsOn ?? false,
+                    isOn,
                     preference?.OptionItemId,
                     optionNames.GetValueOrDefault(preference?.OptionItemId ?? Guid.Empty),
                     guestCount);
@@ -577,6 +634,18 @@ public sealed class MealsController(
             return BadRequest(new { message = "Override cannot span more than one year." });
         var selectedWing = await currentUser.GetMealWingAsync(request.Wing, cancellationToken);
 
+        var overlapping = await db.GlobalMealOverrides
+            .Where(x => x.Wing == selectedWing
+                && x.MealPeriod == request.MealPeriod
+                && x.EffectiveTo >= request.EffectiveFrom
+                && x.EffectiveFrom <= request.EffectiveTo)
+            .ToListAsync(cancellationToken);
+
+        if (overlapping.Count > 0)
+        {
+            db.GlobalMealOverrides.RemoveRange(overlapping);
+        }
+
         var entity = new GlobalMealOverride
         {
             Wing = selectedWing,
@@ -589,7 +658,6 @@ public sealed class MealsController(
         };
         db.GlobalMealOverrides.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
         return new GlobalMealOverrideDto(entity.Id, entity.Wing, entity.MealPeriod, entity.EffectiveFrom, entity.EffectiveTo, entity.IsOn, entity.Note, entity.CreatedAtUtc);
     }
 
@@ -603,7 +671,6 @@ public sealed class MealsController(
         if (!string.IsNullOrWhiteSpace(adminWing) && entity.Wing != adminWing) return Forbid();
         db.GlobalMealOverrides.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await billing.RecalculateForwardAsync(entity.EffectiveFrom.Month, entity.EffectiveFrom.Year, cancellationToken);
         return NoContent();
     }
 
@@ -748,50 +815,24 @@ public sealed class MealsController(
             var overrides = await db.GlobalMealOverrides.AsNoTracking()
                 .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= target && x.EffectiveTo >= target)
                 .ToListAsync(cancellationToken);
+            var guestMealsByStudentAndPeriod = guestMeals.ToDictionary(x => (x.StudentId, x.MealPeriod), x => x.GuestCount);
+            var preferencesByStudentAndPeriod = preferences
+                .GroupBy(x => (x.StudentId, x.MealPeriod))
+                .ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.EffectiveFrom).First());
 
             foreach (var student in students)
             {
-                // Breakfast
-                var bOverride = overrides
-                    .Where(x => x.MealPeriod == "breakfast")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-                bool bOn = bOverride != null 
-                    ? bOverride.IsOn 
-                    : (statuses.Where(x => x.StudentId == student.Id && x.MealPeriod == "breakfast").OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.IsOn ?? false);
+                var bOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "breakfast", target, statuses, overrides);
+                var lOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "lunch", target, statuses, overrides);
+                var dOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "dinner", target, statuses, overrides);
 
-                // Lunch
-                var lOverride = overrides
-                    .Where(x => x.MealPeriod == "lunch")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-                bool lOn = lOverride != null 
-                    ? lOverride.IsOn 
-                    : (statuses.Where(x => x.StudentId == student.Id && x.MealPeriod == "lunch").OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.IsOn ?? false);
+                var bGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "breakfast"));
+                var lGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "lunch"));
+                var dGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "dinner"));
 
-                // Dinner
-                var dOverride = overrides
-                    .Where(x => x.MealPeriod == "dinner")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-                bool dOn = dOverride != null 
-                    ? dOverride.IsOn 
-                    : (statuses.Where(x => x.StudentId == student.Id && x.MealPeriod == "dinner").OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.IsOn ?? false);
-
-                // Guest counts
-                var bGuest = guestMeals.FirstOrDefault(x => x.StudentId == student.Id && x.MealPeriod == "breakfast")?.GuestCount ?? 0;
-                var lGuest = guestMeals.FirstOrDefault(x => x.StudentId == student.Id && x.MealPeriod == "lunch")?.GuestCount ?? 0;
-                var dGuest = guestMeals.FirstOrDefault(x => x.StudentId == student.Id && x.MealPeriod == "dinner")?.GuestCount ?? 0;
-
-                var bPreference = preferences.Where(x => x.StudentId == student.Id && x.MealPeriod == "breakfast")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-                var lPreference = preferences.Where(x => x.StudentId == student.Id && x.MealPeriod == "lunch")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-                var dPreference = preferences.Where(x => x.StudentId == student.Id && x.MealPeriod == "dinner")
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
+                var bPreference = preferencesByStudentAndPeriod.GetValueOrDefault((student.Id, "breakfast"));
+                var lPreference = preferencesByStudentAndPeriod.GetValueOrDefault((student.Id, "lunch"));
+                var dPreference = preferencesByStudentAndPeriod.GetValueOrDefault((student.Id, "dinner"));
 
                 rows.Add(new MealSheetRowDto(
                     student.HallId,
@@ -824,20 +865,6 @@ public sealed class MealsController(
             dCount,
             rows
         );
-    }
-
-    private static MealEntryDto ToMealEntry(MealConfiguration config)
-    {
-        return new MealEntryDto(
-            config.MealType!.Code,
-            config.Items.Where(x => !x.IsOptional)
-                .Select(x => new MealItemDto(x.InventoryItemId ?? x.Id, x.Name, x.Cost)).ToList(),
-            config.Items.Where(x => x.IsOptional
-                    && x.InventoryItem != null
-                    && x.InventoryItem.Category == "Options"
-                    && !x.InventoryItem.IsDeleted)
-                .Select(x => new MealItemDto(x.InventoryItemId!.Value, x.Name, x.Cost)).ToList(),
-            config.Status);
     }
 
     private async Task<DateOnly> GetEarliestStudentChangeDateAsync(CancellationToken cancellationToken)
@@ -923,6 +950,11 @@ public sealed class MealsController(
                 && x.EffectiveFrom <= target
                 && (x.EffectiveTo == null || x.EffectiveTo >= target))
             .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == wing
+                && x.EffectiveFrom <= target
+                && x.EffectiveTo >= target)
+            .ToListAsync(cancellationToken);
 
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
             .Where(x => x.StudentId == student.Id
@@ -963,9 +995,7 @@ public sealed class MealsController(
 
                 return new AdminStudentMealStatusDto(
                     period,
-                    statuses.Where(x => x.MealPeriod == period)
-                        .OrderByDescending(x => x.EffectiveFrom)
-                        .FirstOrDefault()?.IsOn ?? false,
+                    MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, period, target, statuses, overrides),
                     preference?.OptionItemId,
                     availableOptions.FirstOrDefault(x => x.Id == preference?.OptionItemId)?.Name,
                     availableOptions);
@@ -974,4 +1004,3 @@ public sealed class MealsController(
     }
 
 }
-

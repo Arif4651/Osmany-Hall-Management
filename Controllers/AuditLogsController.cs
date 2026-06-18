@@ -13,8 +13,20 @@ namespace HallBackend.Controllers;
 public sealed class AuditLogsController(HallDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<IReadOnlyList<AuditLogDto>> Get(CancellationToken cancellationToken)
+    public async Task<ActionResult<AuditLogListResponse>> Get([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
-        return await db.AuditLogs.AsNoTracking().OrderByDescending(x => x.Date).Select(x => new AuditLogDto(x.Id, x.Actor, x.Action, x.Module, x.Date)).ToListAsync(cancellationToken);
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = db.AuditLogs.AsNoTracking().OrderByDescending(x => x.Date);
+        var total = await query.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+        page = Math.Min(page, totalPages);
+
+        var items = await query.Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new AuditLogDto(x.Id, x.Actor, x.Action, x.Module, x.Date))
+            .ToListAsync(cancellationToken);
+
+        return new AuditLogListResponse(items, page, pageSize, total, totalPages);
     }
 }

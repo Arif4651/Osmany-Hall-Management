@@ -1,9 +1,11 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using HallBackend.Application.Services;
 using HallBackend.Application.Serialization;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -36,6 +38,66 @@ builder.Services.AddScoped<ItemCatalogService>();
 builder.Services.AddScoped<MealHistoryService>();
 builder.Services.AddScoped<BillingCalculationService>();
 builder.Services.AddScoped<DataSeeder>();
+
+// ── Response Compression (Brotli preferred, Gzip fallback) ──────────────────
+// Reduces API payload sizes by ~60-80% for JSON responses.
+builder.Services.AddResponseCompression(opts =>
+{
+    opts.EnableForHttps = true;
+    opts.Providers.Add<BrotliCompressionProvider>();
+    opts.Providers.Add<GzipCompressionProvider>();
+    opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+    [
+        "application/json",
+        "text/json",
+    ]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(opts =>
+    opts.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(opts =>
+    opts.Level = System.IO.Compression.CompressionLevel.Fastest);
+
+// ── Output Caching ────────────────────────────────────────────────────────────
+// Server-side cache for read-heavy, rarely-mutated endpoints.
+// IMPORTANT: policies are "NoStore" by default for authenticated routes —
+// only apply policies explicitly on endpoints that are safe to cache.
+builder.Services.AddOutputCache(opts =>
+{
+    // Notices: refresh every 5 minutes; invalidated on notice write operations.
+    opts.AddPolicy("notices-cache", b =>
+        b.Expire(TimeSpan.FromMinutes(5))
+         .SetVaryByHeader("Authorization"));
+
+    // Student filter options (departments / levels / halls): 10-minute cache.
+    opts.AddPolicy("filter-options-cache", b =>
+        b.Expire(TimeSpan.FromMinutes(10))
+         .SetVaryByHeader("Authorization"));
+
+    // Daily Cost Report: 2 minutes TTL
+    opts.AddPolicy("daily-cost-cache", b =>
+        b.Expire(TimeSpan.FromMinutes(2))
+         .SetVaryByQuery("month", "year", "gender")
+         .SetVaryByHeader("Authorization"));
+});
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────────
+// Prevent brute-force attacks on the login endpoint.
+builder.Services.AddRateLimiter(opts =>
+{
+    opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Max 10 login attempts per minute per IP address.
+    opts.AddPolicy("auth-login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+            }));
+});
 
 builder.Services.AddCors(options =>
 {
@@ -78,7 +140,7 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
 
-//added new fro render..
+//added new for render..
 var port = Environment.GetEnvironmentVariable("PORT");
 
 if (!string.IsNullOrEmpty(port))
@@ -86,7 +148,7 @@ if (!string.IsNullOrEmpty(port))
     builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 }
 
-//untill
+//until
 
 var app = builder.Build();
 
@@ -104,11 +166,18 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+
+// Middleware order matters: compression before responses are written.
+app.UseResponseCompression();
 app.UseCors("frontend");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseOutputCache();
 
 app.MapHealthChecks("/health");
 app.MapControllers();
 
 app.Run();
+
+

@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace HallBackend.Controllers;
@@ -12,6 +13,7 @@ namespace HallBackend.Controllers;
 public sealed class AuthController(HallDbContext db, PasswordService passwords, JwtTokenService tokens) : ControllerBase
 {
     [HttpPost("login")]
+    [EnableRateLimiting("auth-login")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         var identifier = request.Email.Trim().ToUpperInvariant();

@@ -31,9 +31,29 @@ public sealed class PaymentsController(
     public async Task<IReadOnlyList<PaymentSubmissionDto>> GetMine(CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
-        var rows = await Query().Where(x => x.StudentId == studentId).OrderByDescending(x => x.SubmittedAtUtc)
+        return await db.PaymentSubmissions.AsNoTracking()
+            .Where(x => x.StudentId == studentId)
+            .OrderByDescending(x => x.SubmittedAtUtc)
+            .Select(x => new PaymentSubmissionDto(
+                x.Id,
+                x.StudentId,
+                x.Student != null ? x.Student.StudentName : string.Empty,
+                x.Student != null ? x.Student.RollNumber : string.Empty,
+                x.Student != null ? x.Student.HallId : string.Empty,
+                x.Student != null ? x.Student.Gender : string.Empty,
+                x.CategoryId,
+                x.Category != null ? x.Category.Name : string.Empty,
+                x.BillingMonth,
+                x.BillingYear,
+                x.SubmittedAmount,
+                x.SubmittedCharge,
+                x.ApprovedAmount,
+                x.TransactionId,
+                x.Status,
+                x.SubmittedAtUtc,
+                x.ReviewedAtUtc
+            ))
             .ToListAsync(cancellationToken);
-        return rows.Select(ToDto).ToList();
     }
 
     [HttpPost]
@@ -73,14 +93,50 @@ public sealed class PaymentsController(
     [HttpGet("admin")]
     [HttpGet]
     [Authorize(Roles = Roles.HallAdministrators)]
-    public async Task<IReadOnlyList<PaymentSubmissionDto>> GetAll([FromQuery] string? gender, CancellationToken cancellationToken)
+    public async Task<ActionResult<PaymentListResponse>> GetAll(
+        [FromQuery] string? gender,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        var query = Query();
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = db.PaymentSubmissions.AsNoTracking();
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(adminWing)) query = query.Where(x => x.Student!.Gender == adminWing);
         else if (gender is "Male" or "Female") query = query.Where(x => x.Student!.Gender == gender);
-        var rows = await query.OrderByDescending(x => x.SubmittedAtUtc).ToListAsync(cancellationToken);
-        return rows.Select(ToDto).ToList();
+
+        var total = await query.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+        page = Math.Min(page, totalPages);
+
+        var items = await query
+            .OrderByDescending(x => x.SubmittedAtUtc)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new PaymentSubmissionDto(
+                x.Id,
+                x.StudentId,
+                x.Student != null ? x.Student.StudentName : string.Empty,
+                x.Student != null ? x.Student.RollNumber : string.Empty,
+                x.Student != null ? x.Student.HallId : string.Empty,
+                x.Student != null ? x.Student.Gender : string.Empty,
+                x.CategoryId,
+                x.Category != null ? x.Category.Name : string.Empty,
+                x.BillingMonth,
+                x.BillingYear,
+                x.SubmittedAmount,
+                x.SubmittedCharge,
+                x.ApprovedAmount,
+                x.TransactionId,
+                x.Status,
+                x.SubmittedAtUtc,
+                x.ReviewedAtUtc
+            ))
+            .ToListAsync(cancellationToken);
+
+        return new PaymentListResponse(items, page, pageSize, total, totalPages);
     }
 
     [HttpPost("{id:guid}/review")]

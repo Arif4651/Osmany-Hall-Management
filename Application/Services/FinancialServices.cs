@@ -169,6 +169,38 @@ public sealed class MealHistoryService(HallDbContext db)
 {
     public static readonly string[] MealPeriods = ["breakfast", "lunch", "dinner"];
 
+    public static bool GetEffectiveStatus(
+        Guid studentId,
+        string wing,
+        string mealPeriod,
+        DateOnly date,
+        IEnumerable<MealStatusHistory> statuses,
+        IEnumerable<GlobalMealOverride> overrides)
+    {
+        var globalOverride = overrides
+            .Where(x => x.Wing == wing
+                && x.MealPeriod == mealPeriod
+                && x.EffectiveFrom <= date
+                && x.EffectiveTo >= date)
+            .OrderByDescending(x => x.EffectiveFrom)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+
+        if (globalOverride is not null)
+        {
+            return globalOverride.IsOn;
+        }
+
+        return statuses
+            .Where(x => x.StudentId == studentId
+                && x.MealPeriod == mealPeriod
+                && x.EffectiveFrom <= date
+                && (x.EffectiveTo == null || x.EffectiveTo >= date))
+            .OrderByDescending(x => x.EffectiveFrom)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault()?.IsOn ?? false;
+    }
+
     public async Task SetPreferenceAsync(Guid studentId, string mealPeriod, Guid? optionItemId, DateOnly effectiveFrom, CancellationToken cancellationToken)
     {
         ValidatePeriod(mealPeriod);
@@ -453,8 +485,26 @@ public sealed record MonthlyBillResult(
 public sealed class BillingCalculationService(
     HallDbContext db,
     BillingPeriodService periods,
-    InventoryTransactionService inventory)
+    InventoryTransactionService inventory,
+    Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopeFactory)
 {
+    public void QueueRecalculateForward(int month, int year)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var bgBilling = scope.ServiceProvider.GetRequiredService<BillingCalculationService>();
+                await bgBilling.RecalculateForwardAsync(month, year, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Background recalculation failed: {ex}");
+            }
+        });
+    }
+
     public async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(int month, int year, CancellationToken cancellationToken)
     {
         if (month is < 1 or > 12) throw new InvalidOperationException("Month must be between 1 and 12.");

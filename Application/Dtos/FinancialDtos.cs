@@ -113,3 +113,5 @@ public sealed record SaveAdminStudentMealStatusRequest(
     string MealPeriod,
     bool IsOn,
     Guid? OptionItemId);
+
+public sealed record PaymentListResponse(IReadOnlyList<PaymentSubmissionDto> Items, int Page, int PageSize, int Total, int TotalPages);

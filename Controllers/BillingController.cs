@@ -24,7 +24,18 @@ public sealed class BillingController(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender,
         [FromQuery] string? status, CancellationToken cancellationToken)
     {
-        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        // ── Performance: read from cache first ───────────────────────────────
+        // Only run full recalculation if the cache has NO entries for this month.
+        // Explicit recalculation is available via POST /billing/recalculate.
+        // Write operations (save service bill, close/unlock period, payment approval,
+        // subsidy changes) continue to trigger RecalculateForwardAsync automatically.
+        var hasCacheEntries = await db.MonthlyBillCache.AsNoTracking()
+            .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
+        if (!hasCacheEntries)
+        {
+            await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        }
+
         var locked = await periods.IsLockedAsync(month, year, cancellationToken);
         var overrides = await db.DueAdjustments.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year)
@@ -42,15 +53,39 @@ public sealed class BillingController(
         return result;
     }
 
+    /// <summary>
+    /// Admin-only explicit recalculation trigger. Call this after bulk data entry
+    /// or whenever you need to force a fresh bill computation outside the normal
+    /// write-triggered path.
+    /// </summary>
+    [HttpPost("recalculate")]
+    [Authorize(Roles = Roles.HallAdministrators)]
+    public async Task<IActionResult> Recalculate(
+        [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    {
+        if (month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
+        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("me")]
     public async Task<ActionResult<MonthlyBillDto>> GetMine(
         [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
-        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+
+        // ── Performance: read from cache, only recalc if no entry exists ─────
         var row = await db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
             .FirstOrDefaultAsync(x => x.StudentId == studentId && x.Month == month && x.Year == year, cancellationToken);
+        if (row is null)
+        {
+            // First time this month has been viewed — run calculation once.
+            await billing.RecalculateMonthAsync(month, year, cancellationToken);
+            row = await db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
+                .FirstOrDefaultAsync(x => x.StudentId == studentId && x.Month == month && x.Year == year, cancellationToken);
+        }
         if (row is null) return NotFound();
+
         var overridden = await db.DueAdjustments.AnyAsync(x => x.StudentId == studentId && x.BillingMonth == month && x.BillingYear == year, cancellationToken);
         return ToDto(row, overridden, await periods.IsLockedAsync(month, year, cancellationToken));
     }

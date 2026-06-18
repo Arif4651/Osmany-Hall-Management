@@ -14,6 +14,7 @@ namespace HallBackend.Controllers;
 public sealed class DailyCostController(HallDbContext db, CurrentUserService currentUser) : ControllerBase
 {
     [HttpGet]
+    [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "daily-cost-cache")]
     public async Task<ActionResult<DailyCostReportDto>> Get(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string gender = "All",
         CancellationToken cancellationToken = default)
@@ -23,23 +24,51 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
         var effectiveGender = await currentUser.GetMealWingAsync(gender, cancellationToken);
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
+
         var transactions = await db.StockTransactions.AsNoTracking()
             .Include(x => x.Item)
             .Where(x => x.TransactionType == "out" && x.Date >= from && x.Date <= to)
             .ToListAsync(cancellationToken);
-        var students = await db.Students.AsNoTracking().ToListAsync(cancellationToken);
+
+        // Optimize: Filter students by effectiveGender first
+        var studentsQuery = db.Students.AsNoTracking();
+        if (effectiveGender != "All")
+        {
+            studentsQuery = studentsQuery.Where(x => x.Gender == effectiveGender);
+        }
+        var students = await studentsQuery.ToListAsync(cancellationToken);
+
         var statuses = await db.MealStatusHistory.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
             .ToListAsync(cancellationToken);
+        
+        // Optimize: Group statuses by (StudentId, MealPeriod) to avoid O(N) lookup in loop
+        var statusesGrouped = statuses
+            .GroupBy(x => new { x.StudentId, x.MealPeriod })
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+
         var overrides = await db.GlobalMealOverrides.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && x.EffectiveTo >= from)
             .ToListAsync(cancellationToken);
+
+        // Optimize: Group overrides by (Wing, MealPeriod)
+        var overridesGrouped = overrides
+            .GroupBy(x => new { x.Wing, x.MealPeriod })
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+
         var subsidies = await db.DswSubsidies.AsNoTracking()
             .Where(x => x.Date >= from && x.Date <= to && !x.IsReversed)
             .ToListAsync(cancellationToken);
+
         var preferences = await db.MealPreferenceHistory.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
             .ToListAsync(cancellationToken);
+
+        // Optimize: Group preferences by (StudentId, MealPeriod, DayOfWeek)
+        var preferencesGrouped = preferences
+            .GroupBy(x => new { x.StudentId, x.MealPeriod, x.DayOfWeek })
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+
         var optionItems = await db.InventoryItems.AsNoTracking()
             .Where(x => x.Category == "Options" && !x.IsDeleted)
             .ToListAsync(cancellationToken);
@@ -145,31 +174,41 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                 var participants = students.Where(student =>
                 {
                     if (effectiveGender != "All" && student.Gender != effectiveGender) return false;
-                    var mealOverride = overrides
-                        .Where(x => x.Wing == student.Gender
-                            && x.MealPeriod == period
-                            && x.EffectiveFrom <= date
-                            && x.EffectiveTo >= date)
-                        .OrderByDescending(x => x.EffectiveFrom)
-                        .FirstOrDefault();
-                    return mealOverride is not null
-                        ? mealOverride.IsOn
-                        : statuses
-                            .Where(x => x.StudentId == student.Id && x.MealPeriod == period && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-                            .OrderByDescending(x => x.EffectiveFrom)
-                            .FirstOrDefault()?.IsOn == true;
+                    
+                    // Optimize: Look up in grouped dictionary for overrides
+                    if (overridesGrouped.TryGetValue(new { Wing = student.Gender, MealPeriod = period }, out var wingOverrides))
+                    {
+                        var mealOverride = wingOverrides.FirstOrDefault(x => x.EffectiveFrom <= date && x.EffectiveTo >= date);
+                        if (mealOverride is not null)
+                        {
+                            return mealOverride.IsOn;
+                        }
+                    }
+
+                    // Optimize: Look up in grouped dictionary for statuses
+                    if (statusesGrouped.TryGetValue(new { StudentId = student.Id, MealPeriod = period }, out var studentStatuses))
+                    {
+                        var activeStatus = studentStatuses
+                            .FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date));
+                        return activeStatus?.IsOn == true;
+                    }
+
+                    return false;
                 }).ToList();
 
                 var totalStudents = participants.Count;
                 var overallPerHead = totalStudents == 0 ? 0m : netCost / totalStudents;
 
-                // Let's resolve the preferences for these participants
+                // Let's resolve the preferences for these participants using grouped lookup
                 var participantPreferences = participants.Select(student =>
                 {
-                    var selectedOptionId = preferences
-                        .Where(x => x.StudentId == student.Id && x.MealPeriod == period && x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-                        .OrderByDescending(x => x.EffectiveFrom)
-                        .FirstOrDefault()?.OptionItemId;
+                    Guid? selectedOptionId = null;
+                    if (preferencesGrouped.TryGetValue(new { StudentId = student.Id, MealPeriod = period, DayOfWeek = date.DayOfWeek }, out var studentPrefs))
+                    {
+                        selectedOptionId = studentPrefs
+                            .FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
+                            ?.OptionItemId;
+                    }
                     return new { Student = student, OptionId = selectedOptionId };
                 }).ToList();
 

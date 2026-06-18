@@ -54,13 +54,17 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpGet("filter-options")]
+    [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "filter-options-cache")]
     public async Task<StudentFilterOptionsResponse> GetFilterOptions(CancellationToken cancellationToken)
     {
         var students = await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken);
-        return new StudentFilterOptionsResponse(
-            await students.Select(x => x.Department).Distinct().OrderBy(x => x).ToListAsync(cancellationToken),
-            await students.Select(x => x.Level).Distinct().OrderBy(x => x).ToListAsync(cancellationToken),
-            await students.Select(x => x.HallName).Distinct().OrderBy(x => x).ToListAsync(cancellationToken));
+        var raw = await students.Select(x => new { x.Department, x.Level, x.HallName }).ToListAsync(cancellationToken);
+        
+        var departments = raw.Select(x => x.Department).Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        var levels = raw.Select(x => x.Level).Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        var halls = raw.Select(x => x.HallName).Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        
+        return new StudentFilterOptionsResponse(departments, levels, halls);
     }
 
     [HttpPost]

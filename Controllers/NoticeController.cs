@@ -12,9 +12,10 @@ namespace HallBackend.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/notices")]
-public sealed class NoticeController(HallDbContext db, CurrentUserService currentUser) : ControllerBase
+public sealed class NoticeController(HallDbContext db, CurrentUserService currentUser, Microsoft.AspNetCore.OutputCaching.IOutputCacheStore cacheStore) : ControllerBase
 {
     [HttpGet]
+    [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "notices-cache", Tags = ["notices"])]
     public async Task<ActionResult<IReadOnlyList<NoticeDto>>> Get(CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId;
@@ -98,6 +99,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
 
         db.Notices.Add(notice);
         await db.SaveChangesAsync(cancellationToken);
+        await cacheStore.EvictByTagAsync("notices", cancellationToken);
 
         var creatorName = user.FullName;
 
@@ -153,6 +155,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
         notice.TargetWing = request.TargetWing;
 
         await db.SaveChangesAsync(cancellationToken);
+        await cacheStore.EvictByTagAsync("notices", cancellationToken);
         return NoContent();
     }
 
@@ -179,6 +182,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
 
         db.Notices.Remove(notice);
         await db.SaveChangesAsync(cancellationToken);
+        await cacheStore.EvictByTagAsync("notices", cancellationToken);
         return NoContent();
     }
 }

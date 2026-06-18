@@ -69,6 +69,11 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.Property(x => x.HallName).HasMaxLength(120).IsRequired();
             entity.Property(x => x.RoomNo).HasMaxLength(40).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
+            // Performance indexes for common filter combinations
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Department);
+            entity.HasIndex(x => x.Level);
+            entity.HasIndex(x => new { x.Status, x.Gender }); // most common dual-filter
         });
 
         modelBuilder.Entity<MealType>(entity =>
@@ -150,6 +155,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.Property(x => x.Content).HasMaxLength(4000).IsRequired();
             entity.Property(x => x.TargetWing).HasMaxLength(20).IsRequired();
             entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
+            // Performance index: wing-filtered notice queries ordered by date
+            entity.HasIndex(x => new { x.TargetWing, x.CreatedAtUtc });
         });
 
         modelBuilder.Entity<AuditLog>(entity =>
@@ -158,6 +165,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.Property(x => x.Actor).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Action).HasMaxLength(240).IsRequired();
             entity.Property(x => x.Module).HasMaxLength(80).IsRequired();
+            // Performance index: chronological audit log pagination
+            entity.HasIndex(x => x.CreatedAtUtc);
         });
 
         ConfigureFinancialModel(modelBuilder);
@@ -175,6 +184,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             });
             entity.HasIndex(x => x.Date);
             entity.HasIndex(x => new { x.ItemId, x.Date });
+            // Performance index: DailyCostController and BillingCalculation most common filter
+            entity.HasIndex(x => new { x.Date, x.TransactionType, x.MealPeriod });
             entity.Property(x => x.TransactionType).HasMaxLength(8).IsRequired();
             entity.Property(x => x.MealPeriod).HasMaxLength(20);
             entity.Property(x => x.Quantity).HasPrecision(12, 4);
@@ -273,6 +284,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
         {
             entity.ToTable("monthly_bill_cache", table => table.HasCheckConstraint("ck_monthly_bill_cache_month", "\"Month\" BETWEEN 1 AND 12"));
             entity.HasIndex(x => new { x.StudentId, x.Month, x.Year }).IsUnique();
+            // Performance index: cache hit check for billing GET endpoints
+            entity.HasIndex(x => new { x.Month, x.Year, x.IsFinal });
             entity.Property(x => x.MonthlyBill).HasPrecision(12, 4);
             entity.Property(x => x.DswSubsidy).HasPrecision(12, 4);
             entity.Property(x => x.GuestMealBill).HasPrecision(12, 4);
@@ -354,6 +367,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
         {
             entity.ToTable("billing_periods", table => table.HasCheckConstraint("ck_billing_periods_month", "\"Month\" BETWEEN 1 AND 12"));
             entity.HasIndex(x => new { x.Month, x.Year }).IsUnique();
+            // Performance index: IsLockedAsync checks — called on every billing read and write
+            entity.HasIndex(x => new { x.Month, x.Year, x.IsLocked });
             entity.HasOne(x => x.LockedBy).WithMany().HasForeignKey(x => x.LockedById).OnDelete(DeleteBehavior.Restrict);
         });
 
