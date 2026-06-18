@@ -10,6 +10,9 @@ namespace HallBackend.Application.Services;
 public sealed class JwtTokenService(IConfiguration configuration)
 {
     public LoginResponse CreateToken(AppUser user)
+        => CreateToken(new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword));
+
+    public LoginResponse CreateToken(AuthUserDto user)
     {
         var expiresMinutes = configuration.GetValue("Jwt:ExpiresMinutes", 120);
         var expiresAt = DateTime.UtcNow.AddMinutes(expiresMinutes);
@@ -40,6 +43,6 @@ public sealed class JwtTokenService(IConfiguration configuration)
         return new LoginResponse(
             new JwtSecurityTokenHandler().WriteToken(token),
             expiresAt,
-            new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword));
+            user);
     }
 }

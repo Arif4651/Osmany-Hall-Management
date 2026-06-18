@@ -15,14 +15,26 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         var identifier = request.Email.Trim().ToUpperInvariant();
+        var isEmailIdentifier = identifier.Contains('@');
         var user = await db.Users
-            .Include(x => x.Student)
-            .FirstOrDefaultAsync(
-                x => (x.NormalizedEmail == identifier || x.NormalizedUserName == identifier)
-                    && (x.Role == request.Role || (request.Role == "admin"
-                        && (x.Role == "super_admin" || x.Role == "admin"
-                            || x.Role == "male_wing_admin" || x.Role == "female_wing_admin"))),
-                cancellationToken);
+            .AsNoTracking()
+            .Where(x => isEmailIdentifier ? x.NormalizedEmail == identifier : x.NormalizedUserName == identifier)
+            .Where(x => x.Role == request.Role || (request.Role == "admin"
+                && (x.Role == "super_admin" || x.Role == "admin"
+                    || x.Role == "male_wing_admin" || x.Role == "female_wing_admin")))
+            .Select(x => new LoginUser(
+                x.Id,
+                x.FullName,
+                x.Email,
+                x.UserName,
+                x.Role,
+                x.Designation,
+                x.Role == "student" ? x.Student!.Gender : x.Wing,
+                x.StudentId,
+                x.MustChangePassword,
+                x.PasswordHash,
+                x.IsActive))
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (user is null || !user.IsActive)
         {
@@ -34,9 +46,13 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
             return Unauthorized(new { message = "Invalid credentials. Please try again." });
         }
 
-        user.LastLoginAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        return Ok(tokens.CreateToken(user));
+        await db.Users
+            .Where(x => x.Id == user.Id)
+            .ExecuteUpdateAsync(
+                updates => updates.SetProperty(x => x.LastLoginAtUtc, DateTime.UtcNow),
+                cancellationToken);
+
+        return Ok(tokens.CreateToken(user.ToAuthUser()));
     }
 
     [HttpPost("logout")]
@@ -90,13 +106,32 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
         }
 
         var user = await db.Users
-            .Include(x => x.Student)
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new AuthUserDto(x.Id, x.FullName, x.Email, x.UserName, x.Role, x.Designation, x.Role == "student" ? x.Student!.Gender : x.Wing, x.StudentId, x.MustChangePassword))
+            .FirstOrDefaultAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
         }
 
-        return new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword);
+        return user;
+    }
+
+    private sealed record LoginUser(
+        Guid Id,
+        string FullName,
+        string Email,
+        string UserName,
+        string Role,
+        string Designation,
+        string? Wing,
+        Guid? StudentId,
+        bool MustChangePassword,
+        string PasswordHash,
+        bool IsActive)
+    {
+        public AuthUserDto ToAuthUser()
+            => new(Id, FullName, Email, UserName, Role, Designation, Wing, StudentId, MustChangePassword);
     }
 }

@@ -11,10 +11,6 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
     {
         if (await db.Users.AnyAsync(cancellationToken))
         {
-            await EnsureUserExistsAsync("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "super1234", "Super Administrator", null, cancellationToken);
-            await EnsureUserExistsAsync("Male Wing Administrator", "admin.male", "admin.male@mist.ac.bd", Roles.MaleWingAdmin, "male1234", "Male Wing Administrator", "Male", cancellationToken);
-            await EnsureUserExistsAsync("Female Wing Administrator", "admin.female", "admin.female@mist.ac.bd", Roles.FemaleWingAdmin, "female1234", "Female Wing Administrator", "Female", cancellationToken);
-
             var legacyAdmins = await db.Users.Where(x => x.Role == Roles.Admin).ToListAsync(cancellationToken);
             foreach (var legacyAdmin in legacyAdmins)
             {
@@ -269,30 +265,6 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
         db.AuditLogs.AddRange(
             new AuditLog { Actor = "Admin User", Action = "System initialized", Module = "System", Date = DateOnly.FromDateTime(DateTime.Today) });
 
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    private async Task EnsureUserExistsAsync(string fullName, string userName, string email, string role, string plainPassword, string designation, string? wing, CancellationToken cancellationToken)
-    {
-        var normalizedEmail = email.Trim().ToUpperInvariant();
-        var user = await db.Users.FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
-        if (user == null)
-        {
-            user = User(fullName, userName, email, role, designation, wing);
-            user.PasswordHash = passwords.Hash(plainPassword);
-            db.Users.Add(user);
-        }
-        else
-        {
-            user.FullName = fullName;
-            user.UserName = userName;
-            user.NormalizedUserName = userName.Trim().ToUpperInvariant();
-            user.Role = role;
-            user.Designation = designation;
-            user.Wing = wing;
-            user.PasswordHash = passwords.Hash(plainPassword);
-            db.Entry(user).State = EntityState.Modified;
-        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
