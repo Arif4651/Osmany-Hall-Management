@@ -55,6 +55,7 @@ public sealed record DailyCostMealDto(
     decimal Cost,
     int Students,
     decimal PerHead,
+    decimal MyCost,
     IReadOnlyList<DailyCostOptionBreakdownDto> Options);
 
 public sealed record DailyCostRowDto(
@@ -63,6 +64,7 @@ public sealed record DailyCostRowDto(
     DailyCostMealDto Lunch,
     DailyCostMealDto Dinner,
     decimal TotalPerHead,
+    decimal TotalMyCost,
     IReadOnlyList<DailyCostOptionBreakdownDto> Options);
 
 public sealed record DailyCostReportDto(

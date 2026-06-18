@@ -53,6 +53,13 @@ public sealed class FinancialMathTests
         Assert.Equal(0m, FinancialMath.ProportionalCost(1000m, 0, 0));
     }
 
+    [Fact]
+    public void PerHead_DividesCostByHeadcountAndHandlesZero()
+    {
+        Assert.Equal(256.25m, FinancialMath.PerHead(2050m, 8));
+        Assert.Equal(0m, FinancialMath.PerHead(2050m, 0));
+    }
+
     [Theory]
     [InlineData(" Egg ", "egg")]
     [InlineData("Soybean   Oil", "soybean oil")]

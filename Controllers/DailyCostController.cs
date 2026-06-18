@@ -21,6 +21,12 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
     {
         if (month is < 1 or > 12 || gender is not ("All" or "Male" or "Female"))
             return BadRequest(new { message = "Invalid filters." });
+
+        var currentStudentId = await db.Users.AsNoTracking()
+            .Where(x => x.Id == currentUser.UserId)
+            .Select(x => x.StudentId)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var effectiveGender = await currentUser.GetMealWingAsync(gender, cancellationToken);
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
@@ -75,81 +81,6 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
 
         var rows = new List<DailyCostRowDto>();
 
-        List<DailyCostOptionBreakdownDto> AggregateTotalOptions(IEnumerable<DailyCostMealDto> meals)
-        {
-            return meals
-                .SelectMany(m => m.Options)
-                .GroupBy(o => o.Name)
-                .Select(g => new DailyCostOptionBreakdownDto(
-                    Guid.Empty,
-                    g.Key,
-                    g.Sum(x => x.Cost),
-                    g.Sum(x => x.Students),
-                    g.Sum(x => x.PerHead)
-                ))
-                .OrderBy(x => x.Name)
-                .ToList();
-        }
-
-        List<DailyCostOptionBreakdownDto> AggregateRowOptions(DailyCostMealDto b, DailyCostMealDto l, DailyCostMealDto d)
-        {
-            var dailyOptions = b.Options.Concat(l.Options).Concat(d.Options)
-                .Select(x => x.Name)
-                .Distinct()
-                .ToList();
-
-            var breakdowns = new List<DailyCostOptionBreakdownDto>();
-            foreach (var optName in dailyOptions)
-            {
-                decimal cost = 0m;
-                int studentsCount = 0;
-                decimal perHead = 0m;
-
-                // Breakfast
-                var bOpt = b.Options.FirstOrDefault(x => x.Name == optName);
-                if (bOpt is not null)
-                {
-                    cost += bOpt.Cost;
-                    studentsCount += bOpt.Students;
-                    perHead += bOpt.PerHead;
-                }
-                else
-                {
-                    perHead += b.PerHead;
-                }
-
-                // Lunch
-                var lOpt = l.Options.FirstOrDefault(x => x.Name == optName);
-                if (lOpt is not null)
-                {
-                    cost += lOpt.Cost;
-                    studentsCount += lOpt.Students;
-                    perHead += lOpt.PerHead;
-                }
-                else
-                {
-                    perHead += l.PerHead;
-                }
-
-                // Dinner
-                var dOpt = d.Options.FirstOrDefault(x => x.Name == optName);
-                if (dOpt is not null)
-                {
-                    cost += dOpt.Cost;
-                    studentsCount += dOpt.Students;
-                    perHead += dOpt.PerHead;
-                }
-                else
-                {
-                    perHead += d.PerHead;
-                }
-
-                breakdowns.Add(new DailyCostOptionBreakdownDto(Guid.Empty, optName, cost, studentsCount, perHead));
-            }
-
-            return breakdowns.OrderBy(x => x.Name).ToList();
-        }
-
         var today = DateOnly.FromDateTime(DateTime.Today);
         var tomorrow = today.AddDays(1);
 
@@ -197,7 +128,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                 }).ToList();
 
                 var totalStudents = participants.Count;
-                var overallPerHead = totalStudents == 0 ? 0m : netCost / totalStudents;
+                var overallPerHead = FinancialMath.PerHead(netCost, totalStudents);
 
                 // Let's resolve the preferences for these participants using grouped lookup
                 var participantPreferences = participants.Select(student =>
@@ -220,6 +151,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                     .ToList();
 
                 var optionBreakdowns = new List<DailyCostOptionBreakdownDto>();
+                decimal myCost = 0m;
 
                 if (activeOptions.Count > 0)
                 {
@@ -230,7 +162,8 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                         .Sum(t => t.TotalCost);
 
                     var netCommonCost = commonTxCostRobust - subsidyAmount;
-                    var commonPerHead = totalStudents > 0 ? netCommonCost / totalStudents : 0m;
+                    var commonPerHead = FinancialMath.PerHead(netCommonCost, totalStudents);
+                    optionBreakdowns.Add(new DailyCostOptionBreakdownDto(Guid.Empty, "Common", netCommonCost, totalStudents, commonPerHead));
 
                     foreach (var opt in activeOptions)
                     {
@@ -239,34 +172,66 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                             .Where(t => t.Item != null && (t.ItemId == opt.Id || (t.Item.LinkedOptionId.HasValue && t.Item.LinkedOptionId.Value == opt.Id)))
                             .Sum(t => t.TotalCost);
 
-                        var optPerHead = optStudentsCount > 0 ? optTxCost / optStudentsCount : 0m;
+                        var optPerHead = FinancialMath.PerHead(optTxCost, optStudentsCount);
                         var totalOptPerHead = commonPerHead + optPerHead;
 
                         optionBreakdowns.Add(new DailyCostOptionBreakdownDto(opt.Id, opt.Item, optTxCost, optStudentsCount, totalOptPerHead));
                     }
+                }
 
-                    var noOptionStudentsCount = participantPreferences.Count(x => !x.OptionId.HasValue || !activeOptionIds.Contains(x.OptionId.Value));
-                    if (noOptionStudentsCount > 0)
+                if (currentStudentId.HasValue)
+                {
+                    var studentPreference = participantPreferences.FirstOrDefault(x => x.Student.Id == currentStudentId.Value);
+                    if (studentPreference is not null)
                     {
-                        optionBreakdowns.Add(new DailyCostOptionBreakdownDto(Guid.Empty, "No Option", 0m, noOptionStudentsCount, commonPerHead));
+                        foreach (var tx in periodTxs)
+                        {
+                            if (tx.Item is null)
+                            {
+                                myCost += FinancialMath.PerHead(tx.TotalCost, totalStudents);
+                                continue;
+                            }
+
+                            var chargedStudents = participantPreferences.Count(x => FinancialMath.IsChargeParticipant(
+                                tx.Item.Category,
+                                tx.Item.Id,
+                                tx.Item.LinkedOptionId,
+                                true,
+                                x.OptionId));
+
+                            if (chargedStudents == 0) continue;
+                            var isCharged = FinancialMath.IsChargeParticipant(
+                                tx.Item.Category,
+                                tx.Item.Id,
+                                tx.Item.LinkedOptionId,
+                                true,
+                                studentPreference.OptionId);
+
+                            if (isCharged)
+                            {
+                                myCost += tx.TotalCost / chargedStudents;
+                            }
+                        }
                     }
                 }
 
-                return new DailyCostMealDto(netCost, totalStudents, overallPerHead, optionBreakdowns);
+                return new DailyCostMealDto(netCost, totalStudents, overallPerHead, myCost, optionBreakdowns);
             }
 
             DailyCostMealDto breakfast;
             DailyCostMealDto lunch;
             DailyCostMealDto dinner;
             decimal totalPerHead;
+            decimal totalMyCost;
             List<DailyCostOptionBreakdownDto> rowOptions;
 
             if (date > tomorrow)
             {
-                breakfast = new DailyCostMealDto(0m, 0, 0m, new List<DailyCostOptionBreakdownDto>());
-                lunch = new DailyCostMealDto(0m, 0, 0m, new List<DailyCostOptionBreakdownDto>());
-                dinner = new DailyCostMealDto(0m, 0, 0m, new List<DailyCostOptionBreakdownDto>());
+                breakfast = new DailyCostMealDto(0m, 0, 0m, 0m, new List<DailyCostOptionBreakdownDto>());
+                lunch = new DailyCostMealDto(0m, 0, 0m, 0m, new List<DailyCostOptionBreakdownDto>());
+                dinner = new DailyCostMealDto(0m, 0, 0m, 0m, new List<DailyCostOptionBreakdownDto>());
                 totalPerHead = 0m;
+                totalMyCost = 0m;
                 rowOptions = new List<DailyCostOptionBreakdownDto>();
             }
             else
@@ -275,40 +240,41 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                 lunch = Meal("lunch");
                 dinner = Meal("dinner");
                 totalPerHead = breakfast.PerHead + lunch.PerHead + dinner.PerHead;
-                rowOptions = AggregateRowOptions(breakfast, lunch, dinner);
+                totalMyCost = breakfast.MyCost + lunch.MyCost + dinner.MyCost;
+                rowOptions = new List<DailyCostOptionBreakdownDto>();
             }
 
-            rows.Add(new DailyCostRowDto(date, breakfast, lunch, dinner, totalPerHead, rowOptions));
+            rows.Add(new DailyCostRowDto(date, breakfast, lunch, dinner, totalPerHead, totalMyCost, rowOptions));
         }
 
         // Footer totals: sum of each day's per-head for each period
-        var breakfastOptionsTotal = AggregateTotalOptions(rows.Select(x => x.Breakfast));
         var breakfastTotal = new DailyCostMealDto(
             rows.Sum(x => x.Breakfast.Cost),
             rows.Sum(x => x.Breakfast.Students),
             rows.Sum(x => x.Breakfast.PerHead),
-            breakfastOptionsTotal);
+            rows.Sum(x => x.Breakfast.MyCost),
+            new List<DailyCostOptionBreakdownDto>());
 
-        var lunchOptionsTotal = AggregateTotalOptions(rows.Select(x => x.Lunch));
         var lunchTotal = new DailyCostMealDto(
             rows.Sum(x => x.Lunch.Cost),
             rows.Sum(x => x.Lunch.Students),
             rows.Sum(x => x.Lunch.PerHead),
-            lunchOptionsTotal);
+            rows.Sum(x => x.Lunch.MyCost),
+            new List<DailyCostOptionBreakdownDto>());
 
-        var dinnerOptionsTotal = AggregateTotalOptions(rows.Select(x => x.Dinner));
         var dinnerTotal = new DailyCostMealDto(
             rows.Sum(x => x.Dinner.Cost),
             rows.Sum(x => x.Dinner.Students),
             rows.Sum(x => x.Dinner.PerHead),
-            dinnerOptionsTotal);
+            rows.Sum(x => x.Dinner.MyCost),
+            new List<DailyCostOptionBreakdownDto>());
 
-        var grandOptionsTotal = AggregateTotalOptions(new[] { breakfastTotal, lunchTotal, dinnerTotal });
         var grand = new DailyCostMealDto(
             breakfastTotal.Cost + lunchTotal.Cost + dinnerTotal.Cost,
             breakfastTotal.Students + lunchTotal.Students + dinnerTotal.Students,
             breakfastTotal.PerHead + lunchTotal.PerHead + dinnerTotal.PerHead,
-            grandOptionsTotal);
+            breakfastTotal.MyCost + lunchTotal.MyCost + dinnerTotal.MyCost,
+            new List<DailyCostOptionBreakdownDto>());
 
         return new DailyCostReportDto(month, year, effectiveGender, rows, breakfastTotal, lunchTotal, dinnerTotal, grand);
     }

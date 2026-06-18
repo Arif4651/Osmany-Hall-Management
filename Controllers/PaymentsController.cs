@@ -95,6 +95,8 @@ public sealed class PaymentsController(
     [Authorize(Roles = Roles.HallAdministrators)]
     public async Task<ActionResult<PaymentListResponse>> GetAll(
         [FromQuery] string? gender,
+        [FromQuery] string? status,
+        [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
@@ -106,6 +108,30 @@ public sealed class PaymentsController(
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(adminWing)) query = query.Where(x => x.Student!.Gender == adminWing);
         else if (gender is "Male" or "Female") query = query.Where(x => x.Student!.Gender == gender);
+
+        if (!string.IsNullOrWhiteSpace(status) && status.Trim().ToLowerInvariant() != "all")
+        {
+            var statusNorm = status.Trim().ToLowerInvariant().Replace(" ", "_");
+            if (statusNorm == "pending" || statusNorm == "under_review" || statusNorm == "under review")
+            {
+                query = query.Where(x => x.Status == "under_review");
+            }
+            else
+            {
+                query = query.Where(x => x.Status == statusNorm);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var searchNorm = search.Trim().ToLowerInvariant();
+            query = query.Where(x =>
+                x.Student!.RollNumber.ToLower().Contains(searchNorm) ||
+                x.Student!.HallId.ToLower().Contains(searchNorm) ||
+                x.Student!.StudentName.ToLower().Contains(searchNorm) ||
+                x.TransactionId.ToLower().Contains(searchNorm)
+            );
+        }
 
         var total = await query.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));

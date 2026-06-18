@@ -21,22 +21,43 @@ public sealed class DueController(
     [HttpGet]
     public async Task<IReadOnlyList<DueRowDto>> Get([FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender, CancellationToken cancellationToken)
     {
-        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        if (month is < 1 or > 12) return [];
+
+        var hasCacheEntries = await db.MonthlyBillCache.AsNoTracking()
+            .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
+        if (!hasCacheEntries)
+        {
+            await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        }
+
         var overrides = await db.DueAdjustments.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year)
             .Select(x => x.StudentId).Distinct().ToListAsync(cancellationToken);
         var overrideIds = overrides.ToHashSet();
-        var query = db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
+        var query = db.MonthlyBillCache.AsNoTracking()
             .Where(x => x.Month == month && x.Year == year);
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(adminWing)) query = query.Where(x => x.Student!.Gender == adminWing);
         else if (gender is "Male" or "Female") query = query.Where(x => x.Student!.Gender == gender);
         var rows = await query
-            .OrderBy(x => x.Student!.StudentName).ToListAsync(cancellationToken);
+            .OrderBy(x => x.Student!.StudentName)
+            .Select(x => new
+            {
+                x.StudentId,
+                StudentName = x.Student!.StudentName,
+                StudentCode = x.Student.StudentId,
+                x.Student.HallId,
+                x.Student.Gender,
+                x.DueBill,
+                x.Student.MobileNumber,
+                x.Student.Department,
+            })
+            .ToListAsync(cancellationToken);
+
         return rows.Select(x => new DueRowDto(
-            x.StudentId, x.Student?.StudentName ?? string.Empty, x.Student?.StudentId ?? string.Empty,
-            x.Student?.HallId ?? string.Empty, x.Student?.Gender ?? string.Empty, month, year, x.DueBill, overrideIds.Contains(x.StudentId),
-            x.Student?.MobileNumber ?? string.Empty, x.Student?.Department ?? string.Empty)).ToList();
+            x.StudentId, x.StudentName, x.StudentCode,
+            x.HallId, x.Gender, month, year, x.DueBill, overrideIds.Contains(x.StudentId),
+            x.MobileNumber, x.Department)).ToList();
     }
 
     [HttpPost("adjustments")]

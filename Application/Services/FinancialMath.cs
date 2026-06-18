@@ -34,6 +34,9 @@ public static class FinancialMath
     public static decimal ProportionalCost(decimal totalCost, int filteredCount, int totalCount)
         => totalCount == 0 ? 0m : totalCost * filteredCount / totalCount;
 
+    public static decimal PerHead(decimal totalCost, int headcount)
+        => headcount == 0 ? 0m : totalCost / headcount;
+
     public static bool IsChargeParticipant(
         string category,
         Guid itemId,
