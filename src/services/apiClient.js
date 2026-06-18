@@ -71,59 +71,82 @@ function humanizeErrorMessage(message) {
   return text;
 }
 
-export async function apiRequest(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  let token = getAccessToken();
-  const isLoginRequest = path === '/auth/login';
+const inFlightRequests = new Map();
 
-  if (token && isTokenExpired(token)) {
-    notifyUnauthorized('Your session has expired. Please sign in again.');
-    token = null;
-    if (!isLoginRequest) {
-      const error = new Error('Your session has expired. Please sign in again.');
-      error.status = 401;
+export async function apiRequest(path, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const isGet = method === 'GET';
+  const requestKey = `${method}:${path}`;
+
+  if (isGet && inFlightRequests.has(requestKey)) {
+    return inFlightRequests.get(requestKey);
+  }
+
+  const fetchPromise = (async () => {
+    const headers = new Headers(options.headers || {});
+    let token = getAccessToken();
+    const isLoginRequest = path === '/auth/login';
+
+    if (token && isTokenExpired(token)) {
+      notifyUnauthorized('Your session has expired. Please sign in again.');
+      token = null;
+      if (!isLoginRequest) {
+        const error = new Error('Your session has expired. Please sign in again.');
+        error.status = 401;
+        throw error;
+      }
+    }
+
+    if (!headers.has('Content-Type') && options.body) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const payload = isJsonLikeContentType(contentType) ? await response.json() : null;
+
+    if (!response.ok) {
+      const normalizedErrors = normalizeValidationErrors(payload?.errors);
+      const rawMessage = response.status === 401 && !isLoginRequest
+        ? 'Your session has expired. Please sign in again.'
+        : firstValidationMessage(payload?.errors) || payload?.message || payload?.title || 'Request failed.';
+      const message = humanizeErrorMessage(rawMessage);
+      if (response.status === 401 && !isLoginRequest) {
+        notifyUnauthorized(message);
+      }
+      const error = new Error(message);
+      error.status = response.status;
+      error.validationErrors = Object.fromEntries(
+        Object.entries(normalizedErrors).map(([key, value]) => [key, humanizeErrorMessage(value)]),
+      );
       throw error;
     }
-  }
 
-  if (!headers.has('Content-Type') && options.body) {
-    headers.set('Content-Type', 'application/json');
-  }
+    return payload;
+  })();
 
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
-
-  if (response.status === 204) {
-    return null;
-  }
-
-  const contentType = response.headers.get('content-type') || '';
-  const payload = isJsonLikeContentType(contentType) ? await response.json() : null;
-
-  if (!response.ok) {
-    const normalizedErrors = normalizeValidationErrors(payload?.errors);
-    const rawMessage = response.status === 401 && !isLoginRequest
-      ? 'Your session has expired. Please sign in again.'
-      : firstValidationMessage(payload?.errors) || payload?.message || payload?.title || 'Request failed.';
-    const message = humanizeErrorMessage(rawMessage);
-    if (response.status === 401 && !isLoginRequest) {
-      notifyUnauthorized(message);
+  if (isGet) {
+    inFlightRequests.set(requestKey, fetchPromise);
+    try {
+      return await fetchPromise;
+    } finally {
+      inFlightRequests.delete(requestKey);
     }
-    const error = new Error(message);
-    error.status = response.status;
-    error.validationErrors = Object.fromEntries(
-      Object.entries(normalizedErrors).map(([key, value]) => [key, humanizeErrorMessage(value)]),
-    );
-    throw error;
   }
 
-  return payload;
+  return fetchPromise;
 }
 
 export function toQueryString(params = {}) {

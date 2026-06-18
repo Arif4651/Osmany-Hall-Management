@@ -1,15 +1,18 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Megaphone, ChevronDown, ChevronUp, LoaderCircle } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Megaphone, ChevronDown, ChevronUp } from 'lucide-react';
 import { noticeService } from '../../services/noticeService';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 
 const ITEMS_PER_PAGE = 5;
 
 export default function StudentNoticeBoard() {
   useDocumentTitle('Notice Board');
-  const [notices, setNotices] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
+
+  // Cached fetch — notices are re-used for 5 minutes across navigation
+  const { data: notices = [], isLoading, isRefreshing, error } =
+    useCachedFetch('student-notices', () => noticeService.getNotices(), { ttl: 5 * 60_000 });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -17,27 +20,13 @@ export default function StudentNoticeBoard() {
   // Expanded card state
   const [expandedIds, setExpandedIds] = useState(new Set());
 
-  const fetchNotices = async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const data = await noticeService.getNotices();
-      setNotices(data);
-      localStorage.setItem('lastNoticeBoardVisit', new Date().toISOString());
-      // Automatically expand the first notice if exists
-      if (data.length > 0) {
-        setExpandedIds(new Set([data[0].id]));
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load notices.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Auto-expand first notice on initial load
   useEffect(() => {
-    fetchNotices();
-  }, []);
+    if (notices.length > 0) {
+      localStorage.setItem('lastNoticeBoardVisit', new Date().toISOString());
+      setExpandedIds((prev) => prev.size === 0 ? new Set([notices[0].id]) : prev);
+    }
+  }, [notices]);
 
   const toggleExpand = (id) => {
     setExpandedIds(prev => {
@@ -70,18 +59,28 @@ export default function StudentNoticeBoard() {
   return (
     <div className="notice-board-page">
       <header className="notice-board-header">
-        <div>
-          <h1>Notice Board</h1>
-          <p>Important announcements and notices for your wing</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
+          <Megaphone size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+          <div>
+            <h1 style={{ margin: 0 }}>Notice Board</h1>
+            <p style={{ margin: '0.25rem 0 0 0' }}>Important announcements and notices for your wing</p>
+          </div>
         </div>
       </header>
 
       {error && <div className="student-message student-message-error">{error}</div>}
 
+      {isRefreshing && <div className="data-refreshing-bar" />}
+
       {isLoading ? (
-        <div className="notice-empty-state">
-          <LoaderCircle size={24} className="spin" style={{ margin: '0 auto 0.5rem' }} />
-          <p>Loading notices...</p>
+        <div className="skeleton-cards" style={{ display: 'grid', gap: '1rem', marginTop: '1rem' }}>
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="skeleton-card" style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '8px' }}>
+              <div className="skeleton-block skeleton-card-title" style={{ width: '40%', height: '1.2rem', marginBottom: '0.8rem' }} />
+              <div className="skeleton-block skeleton-card-body" style={{ height: '1rem', marginBottom: '0.5rem' }} />
+              <div className="skeleton-block skeleton-card-body short" style={{ width: '70%', height: '1rem' }} />
+            </div>
+          ))}
         </div>
       ) : notices.length === 0 ? (
         <div className="notice-empty-state">

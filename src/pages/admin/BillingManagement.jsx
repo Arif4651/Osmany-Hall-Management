@@ -6,6 +6,9 @@ import { Calculator, HandCoins, RefreshCcw, ShieldAlert } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { useQueryCache } from '../../context/QueryCacheContext';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
@@ -24,11 +27,10 @@ const getAlign = (header) => {
 export default function BillingManagement() {
   useDocumentTitle('Bill Management');
   const { user } = useAuth();
+  const { invalidate } = useQueryCache();
   const [filters, setFilters] = useState(initialFilters);
-  const [rows, setRows] = useState([]);
   const [serviceAmount, setServiceAmount] = useState('');
   const [hasServiceBill, setHasServiceBill] = useState(false);
-  const [dswSubsidies, setDswSubsidies] = useState([]);
   const [editingSubsidy, setEditingSubsidy] = useState(null);
   const [editSubsidyForm, setEditSubsidyForm] = useState({
     id: '',
@@ -47,7 +49,6 @@ export default function BillingManagement() {
   const [activeTab, setActiveTab] = useState('service');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
   const [savingService, setSavingService] = useState(false);
   const [savingSubsidy, setSavingSubsidy] = useState(false);
 
@@ -61,58 +62,79 @@ export default function BillingManagement() {
     }
   }, [filters.gender, user?.wing]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const combinedKey = `admin-billing-combined-${filters.month}-${filters.year}-${filters.status}-${user?.wing || filters.gender}`;
+
+  const {
+    data: combinedData = null,
+    isLoading: loading,
+    isRefreshing,
+    error: loadError,
+    refresh
+  } = useCachedFetch(combinedKey, async () => {
+    const billingRows = await adminDataService.getBillingRecords(filters);
+    
+    let sBillAmount = '';
+    let hasSBill = false;
     try {
-      setRows(await adminDataService.getBillingRecords(filters));
-      
-      // Fetch service bill
-      try {
-        const sBill = await adminDataService.getServiceBill({
-          month: parseInt(filters.month, 10),
-          year: parseInt(filters.year, 10)
-        });
-        if (sBill > 0) {
-          setServiceAmount(String(sBill));
-          setHasServiceBill(true);
-        } else {
-          setServiceAmount('');
-          setHasServiceBill(false);
-        }
-      } catch (sbErr) {
-        setServiceAmount('');
-        setHasServiceBill(false);
+      const sBill = await adminDataService.getServiceBill({
+        month: parseInt(filters.month, 10),
+        year: parseInt(filters.year, 10)
+      });
+      if (sBill > 0) {
+        sBillAmount = String(sBill);
+        hasSBill = true;
       }
-
-      // Fetch DSW subsidies
-      try {
-        const currentWing = user?.wing || filters.gender;
-        let subsidies = [];
-        if (currentWing === 'All') {
-          const [maleSubs, femaleSubs] = await Promise.all([
-            adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Male' }),
-            adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Female' })
-          ]);
-          subsidies = [...(maleSubs || []), ...(femaleSubs || [])];
-        } else {
-          subsidies = await adminDataService.getDswSubsidies({
-            month: parseInt(filters.month, 10),
-            year: parseInt(filters.year, 10),
-            wing: currentWing
-          });
-        }
-        setDswSubsidies(subsidies || []);
-      } catch (dswErr) {
-        setDswSubsidies([]);
-      }
-
-      setError('');
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setLoading(false);
+    } catch {
+      // ignore
     }
-  }, [filters, user?.wing]);
+
+    let subsidies = [];
+    try {
+      const currentWing = user?.wing || filters.gender;
+      if (currentWing === 'All') {
+        const [maleSubs, femaleSubs] = await Promise.all([
+          adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Male' }),
+          adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Female' })
+        ]);
+        subsidies = [...(maleSubs || []), ...(femaleSubs || [])];
+      } else {
+        subsidies = await adminDataService.getDswSubsidies({
+          month: parseInt(filters.month, 10),
+          year: parseInt(filters.year, 10),
+          wing: currentWing
+        });
+      }
+    } catch {
+      // ignore
+    }
+
+    return { rows: billingRows, serviceAmount: sBillAmount, hasServiceBill: hasSBill, dswSubsidies: subsidies || [] };
+  }, { ttl: 30_000 });
+
+  const rows = combinedData?.rows || [];
+  const dswSubsidies = combinedData?.dswSubsidies || [];
+
+  useEffect(() => {
+    if (combinedData) {
+      setServiceAmount(combinedData.serviceAmount || '');
+      setHasServiceBill(combinedData.hasServiceBill || false);
+    } else {
+      setServiceAmount('');
+      setHasServiceBill(false);
+    }
+  }, [combinedData]);
+
+  useEffect(() => {
+    if (loadError) {
+      setError(loadError.message);
+    } else {
+      setError('');
+    }
+  }, [loadError]);
+
+  const load = useCallback(async () => {
+    refresh();
+  }, [refresh]);
 
   const deleteServiceBill = async () => {
     if (!window.confirm(`Are you sure you want to delete the service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
@@ -128,6 +150,7 @@ export default function BillingManagement() {
       setError('');
       setServiceAmount('');
       setHasServiceBill(false);
+      invalidate('admin-billing-combined');
       await load();
     } catch (err) {
       setError(err.message);
@@ -145,6 +168,7 @@ export default function BillingManagement() {
       await adminDataService.deleteDswSubsidy(id);
       setMessage("DSW subsidy deleted successfully and bills recalculated.");
       setError("");
+      invalidate('admin-billing-combined');
       await load();
     } catch (err) {
       setError(err.message);
@@ -185,6 +209,7 @@ export default function BillingManagement() {
       setMessage('DSW subsidy updated successfully and bills recalculated.');
       setError('');
       setEditingSubsidy(null);
+      invalidate('admin-billing-combined');
       await load();
     } catch (err) {
       setError(err.message);
@@ -193,9 +218,6 @@ export default function BillingManagement() {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const exportRows = () => rows.map((row) => ({
     'Student Name': row.studentName,
@@ -255,6 +277,7 @@ export default function BillingManagement() {
       });
       setMessage('Service bill saved and bills recalculated.');
       setError('');
+      invalidate('admin-billing-combined');
       await load();
     } catch (saveError) {
       setError(saveError.message);
@@ -269,6 +292,7 @@ export default function BillingManagement() {
       await adminDataService.closeBillingPeriod({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10) });
       setMessage('Billing period closed and frozen.');
       setError('');
+      invalidate('admin-billing-combined');
       await load();
     } catch (closeError) {
       setError(closeError.message);
@@ -282,6 +306,7 @@ export default function BillingManagement() {
       await adminDataService.unlockBillingPeriod({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), note });
       setMessage('Billing period unlocked and recalculated.');
       setError('');
+      invalidate('admin-billing-combined');
       await load();
     } catch (unlockError) {
       setError(unlockError.message);
@@ -320,6 +345,7 @@ export default function BillingManagement() {
       });
       setMessage('DSW subsidy applied successfully and affected bills were recalculated.');
       setError('');
+      invalidate('admin-billing-combined');
       await load();
     } catch (saveError) {
       setError(saveError.message);
@@ -333,6 +359,7 @@ export default function BillingManagement() {
       await adminDataService.recalculateBillingMonth({ month: Number(filters.month), year: Number(filters.year) });
       setMessage('Billing month recalculated successfully.');
       setError('');
+      invalidate('admin-billing-combined');
       await load();
     } catch (recalcError) {
       setError(recalcError.message);
@@ -341,6 +368,7 @@ export default function BillingManagement() {
 
   return (
     <div className="financial-page">
+      {isRefreshing && <div className="data-refreshing-bar" />}
       <header>
         <h1>Bill Management</h1>
         <p>Monthly bills calculated from stock-out transactions, subsidy adjustments, and historical meal participation.</p>
@@ -558,22 +586,25 @@ export default function BillingManagement() {
       </div>
 
       <section className="financial-card table-wrap">
-        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {headers.map((header) => (
-                <th key={header} style={{ textAlign: getAlign(header), padding: '0.75rem' }}>{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+        {loading && !rows.length ? (
+          <TableSkeleton rows={8} cols={10} />
+        ) : (
+          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
               <tr>
-                <td colSpan={headers.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                  {loading ? 'Loading billing records...' : 'No billing records found.'}
-                </td>
+                {headers.map((header) => (
+                  <th key={header} style={{ textAlign: getAlign(header), padding: '0.75rem' }}>{header}</th>
+                ))}
               </tr>
-            ) : (
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={headers.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
+                    No billing records found.
+                  </td>
+                </tr>
+              ) : (
               rows.map((row) => {
                 const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ').trim();
                 let badgeBg = '#f1f5f9';
@@ -611,7 +642,8 @@ export default function BillingManagement() {
             )}
           </tbody>
         </table>
-      </section>
+      )}
+    </section>
 
       <Modal
         isOpen={confirmSubsidyOpen}

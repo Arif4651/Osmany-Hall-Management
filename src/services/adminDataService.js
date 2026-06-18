@@ -23,7 +23,7 @@ export const adminDataService = {
   saveServiceBill: async (payload) => apiRequest('/billing/service-bills', { method: 'PUT', body: JSON.stringify(payload) }),
   closeBillingPeriod: async (payload) => apiRequest('/billing/periods/close', { method: 'POST', body: JSON.stringify(payload) }),
   unlockBillingPeriod: async (payload) => apiRequest('/billing/periods/unlock', { method: 'POST', body: JSON.stringify(payload) }),
-  getPayments: async (gender) => apiRequest(`/payments/admin${toQueryString({ gender })}`),
+  getPayments: async ({ gender, page, pageSize }) => apiRequest(`/payments/admin${toQueryString({ gender, page, pageSize })}`),
   reviewPayment: async (id, action, approvedAmount = null) => apiRequest(`/payments/${id}/review`, {
     method: 'POST',
     body: JSON.stringify({ action, approvedAmount }),

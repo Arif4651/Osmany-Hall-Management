@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import mealRepository from '../services/meal/mealRepository';
 import { getTomorrowDayId } from '../constants/mealConfig';
+import { useCachedFetch } from './useCachedFetch';
+import { queryCache } from '../services/queryCache';
 
 function getItemsCost(items = []) {
   return items.reduce((sum, item) => sum + Number(item.cost || 0), 0);
@@ -51,27 +53,20 @@ function formatOptionalItemsToText(items = []) {
 }
 
 export default function useAdminMealModule(wing) {
-  const [moduleData, setModuleData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const cacheKey = wing ? `admin-meal-module-${wing}` : null;
+  const {
+    data: moduleData,
+    isLoading,
+    error: cachedError,
+    refresh: loadModule,
+    mutate: setModuleData,
+  } = useCachedFetch(
+    cacheKey,
+    () => mealRepository.getModule(wing),
+    { ttl: 10 * 60_000 }
+  );
 
-  const loadModule = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage('');
-
-    try {
-      const nextState = await mealRepository.getModule(wing);
-      setModuleData(nextState);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to load meal module.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [wing]);
-
-  useEffect(() => {
-    loadModule();
-  }, [loadModule]);
+  const errorMessage = cachedError || '';
 
   const mealTypes = useMemo(() => moduleData?.settings?.mealTypes || [], [moduleData]);
   const days = useMemo(() => moduleData?.days || [], [moduleData]);
@@ -164,8 +159,9 @@ export default function useAdminMealModule(wing) {
 
   const updateCutoffTime = useCallback(async (nextCutoffTime) => {
     const updated = await mealRepository.updateCutoffTime(nextCutoffTime);
+    queryCache.invalidate('meal-counts');
     setModuleData(updated);
-  }, []);
+  }, [setModuleData]);
 
   const getMealForEdit = useCallback((dayId, mealTypeId) => {
     const day = days.find((entry) => entry.id === dayId);
@@ -191,8 +187,9 @@ export default function useAdminMealModule(wing) {
       optionalItems,
     });
 
+    queryCache.invalidate('meal-counts');
     setModuleData(updated);
-  }, [wing]);
+  }, [wing, setModuleData]);
 
   return {
     isLoading,

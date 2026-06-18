@@ -5,7 +5,11 @@ import autoTable from 'jspdf-autotable';
 import { FileSpreadsheet, FileText, Printer } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
+import Button from '../../components/ui/Button';
 import BillingPeriodPicker from '../../components/financial/BillingPeriodPicker';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { useQueryCache } from '../../context/QueryCacheContext';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, moneyInput } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
@@ -15,32 +19,41 @@ const now = new Date();
 export default function DueBill() {
   useDocumentTitle('Due Bill');
   const { user } = useAuth();
+  const { invalidate } = useQueryCache();
   const [gender, setGender] = useState(() => user?.wing || 'Male');
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
-  const [rows, setRows] = useState([]);
   const [editing, setEditing] = useState(null);
   const [adjustment, setAdjustment] = useState({ amount: '', note: '' });
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [submitError, setSubmitError] = useState('');
 
   // Filter States
   const [filterAmount, setFilterAmount] = useState('');
   const [filterCondition, setFilterCondition] = useState('all'); // 'all', 'above', 'below'
 
-  const load = useCallback(async () => {
-    try {
-      setRows(await adminDataService.getDueRows(period.month, period.year, gender));
-      setError('');
-    } catch (loadError) {
-      setError(loadError.message);
-    }
-  }, [period, gender]);
+  const cacheKey = `due-rows-${period.month}-${period.year}-${gender}`;
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const {
+    data: rows = [],
+    isLoading,
+    isRefreshing,
+    error: loadError,
+    refresh
+  } = useCachedFetch(
+    cacheKey,
+    () => adminDataService.getDueRows(period.month, period.year, gender),
+    { ttl: 30_000 }
+  );
+
+  const error = loadError || submitError;
+
+  const load = useCallback(async () => {
+    refresh();
+  }, [refresh]);
 
   const saveAdjustment = async () => {
+    setSubmitError('');
+    setMessage('');
     try {
       await adminDataService.saveDueAdjustment({
         studentId: editing.studentId,
@@ -51,9 +64,11 @@ export default function DueBill() {
       });
       setEditing(null);
       setMessage('Due bill override saved.');
+      invalidate('due-rows-');
+      invalidate('admin-billing-combined');
       await load();
     } catch (saveError) {
-      setError(saveError.message);
+      setSubmitError(saveError.message);
     }
   };
 
@@ -162,6 +177,8 @@ export default function DueBill() {
 
   return (
     <div className="financial-page">
+      {isRefreshing && <div className="data-refreshing-bar" />}
+      
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
         <header style={{ margin: 0 }}>
           <h1 style={{ margin: 0 }}>Due Bill</h1>
@@ -169,33 +186,30 @@ export default function DueBill() {
         </header>
 
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button 
-            type="button" 
-            className="secondary-action" 
+          <Button 
+            variant="secondary" 
             onClick={exportExcel} 
-            disabled={filteredRows.length === 0}
+            disabled={filteredRows.length === 0 || isLoading}
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
           >
             <FileSpreadsheet size={16} /> Excel
-          </button>
-          <button 
-            type="button" 
-            className="secondary-action" 
+          </Button>
+          <Button 
+            variant="secondary" 
             onClick={exportPdf} 
-            disabled={filteredRows.length === 0}
+            disabled={filteredRows.length === 0 || isLoading}
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
           >
             <FileText size={16} /> PDF
-          </button>
-          <button 
-            type="button" 
-            className="secondary-action" 
+          </Button>
+          <Button 
+            variant="secondary" 
             onClick={handlePrint} 
-            disabled={filteredRows.length === 0}
+            disabled={filteredRows.length === 0 || isLoading}
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
           >
             <Printer size={16} /> Print
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -208,7 +222,12 @@ export default function DueBill() {
         {user?.role === 'super_admin' ? (
           <div className="wing-switcher">
             {['Male', 'Female'].map((wing) => (
-              <button type="button" key={wing} className={gender === wing ? 'is-active' : ''} onClick={() => setGender(wing)}>
+              <button
+                type="button"
+                key={wing}
+                className={gender === wing ? 'is-active' : ''}
+                onClick={() => setGender(wing)}
+              >
                 {wing} Wing
               </button>
             ))}
@@ -317,96 +336,100 @@ export default function DueBill() {
       </section>
 
       <section className="financial-card table-wrap">
-        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Name</th>
-              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student ID</th>
-              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Department</th>
-              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Mobile Number</th>
-              <th style={{ textAlign: 'left', padding: '0.75rem' }}>Hall ID</th>
-              <th style={{ textAlign: 'right', padding: '0.75rem' }}>Current Due Bill</th>
-              <th style={{ textAlign: 'center', padding: '0.75rem' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.length === 0 ? (
+        {isLoading && !rows.length ? (
+          <TableSkeleton rows={8} cols={7} />
+        ) : (
+          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1.5rem' }}>
-                  No students found matching the selected filter criteria.
-                </td>
+                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Name</th>
+                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student ID</th>
+                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Department</th>
+                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Mobile Number</th>
+                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Hall ID</th>
+                <th style={{ textAlign: 'right', padding: '0.75rem' }}>Current Due Bill</th>
+                <th style={{ textAlign: 'center', padding: '0.75rem' }}>Action</th>
               </tr>
-            ) : (
-              filteredRows.map((row) => (
-                <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
-                    {row.studentName}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
-                    {row.studentCode}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
-                    {row.department || 'N/A'}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
-                    {row.mobileNumber || 'N/A'}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>
-                    {row.hallId}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
-                    {formatCurrency(row.dueBill)}
-                    {row.isOverridden && (
-                      <span className="warning-badge" style={{
-                        marginLeft: '0.35rem',
-                        background: '#fffbeb',
-                        color: '#b45309',
-                        padding: '0.1rem 0.35rem',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: '600',
-                        display: 'inline-block'
-                      }}>
-                        Override
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                    <button
-                      onClick={() => {
-                        setEditing(row);
-                        setAdjustment({ amount: row.dueBill, note: '' });
-                      }}
-                      style={{
-                        padding: '0.35rem 0.65rem',
-                        fontSize: '0.8rem',
-                        fontWeight: '600',
-                        border: '1px solid var(--border)',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        background: 'var(--surface)',
-                        color: 'var(--text)',
-                        transition: 'all 0.2s'
-                      }}
-                      onMouseOver={(e) => {
-                        e.currentTarget.style.background = 'var(--surface-soft, #f8fafc)';
-                        e.currentTarget.style.borderColor = 'var(--primary)';
-                        e.currentTarget.style.color = 'var(--primary)';
-                      }}
-                      onMouseOut={(e) => {
-                        e.currentTarget.style.background = 'var(--surface)';
-                        e.currentTarget.style.borderColor = 'var(--border)';
-                        e.currentTarget.style.color = 'var(--text)';
-                      }}
-                    >
-                      Override
-                    </button>
+            </thead>
+            <tbody>
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1.5rem' }}>
+                    No students found matching the selected filter criteria.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                filteredRows.map((row) => (
+                  <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
+                      {row.studentName}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
+                      {row.studentCode}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
+                      {row.department || 'N/A'}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
+                      {row.mobileNumber || 'N/A'}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                      {row.hallId}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
+                      {formatCurrency(row.dueBill)}
+                      {row.isOverridden && (
+                        <span className="warning-badge" style={{
+                          marginLeft: '0.35rem',
+                          background: '#fffbeb',
+                          color: '#b45309',
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: '4px',
+                          fontSize: '0.7rem',
+                          fontWeight: '600',
+                          display: 'inline-block'
+                        }}>
+                          Override
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                      <button
+                        onClick={() => {
+                          setEditing(row);
+                          setAdjustment({ amount: row.dueBill, note: '' });
+                        }}
+                        style={{
+                          padding: '0.35rem 0.65rem',
+                          fontSize: '0.8rem',
+                          fontWeight: '600',
+                          border: '1px solid var(--border)',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: 'var(--surface)',
+                          color: 'var(--text)',
+                          transition: 'all 0.2s'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.background = 'var(--surface-soft, #f8fafc)';
+                          e.currentTarget.style.borderColor = 'var(--primary)';
+                          e.currentTarget.style.color = 'var(--primary)';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.background = 'var(--surface)';
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                          e.currentTarget.style.color = 'var(--text)';
+                        }}
+                      >
+                        Override
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <Modal isOpen={!!editing} onClose={() => setEditing(null)} title={`Override Due: ${editing?.studentName || ''}`}>
@@ -429,7 +452,7 @@ export default function DueBill() {
               onChange={(e) => setAdjustment({ ...adjustment, note: e.target.value })}
             />
           </label>
-          <button className="primary-action" onClick={saveAdjustment}>Confirm Override</button>
+          <Button onClick={saveAdjustment}>Confirm Override</Button>
         </div>
       </Modal>
     </div>

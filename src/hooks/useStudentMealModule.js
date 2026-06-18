@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import mealRepository from '../services/meal/mealRepository';
 import { getTomorrowDayId, getMinutesUntilCutoff, isAfterDailyCutoff } from '../constants/mealConfig';
+import { useCachedFetch } from './useCachedFetch';
+import { queryCache } from '../services/queryCache';
 
 function formatLocalDate(date) {
   const year = date.getFullYear();
@@ -43,51 +45,55 @@ function removeUnavailableOptions(preferences, moduleState, effectiveDate) {
 }
 
 export default function useStudentMealModule(studentId) {
-  const [moduleData, setModuleData] = useState(null);
   const [preferences, setPreferences] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
-  const loadState = useCallback(async () => {
-    if (!studentId) {
-      setIsLoading(true);
-      setErrorMessage('');
-      setModuleData(null);
-      setPreferences({});
-      return;
-    }
+  const moduleCacheKey = studentId ? `student-meal-module-${studentId}` : null;
+  const {
+    data: moduleData,
+    isLoading: isModuleLoading,
+    error: moduleError,
+    refresh: refreshModule,
+  } = useCachedFetch(
+    moduleCacheKey,
+    () => mealRepository.getModule(),
+    { ttl: 10 * 60_000 }
+  );
 
-    setIsLoading(true);
-    setErrorMessage('');
+  const cutoffTime = moduleData?.settings?.cutoffTime || '';
+  const effectiveDate = cutoffTime ? getEffectivePreferenceDate(cutoffTime, currentTime) : '';
 
-    try {
-      const moduleState = await mealRepository.getModule();
-      const effectiveDate = getEffectivePreferenceDate(moduleState?.settings?.cutoffTime);
-      const preferenceState = await mealRepository.getStudentPreferences(effectiveDate);
+  const prefsCacheKey = studentId && effectiveDate ? `student-meal-preferences-${studentId}-${effectiveDate}` : null;
+  const {
+    data: rawPreferences,
+    isLoading: isPrefsLoading,
+    error: prefsError,
+    refresh: refreshPrefs,
+  } = useCachedFetch(
+    prefsCacheKey,
+    () => mealRepository.getStudentPreferences(effectiveDate),
+    { ttl: 5 * 60_000 }
+  );
 
-      setModuleData(moduleState);
+  // Sync loaded preferences to form state
+  useEffect(() => {
+    if (rawPreferences && moduleData && effectiveDate) {
       setPreferences(removeUnavailableOptions(
-        mapPreferenceList(preferenceState),
-        moduleState,
+        mapPreferenceList(rawPreferences),
+        moduleData,
         effectiveDate,
       ));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to load student meal module.');
-    } finally {
-      setIsLoading(false);
     }
-  }, [studentId]);
+  }, [rawPreferences, moduleData, effectiveDate]);
 
   useEffect(() => {
-    loadState();
-
     const intervalId = window.setInterval(() => {
       setCurrentTime(new Date());
     }, 30000);
 
     const handleFocus = () => {
-      loadState();
+      refreshModule();
+      refreshPrefs();
       setCurrentTime(new Date());
     };
 
@@ -97,10 +103,9 @@ export default function useStudentMealModule(studentId) {
       window.removeEventListener('focus', handleFocus);
       window.clearInterval(intervalId);
     };
-  }, [loadState]);
+  }, [refreshModule, refreshPrefs]);
 
   const mealTypes = useMemo(() => moduleData?.settings?.mealTypes || [], [moduleData]);
-  const cutoffTime = moduleData?.settings?.cutoffTime || '';
 
   const tomorrowMenu = useMemo(() => {
     if (!moduleData?.days?.length) return null;
@@ -121,45 +126,48 @@ export default function useStudentMealModule(studentId) {
     }));
   }, []);
 
-  const clearErrorMessage = useCallback(() => setErrorMessage(''), []);
+  const errorMessage = moduleError || prefsError || '';
+  const isLoading = isModuleLoading || isPrefsLoading;
+
+  const clearErrorMessage = useCallback(() => {
+    // SWR error handles automatically, but we can clear from local if we want, or keep empty
+  }, []);
 
   const savePreferences = useCallback(async () => {
-    setErrorMessage('');
+    const effectiveFrom = getEffectivePreferenceDate(cutoffTime);
+    const meals = mealTypes.map((mealType) => {
+      const preference = preferences[mealType.id] || { enabled: false, optionItemId: '' };
+      return {
+        mealPeriod: mealType.id,
+        isOn: preference.enabled,
+        optionItemId: preference.enabled && preference.optionItemId
+          ? preference.optionItemId
+          : null,
+        optionName: null,
+        guestCount: 0,
+      };
+    });
 
-    try {
-      const effectiveFrom = getEffectivePreferenceDate(cutoffTime);
-      const meals = mealTypes.map((mealType) => {
-        const preference = preferences[mealType.id] || { enabled: false, optionItemId: '' };
-        return {
-          mealPeriod: mealType.id,
-          isOn: preference.enabled,
-          optionItemId: preference.enabled && preference.optionItemId
-            ? preference.optionItemId
-            : null,
-          optionName: null,
-          guestCount: 0,
-        };
-      });
-      const updated = await mealRepository.saveStudentPreferences({ effectiveFrom, meals });
-      setPreferences(mapPreferenceList(updated));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to save meal preferences.');
-      throw error;
+    const updated = await mealRepository.saveStudentPreferences({ effectiveFrom, meals });
+
+    // Update queryCache directly
+    if (prefsCacheKey) {
+      queryCache.set(prefsCacheKey, updated, 5 * 60_000);
     }
-  }, [cutoffTime, mealTypes, preferences]);
+    setPreferences(mapPreferenceList(updated));
+  }, [cutoffTime, mealTypes, preferences, prefsCacheKey]);
 
   const resetPreferences = useCallback(async () => {
-    setErrorMessage('');
-
-    try {
-      const effectiveDate = getEffectivePreferenceDate(cutoffTime);
-      const defaults = await mealRepository.getStudentPreferences(effectiveDate);
-      setPreferences(mapPreferenceList(defaults));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to reset meal preferences.');
-      throw error;
+    const effectiveDateVal = getEffectivePreferenceDate(cutoffTime);
+    if (prefsCacheKey) {
+      queryCache.remove(prefsCacheKey);
     }
-  }, [cutoffTime]);
+    const defaults = await mealRepository.getStudentPreferences(effectiveDateVal);
+    if (prefsCacheKey) {
+      queryCache.set(prefsCacheKey, defaults, 5 * 60_000);
+    }
+    setPreferences(mapPreferenceList(defaults));
+  }, [cutoffTime, prefsCacheKey]);
 
   const getMealOptions = useCallback((mealTypeId) => {
     if (!tomorrowMenu) return [];
@@ -182,6 +190,9 @@ export default function useStudentMealModule(studentId) {
     savePreferences,
     resetPreferences,
     getMealOptions,
-    reload: loadState,
+    reload: () => {
+      refreshModule();
+      refreshPrefs();
+    },
   };
 }

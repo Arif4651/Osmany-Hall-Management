@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package } from 'lucide-react';
+import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package, Loader2 } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
 import { adminDataService } from '../../services/adminDataService';
 import { money, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { useQueryCache } from '../../context/QueryCacheContext';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 
 const tabs = [
   { id: 'in', label: 'Stock In' },
@@ -21,7 +24,7 @@ const formatDisplayDate = (value) => new Intl.DateTimeFormat('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric',
 }).format(new Date(`${value}T00:00:00`));
 
-function ItemPicker({ items, value, onChange, showRemaining }) {
+function ItemPicker({ items, value, onChange, showRemaining, disabled }) {
   const rootRef = useRef(null);
   const optionRefs = useRef([]);
   const [query, setQuery] = useState('');
@@ -64,6 +67,7 @@ function ItemPicker({ items, value, onChange, showRemaining }) {
   };
 
   const handleKeyDown = (e) => {
+    if (disabled) return;
     if (!open) {
       if (e.key === 'ArrowDown' || e.key === 'Enter') {
         setOpen(true);
@@ -95,17 +99,20 @@ function ItemPicker({ items, value, onChange, showRemaining }) {
   };
 
   return (
-    <div className="stock-item-picker" ref={rootRef}>
+    <div className={`stock-item-picker ${disabled ? 'is-disabled' : ''}`} ref={rootRef}>
       <Search size={17} />
       <input
         value={query}
         placeholder="Search item..."
         autoComplete="off"
+        disabled={disabled}
         onFocus={() => {
+          if (disabled) return;
           setOpen(true);
           setHighlightedIndex(filtered.length > 0 ? 0 : -1);
         }}
         onChange={(event) => {
+          if (disabled) return;
           setQuery(event.target.value);
           onChange('');
           setOpen(true);
@@ -142,10 +149,24 @@ export default function Inventory() {
   const { user, role } = useAuth();
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
 
+  const { invalidate } = useQueryCache();
+
   const [activeTab, setActiveTab] = useState('in');
   // Wing admins are locked to their wing's gender; super_admin/admin can switch
   const [gender, setGender] = useState(() => user?.wing || 'Male');
-  const [items, setItems] = useState([]);
+
+  // Cache inventory items list
+  const {
+    data: items = [],
+    isLoading: itemsLoading,
+    isRefreshing: itemsRefreshing,
+    refresh: refreshItems
+  } = useCachedFetch(
+    `inventory-${gender}`,
+    () => adminDataService.getInventory(false, gender),
+    { ttl: 30_000 }
+  );
+
   const [movement, setMovement] = useState(emptyMovement);
   const [summarySearch, setSummarySearch] = useState('');
   const [itemSearch, setItemSearch] = useState('');
@@ -158,8 +179,23 @@ export default function Inventory() {
 
   // History ledger state variables
   const [historyItem, setHistoryItem] = useState(null);
-  const [ledgerTransactions, setLedgerTransactions] = useState([]);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
+
+  // Cache ledger transactions list
+  const ledgerCacheKey = historyItem ? `inventory-ledger-${historyItem.id}-${gender}` : null;
+  const {
+    data: ledgerTransactions = [],
+    isLoading: ledgerLoading,
+    isRefreshing: ledgerRefreshing,
+    error: ledgerFetchError,
+    refresh: refreshLedger
+  } = useCachedFetch(
+    ledgerCacheKey,
+    () => adminDataService.getInventoryLedger({ itemId: historyItem.id, wing: gender }),
+    { ttl: 30_000, enabled: Boolean(historyItem) }
+  );
+
+  const ledgerError = ledgerFetchError || modalError;
+
   const [ledgerTab, setLedgerTab] = useState('all');
   const [editTransaction, setEditTransaction] = useState(null);
   const [editForm, setEditForm] = useState({ date: '', mealPeriod: 'breakfast', quantity: '', totalPrice: '' });
@@ -206,10 +242,10 @@ export default function Inventory() {
       };
       await adminDataService.updateInventoryMovement(editTransaction.id, payload);
       setEditTransaction(null);
-      await loadItems();
+      invalidate('inventory-');
+      refreshItems();
       if (historyItem) {
-        const data = await adminDataService.getInventoryLedger({ itemId: historyItem.id, wing: gender });
-        setLedgerTransactions(Array.isArray(data) ? data : []);
+        refreshLedger();
       }
       setMessage('Transaction updated successfully.');
     } catch (error) {
@@ -226,10 +262,10 @@ export default function Inventory() {
     try {
       await adminDataService.deleteInventoryMovement(deleteTransaction.id);
       setDeleteTransaction(null);
-      await loadItems();
+      invalidate('inventory-');
+      refreshItems();
       if (historyItem) {
-        const data = await adminDataService.getInventoryLedger({ itemId: historyItem.id, wing: gender });
-        setLedgerTransactions(Array.isArray(data) ? data : []);
+        refreshLedger();
       }
       setMessage('Transaction deleted successfully.');
     } catch (error) {
@@ -246,16 +282,6 @@ export default function Inventory() {
   }, [editForm.quantity, editForm.totalPrice]);
 
   const formRef = useRef(null);
-
-  const loadItems = useCallback(async () => {
-    try {
-      setItems(await adminDataService.getInventory(false, gender));
-    } catch (error) {
-      setMessage(error.message || 'Unable to load inventory.');
-    }
-  }, [gender]);
-
-  useEffect(() => { loadItems(); }, [loadItems]);
 
   useEffect(() => {
     if (activeTab === 'non-stock' && movement.itemId && movement.date && movement.mealPeriod) {
@@ -325,13 +351,19 @@ export default function Inventory() {
     return qty > 0 ? (total / qty) : 0;
   }, [movement.quantity, movement.totalPrice]);
 
+  // Filter ledger transactions dynamically to avoid cross-item stale displays
+  const currentLedgerTransactions = useMemo(() => {
+    if (!historyItem) return [];
+    return ledgerTransactions.filter((t) => t.itemId === historyItem.id);
+  }, [ledgerTransactions, historyItem]);
+
   // Compute stats for history ledger modal
   const historyStats = useMemo(() => {
     let totalIn = 0;
     let totalOut = 0;
     let totalSpent = 0;
 
-    ledgerTransactions.forEach((t) => {
+    currentLedgerTransactions.forEach((t) => {
       const qty = Number(t.quantity || 0);
       const cost = Number(t.totalCost || 0);
       if (t.transactionType === 'in') {
@@ -343,13 +375,13 @@ export default function Inventory() {
     });
 
     return { totalIn, totalOut, totalSpent };
-  }, [ledgerTransactions]);
+  }, [currentLedgerTransactions]);
 
   // Chronologically sort timeline to compute running balance correctly
   const historyTimeline = useMemo(() => {
     // The backend returns transactions sorted newest first (Date desc, CreatedAtUtc desc).
     // Reversing it gives us chronological order (oldest first).
-    const oldestFirst = [...ledgerTransactions].reverse();
+    const oldestFirst = [...currentLedgerTransactions].reverse();
 
     let balance = 0;
     const computed = oldestFirst.map((t) => {
@@ -362,7 +394,7 @@ export default function Inventory() {
     });
 
     return computed.reverse();
-  }, [ledgerTransactions]);
+  }, [currentLedgerTransactions]);
 
 
   const filteredTimeline = useMemo(() => {
@@ -377,20 +409,10 @@ export default function Inventory() {
   }, []);
 
   // Open history ledger modal and load timeline from backend
-  const openHistoryModal = async (item) => {
+  const openHistoryModal = (item) => {
     setHistoryItem(item);
-    setLedgerTransactions([]);
-    setLedgerLoading(true);
     setLedgerTab('all');
     setModalError('');
-    try {
-      const data = await adminDataService.getInventoryLedger({ itemId: item.id, wing: gender });
-      setLedgerTransactions(Array.isArray(data) ? data : []);
-    } catch (error) {
-      setModalError(error.message || 'Unable to load stock history.');
-    } finally {
-      setLedgerLoading(false);
-    }
   };
 
 
@@ -445,7 +467,8 @@ export default function Inventory() {
         note: null,
       });
       setMovement(emptyMovement);
-      await loadItems();
+      invalidate('inventory-');
+      refreshItems();
       setMessage('Transaction saved successfully.');
     } catch (error) {
       setMessage(error.message || 'Unable to save transaction.');
@@ -483,7 +506,8 @@ export default function Inventory() {
       if (itemForm.id) await adminDataService.updateInventoryItem(itemForm.id, payload);
       else await adminDataService.createInventoryItem(payload);
       setItemModal(null);
-      await loadItems();
+      invalidate('inventory-');
+      refreshItems();
       setMessage(itemForm.id ? 'Item updated successfully.' : 'Item created successfully.');
     } catch (error) {
       setModalError(error.message || 'Unable to save item.');
@@ -505,7 +529,8 @@ export default function Inventory() {
       if (deleteTarget.force) await adminDataService.forceDeleteInventoryItem(deleteTarget.item.id);
       else await adminDataService.deleteInventoryItem(deleteTarget.item.id);
       setDeleteTarget(null);
-      await loadItems();
+      invalidate('inventory-');
+      refreshItems();
       setMessage(deleteTarget.force ? 'Item was permanently deleted.' : 'Item deleted successfully.');
     } catch (error) {
       setModalError(error.message || 'Unable to delete item.');
@@ -516,6 +541,7 @@ export default function Inventory() {
 
   return (
     <div className="stock-page">
+      {(itemsRefreshing || ledgerRefreshing) && <div className="data-refreshing-bar" />}
       <div className="stock-title-row">
         <h1>Stock</h1>
         <div className="stock-top-actions">
@@ -563,43 +589,48 @@ export default function Inventory() {
             <button type="button" onClick={() => openItemModal()}><Plus size={17} /> New Item</button>
           </div>
           <div className="stock-items-table-wrap">
-            <table className="stock-items-table">
-              <thead><tr><th>Name</th><th>Unit</th><th>Category</th><th>Main Option</th><th>Storage Type</th><th>Actions</th></tr></thead>
-              <tbody style={{ cursor: 'pointer' }}>{visibleItems.map((item) => (
-                <tr key={item.id} onClick={() => openHistoryModal(item)}>
-                  <td>{item.name}</td>
-                  <td>{item.unit.toUpperCase()}</td>
-                  <td><span className={`stock-category stock-category-${item.category.toLowerCase()}`}>{item.category.toUpperCase()}</span></td>
-                  <td>{item.category === 'Others' ? items.find((option) => option.id === item.linkedOptionId)?.name || 'Not linked' : '—'}</td>
-                  <td><span className={`stock-storage ${item.isStored ? 'is-stored' : 'is-non-stored'}`}>{item.isStored ? 'STORED' : 'NON-STORED'}</span></td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button type="button" aria-label={`Edit ${item.name}`} onClick={() => openItemModal(item)}><Pencil size={17} /></button>
-                    <button type="button" aria-label={`Delete ${item.name}`} onClick={() => openDeleteDialog(item)}><Trash2 size={17} /></button>
-                    <button type="button" aria-label={`Force delete ${item.name}`} onClick={() => openDeleteDialog(item, true)}><Flame size={17} /></button>
-                  </td>
-                </tr>
-              ))}</tbody>
-            </table>
+            {itemsLoading ? (
+              <TableSkeleton rows={8} cols={6} />
+            ) : (
+              <table className="stock-items-table">
+                <thead><tr><th>Name</th><th>Unit</th><th>Category</th><th>Main Option</th><th>Storage Type</th><th>Actions</th></tr></thead>
+                <tbody style={{ cursor: 'pointer' }}>{visibleItems.map((item) => (
+                  <tr key={item.id} onClick={() => openHistoryModal(item)}>
+                    <td>{item.name}</td>
+                    <td>{item.unit.toUpperCase()}</td>
+                    <td><span className={`stock-category stock-category-${item.category.toLowerCase()}`}>{item.category.toUpperCase()}</span></td>
+                    <td>{item.category === 'Others' ? items.find((option) => option.id === item.linkedOptionId)?.name || 'Not linked' : '—'}</td>
+                    <td><span className={`stock-storage ${item.isStored ? 'is-stored' : 'is-non-stored'}`}>{item.isStored ? 'STORED' : 'NON-STORED'}</span></td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button type="button" aria-label={`Edit ${item.name}`} onClick={() => openItemModal(item)}><Pencil size={17} /></button>
+                      <button type="button" aria-label={`Delete ${item.name}`} onClick={() => openDeleteDialog(item)}><Trash2 size={17} /></button>
+                      <button type="button" aria-label={`Force delete ${item.name}`} onClick={() => openDeleteDialog(item, true)}><Flame size={17} /></button>
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
           </div>
         </section>
       ) : (
         <div className="stock-workspace">
           <main>
             <form ref={formRef} className={`stock-form stock-form-${activeTab}`} onSubmit={submitMovement} onKeyDown={handleFormKeyDown}>
-              <label><span>Date</span><div className={activeTab === 'non-stock' ? 'is-tinted' : ''}><CalendarDays size={17} /><input type="date" value={movement.date} onChange={(e) => setMovement({ ...movement, date: e.target.value })} /><b>{formatDisplayDate(movement.date)}</b></div></label>
-              {activeTab !== 'in' && <label><span>Meal</span><select value={movement.mealPeriod} onChange={(e) => setMovement({ ...movement, mealPeriod: e.target.value })}><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option></select></label>}
-              <label className="stock-item-field"><span>Item</span><ItemPicker items={pickerItems} value={movement.itemId} onChange={(itemId) => setMovement({ ...movement, itemId })} showRemaining={activeTab === 'out'} /></label>
-              <label><span>Quantity</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'non-stock' ? 'eg: 100' : 'eg: 10'} value={movement.quantity} onChange={(e) => setMovement({ ...movement, quantity: e.target.value })} /></label>
+              <label><span>Date</span><div className={activeTab === 'non-stock' ? 'is-tinted' : ''}><CalendarDays size={17} /><input type="date" value={movement.date} disabled={saving} onChange={(e) => setMovement({ ...movement, date: e.target.value })} onClick={(e) => { if (typeof e.target.showPicker === 'function') { try { e.target.showPicker(); } catch (err) { console.error(err); } } }} /><b>{formatDisplayDate(movement.date)}</b></div></label>
+              {activeTab !== 'in' && <label><span>Meal</span><select value={movement.mealPeriod} disabled={saving} onChange={(e) => setMovement({ ...movement, mealPeriod: e.target.value })}><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option></select></label>}
+              <label className="stock-item-field"><span>Item</span><ItemPicker items={pickerItems} value={movement.itemId} onChange={(itemId) => setMovement({ ...movement, itemId })} showRemaining={activeTab === 'out'} disabled={saving} /></label>
+              <label><span>Quantity</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'non-stock' ? 'eg: 100' : 'eg: 10'} value={movement.quantity} disabled={saving} onChange={(e) => setMovement({ ...movement, quantity: e.target.value })} /></label>
               {(activeTab === 'in' || activeTab === 'non-stock') && (
                 <>
                   <label>
-                    <span>Total Purchase Price</span>
+                     <span>Total Purchase Price</span>
                     <input
                       type="number"
                       min="0"
                       step="0.0001"
                       placeholder="eg: 2500"
                       value={movement.totalPrice || ''}
+                      disabled={saving}
                       onChange={(e) => setMovement({ ...movement, totalPrice: e.target.value })}
                     />
                   </label>
@@ -641,39 +672,53 @@ export default function Inventory() {
                   </div>
                 </>
               )}
-              <button className={`stock-submit stock-submit-${activeTab}`} type="submit" disabled={saving}>{activeTab === 'in' ? 'Stock In' : 'Stock Out'}</button>
+              <button className={`stock-submit stock-submit-${activeTab}`} type="submit" disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 size={16} className="spin-icon" style={{ marginRight: '0.4rem' }} />
+                    Saving...
+                  </>
+                ) : (
+                  activeTab === 'in' ? 'Stock In' : 'Stock Out'
+                )}
+              </button>
             </form>
           </main>
           <aside className="stock-summary">
             <div className="stock-summary-title"><h2>Stock Summary</h2><small>Click row for history</small></div>
             <div className="stock-summary-search"><Search size={17} /><input placeholder="Search items..." value={summarySearch} onChange={(e) => setSummarySearch(e.target.value)} /></div>
             <div className="stock-summary-table-wrap">
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                {activeTab === 'non-stock' ? (
-                  <>
-                    <thead><tr><th>Item name</th><th>Students number</th><th>Unit</th><th>Avrg price</th></tr></thead>
-                    <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{Math.round(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
-                  </>
-                ) : (
-                  <>
-                    <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
-                    <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
-                  </>
-                )}
-              </table>
+              {itemsLoading ? (
+                <TableSkeleton rows={6} cols={4} />
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  {activeTab === 'non-stock' ? (
+                    <>
+                      <thead><tr><th>Item name</th><th>Students number</th><th>Unit</th><th>Avrg price</th></tr></thead>
+                      <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{Math.round(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                    </>
+                  ) : (
+                    <>
+                      <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
+                      <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                    </>
+                  )}
+                </table>
+              )}
             </div>
           </aside>
         </div>
       )}
 
-      <Modal isOpen={Boolean(itemModal)} onClose={() => setItemModal(null)} title={itemModal === 'edit' ? 'Edit Item' : 'New Item'} actions={<><Button variant="secondary" onClick={() => setItemModal(null)}>Cancel</Button><Button type="submit" form="stock-item-form" disabled={saving}>Save</Button></>}>
+      <Modal isOpen={Boolean(itemModal)} onClose={() => !saving && setItemModal(null)} title={itemModal === 'edit' ? 'Edit Item' : 'New Item'} actions={<><Button variant="secondary" onClick={() => setItemModal(null)} disabled={saving}>Cancel</Button><Button type="submit" form="stock-item-form" disabled={saving}>{saving ? <><Loader2 size={16} className="spin-icon" style={{ marginRight: '0.4rem' }} /> Saving...</> : 'Save'}</Button></>}>
         <form id="stock-item-form" className="stock-item-form" onSubmit={saveItem}>
           {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
-          <label>Name<input value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
-          <label>Unit<input value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} required /></label>
+          <label>Name<input value={itemForm.name} disabled={saving} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
+          <label>Unit<input value={itemForm.unit} disabled={saving} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} required /></label>
           <label>Category
             <select
               value={itemForm.category}
+              disabled={saving}
               onChange={(e) => setItemForm({
                 ...itemForm,
                 category: e.target.value,
@@ -687,6 +732,7 @@ export default function Inventory() {
             <label>Belongs to Option
               <select
                 value={itemForm.linkedOptionId}
+                disabled={saving}
                 onChange={(e) => setItemForm({ ...itemForm, linkedOptionId: e.target.value })}
                 required
               >
@@ -696,7 +742,7 @@ export default function Inventory() {
               <small>Its cost will be billed only to students who selected this option.</small>
             </label>
           )}
-          <label>Storage Type<select value={itemForm.isStored ? 'stored' : 'non-stored'} onChange={(e) => setItemForm({ ...itemForm, isStored: e.target.value === 'stored' })}><option value="stored">Stored</option><option value="non-stored">Non-Stored</option></select></label>
+          <label>Storage Type<select value={itemForm.isStored ? 'stored' : 'non-stored'} disabled={saving} onChange={(e) => setItemForm({ ...itemForm, isStored: e.target.value === 'stored' })}><option value="stored">Stored</option><option value="non-stored">Non-Stored</option></select></label>
         </form>
       </Modal>
 
@@ -708,7 +754,16 @@ export default function Inventory() {
           <>
             <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</Button>
             <Button variant="danger" onClick={deleteItem} disabled={saving}>
-              {saving ? 'Deleting...' : deleteTarget?.force ? 'Delete Forever' : 'Delete Item'}
+              {saving ? (
+                <>
+                  <Loader2 size={16} className="spin-icon" style={{ marginRight: '0.4rem' }} />
+                  Deleting...
+                </>
+              ) : deleteTarget?.force ? (
+                'Delete Forever'
+              ) : (
+                'Delete Item'
+              )}
             </Button>
           </>
         )}
@@ -760,28 +815,28 @@ export default function Inventory() {
                 className={ledgerTab === 'all' ? 'is-active' : ''}
                 onClick={() => setLedgerTab('all')}
               >
-                All ({ledgerTransactions.length})
+                All ({currentLedgerTransactions.length})
               </button>
               <button
                 type="button"
                 className={ledgerTab === 'in' ? 'is-active' : ''}
                 onClick={() => setLedgerTab('in')}
               >
-                Stock In ({ledgerTransactions.filter((t) => t.transactionType === 'in').length})
+                Stock In ({currentLedgerTransactions.filter((t) => t.transactionType === 'in').length})
               </button>
               <button
                 type="button"
                 className={ledgerTab === 'out' ? 'is-active' : ''}
                 onClick={() => setLedgerTab('out')}
               >
-                Stock Out ({ledgerTransactions.filter((t) => t.transactionType === 'out').length})
+                Stock Out ({currentLedgerTransactions.filter((t) => t.transactionType === 'out').length})
               </button>
             </div>
           </div>
         }
       >
         <div className="stock-history-timeline" style={{ minWidth: 'min(620px, 90vw)', maxHeight: '60vh', overflowY: 'auto' }}>
-          {modalError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{modalError}</div>}
+          {ledgerError && <div className="stock-message-error" style={{ marginBottom: '1rem', color: '#c73833', background: '#fee2e2', border: '1px solid #fca5a5', padding: '0.62rem 0.82rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500 }}>{ledgerError}</div>}
           {ledgerLoading ? (
             <div className="stock-loading">Loading timeline ledger...</div>
           ) : filteredTimeline.length === 0 ? (
@@ -859,7 +914,14 @@ export default function Inventory() {
           <>
             <Button variant="secondary" onClick={() => setDeleteTransaction(null)} disabled={saving}>Cancel</Button>
             <Button variant="danger" onClick={handleDeleteTransaction} disabled={saving}>
-              {saving ? 'Deleting...' : 'Delete'}
+              {saving ? (
+                <>
+                  <Loader2 size={16} className="spin-icon" style={{ marginRight: '0.4rem' }} />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
             </Button>
           </>
         )}
@@ -886,7 +948,16 @@ export default function Inventory() {
         actions={(
           <>
             <Button variant="secondary" onClick={() => setEditTransaction(null)} disabled={saving}>Cancel</Button>
-            <Button type="submit" form="stock-edit-transaction-form" disabled={saving}>Save Changes</Button>
+            <Button type="submit" form="stock-edit-transaction-form" disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 size={16} className="spin-icon" style={{ marginRight: '0.4rem' }} />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
           </>
         )}
       >
@@ -898,7 +969,9 @@ export default function Inventory() {
               <input
                 type="date"
                 value={editForm.date}
+                disabled={saving}
                 onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                onClick={(e) => { if (typeof e.target.showPicker === 'function') { try { e.target.showPicker(); } catch (err) {} } }}
                 required
                 style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
               />
@@ -909,6 +982,7 @@ export default function Inventory() {
                 Meal
                 <select
                   value={editForm.mealPeriod}
+                  disabled={saving}
                   onChange={(e) => setEditForm({ ...editForm, mealPeriod: e.target.value })}
                   required
                   style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
@@ -927,6 +1001,7 @@ export default function Inventory() {
                 min="0.0001"
                 step="0.0001"
                 value={editForm.quantity}
+                disabled={saving}
                 onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
                 required
                 style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}
@@ -942,6 +1017,7 @@ export default function Inventory() {
                     min="0.0001"
                     step="0.0001"
                     value={editForm.totalPrice}
+                    disabled={saving}
                     onChange={(e) => setEditForm({ ...editForm, totalPrice: e.target.value })}
                     required
                     style={{ height: '42px', border: '1px solid #dfe3e8', borderRadius: '7px', padding: '0 0.75rem', background: '#fff', font: 'inherit', outline: 'none' }}

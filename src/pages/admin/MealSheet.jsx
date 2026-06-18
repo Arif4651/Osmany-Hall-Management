@@ -7,6 +7,9 @@ import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
 import { todayLocal } from '../../utils/formatters';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { queryCache } from '../../services/queryCache';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 
 
 const defaultMealSheetDate = todayLocal();
@@ -40,9 +43,6 @@ export default function MealSheet() {
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
 
   const [date, setDate] = useState(defaultMealSheetDate);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   // For wing admins the filter is permanently locked to their wing gender.
   // For super_admin/admin it starts as 'All' and can be changed via dropdown.
@@ -59,7 +59,7 @@ export default function MealSheet() {
   const [sortField, setSortField] = useState('room');
   const [sortAsc, setSortAsc] = useState(true);
 
-  const mergeMealSheetResponses = (...responses) => {
+  const mergeMealSheetResponses = useCallback((...responses) => {
     const valid = responses.filter(Boolean);
     if (!valid.length) return null;
     return {
@@ -70,40 +70,59 @@ export default function MealSheet() {
       dinnerCount: valid.reduce((sum, item) => sum + (item.dinnerCount || 0), 0),
       rows: valid.flatMap((item) => item.rows || []),
     };
-  };
-
-  const load = useCallback(async (targetDate = date, targetWing = genderFilter) => {
-    setLoading(true);
-    setError('');
-    try {
-      let response;
-      if (isWingAdmin) {
-        response = await adminDataService.getMealSheet(targetDate, user?.wing || 'Male');
-      } else if (targetWing === 'All') {
-        const [maleData, femaleData] = await Promise.all([
-          adminDataService.getMealSheet(targetDate, 'Male'),
-          adminDataService.getMealSheet(targetDate, 'Female'),
-        ]);
-        response = mergeMealSheetResponses(maleData, femaleData);
-      } else {
-        response = await adminDataService.getMealSheet(targetDate, targetWing);
-      }
-      setData(response);
-      setPage(1);
-    } catch (err) {
-      setError(err.message || 'Failed to fetch meal sheet data.');
-    } finally {
-      setLoading(false);
-    }
-  }, [date, genderFilter, isWingAdmin, user?.wing]);
-
-  useEffect(() => {
-    load(defaultMealSheetDate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const activeWing = isWingAdmin ? (user?.wing || 'Male') : genderFilter;
+  const cacheKey = `mealsheet-${date}-${activeWing}`;
+
+  const fetcher = useCallback(async () => {
+    if (isWingAdmin) {
+      return adminDataService.getMealSheet(date, user?.wing || 'Male');
+    }
+    if (genderFilter === 'All') {
+      const maleKey = `mealsheet-${date}-Male`;
+      const femaleKey = `mealsheet-${date}-Female`;
+
+      const malePromise = queryCache.has(maleKey)
+        ? Promise.resolve(queryCache.get(maleKey))
+        : queryCache.dedupe(maleKey, () => adminDataService.getMealSheet(date, 'Male'));
+
+      const femalePromise = queryCache.has(femaleKey)
+        ? Promise.resolve(queryCache.get(femaleKey))
+        : queryCache.dedupe(femaleKey, () => adminDataService.getMealSheet(date, 'Female'));
+
+      const [maleData, femaleData] = await Promise.all([malePromise, femalePromise]);
+
+      queryCache.set(maleKey, maleData, 30_000);
+      queryCache.set(femaleKey, femaleData, 30_000);
+
+      return mergeMealSheetResponses(maleData, femaleData);
+    }
+    return adminDataService.getMealSheet(date, genderFilter);
+  }, [date, genderFilter, isWingAdmin, user?.wing, mergeMealSheetResponses]);
+
+  const {
+    data,
+    isLoading: loading,
+    error: fetchError,
+    refresh: reload,
+  } = useCachedFetch(cacheKey, fetcher, { ttl: 30_000 });
+
+  const error = fetchError || '';
+
+  useEffect(() => {
+    setPage(1);
+  }, [date, genderFilter]);
+
   const handleGenerate = () => {
-    load(date, genderFilter);
+    if (isWingAdmin) {
+      queryCache.remove(`mealsheet-${date}-${user?.wing || 'Male'}`);
+    } else {
+      queryCache.remove(`mealsheet-${date}-All`);
+      queryCache.remove(`mealsheet-${date}-Male`);
+      queryCache.remove(`mealsheet-${date}-Female`);
+    }
+    reload();
   };
 
   const formatGuestMeal = (row) => {
@@ -560,92 +579,83 @@ export default function MealSheet() {
 
       {/* Main Table section */}
       <section className="financial-card table-wrap" style={{ position: 'relative' }}>
-        {loading && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(255, 255, 255, 0.72)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10,
-            borderRadius: 'var(--radius-lg)'
-          }}>
-            <span style={{ fontWeight: '600', color: 'var(--primary)' }}>Loading meal sheet...</span>
-          </div>
-        )}
-
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th onClick={() => toggleSort('hallId')} style={{ cursor: 'pointer' }}>
-                Hall ID <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
-              </th>
-              <th onClick={() => toggleSort('studentId')} style={{ cursor: 'pointer' }}>
-                Student ID <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
-              </th>
-              <th onClick={() => toggleSort('name')} style={{ cursor: 'pointer' }}>
-                Name <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
-              </th>
-              <th onClick={() => toggleSort('room')} style={{ cursor: 'pointer' }}>
-                Room <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
-              </th>
-              <th style={{ textAlign: 'center' }}>Meal (B / L / D)</th>
-              <th>Guest Meal</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paginatedRows.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1.5rem' }}>
-                  {loading ? 'Fetching records...' : 'No records found matching criteria.'}
-                </td>
-              </tr>
-            ) : (
-              paginatedRows.map((row) => (
-                <tr key={`${row.studentId}-${row.hallId}`} style={{ height: '3.1rem' }}>
-                  <td>{row.hallId}</td>
-                  <td>{row.studentId}</td>
-                  <td style={{ fontWeight: '600', color: 'var(--primary)' }}>{row.name}</td>
-                  <td>{row.room || 'N/A'}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'grid', justifyContent: 'center', gap: '0.32rem' }}>
-                      <div style={{ display: 'inline-flex', justifyContent: 'center' }}>
-                      <MealIndicator label="B" isOn={row.breakfastOn} />
-                      <MealIndicator label="L" isOn={row.lunchOn} />
-                      <MealIndicator label="D" isOn={row.dinnerOn} />
-                      </div>
-                      {(row.breakfastOptionName || row.lunchOptionName || row.dinnerOptionName) ? (
-                        <div style={{ display: 'grid', gap: '0.18rem', textAlign: 'left' }}>
-                          {row.breakfastOptionName ? <small style={{ color: '#2563eb', fontWeight: 600 }}>B: {row.breakfastOptionName}</small> : null}
-                          {row.lunchOptionName ? <small style={{ color: '#16a34a', fontWeight: 600 }}>L: {row.lunchOptionName}</small> : null}
-                          {row.dinnerOptionName ? <small style={{ color: '#d97706', fontWeight: 600 }}>D: {row.dinnerOptionName}</small> : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td>
-                    {formatGuestMeal(row) ? (
-                      <span style={{
-                        background: '#fef3c7',
-                        color: '#d97706',
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '6px',
-                        fontSize: '0.8rem',
-                        fontWeight: '600',
-                        border: '1px solid #fde68a'
-                      }}>
-                        {formatGuestMeal(row)}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--muted)' }}>-</span>
-                    )}
-                  </td>
+        {loading ? (
+          <TableSkeleton rows={rowsPerPage} cols={6} />
+        ) : (
+          <>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th onClick={() => toggleSort('hallId')} style={{ cursor: 'pointer' }}>
+                    Hall ID <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
+                  </th>
+                  <th onClick={() => toggleSort('studentId')} style={{ cursor: 'pointer' }}>
+                    Student ID <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
+                  </th>
+                  <th onClick={() => toggleSort('name')} style={{ cursor: 'pointer' }}>
+                    Name <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
+                  </th>
+                  <th onClick={() => toggleSort('room')} style={{ cursor: 'pointer' }}>
+                    Room <ArrowUpDown size={12} style={{ marginLeft: '4px' }} />
+                  </th>
+                  <th style={{ textAlign: 'center' }}>Meal (B / L / D)</th>
+                  <th>Guest Meal</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {paginatedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1.5rem' }}>
+                      No records found matching criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedRows.map((row) => (
+                    <tr key={`${row.studentId}-${row.hallId}`} style={{ height: '3.1rem' }}>
+                      <td>{row.hallId}</td>
+                      <td>{row.studentId}</td>
+                      <td style={{ fontWeight: '600', color: 'var(--primary)' }}>{row.name}</td>
+                      <td>{row.room || 'N/A'}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'grid', justifyContent: 'center', gap: '0.32rem' }}>
+                          <div style={{ display: 'inline-flex', justifyContent: 'center' }}>
+                          <MealIndicator label="B" isOn={row.breakfastOn} />
+                          <MealIndicator label="L" isOn={row.lunchOn} />
+                          <MealIndicator label="D" isOn={row.dinnerOn} />
+                          </div>
+                          {(row.breakfastOptionName || row.lunchOptionName || row.dinnerOptionName) ? (
+                            <div style={{ display: 'grid', gap: '0.18rem', textAlign: 'left' }}>
+                              {row.breakfastOptionName ? <small style={{ color: '#2563eb', fontWeight: 600 }}>B: {row.breakfastOptionName}</small> : null}
+                              {row.lunchOptionName ? <small style={{ color: '#16a34a', fontWeight: 600 }}>L: {row.lunchOptionName}</small> : null}
+                              {row.dinnerOptionName ? <small style={{ color: '#d97706', fontWeight: 600 }}>D: {row.dinnerOptionName}</small> : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        {formatGuestMeal(row) ? (
+                          <span style={{
+                            background: '#fef3c7',
+                            color: '#d97706',
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: '600',
+                            border: '1px solid #fde68a'
+                          }}>
+                            {formatGuestMeal(row)}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--muted)' }}>-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
       </section>
 
       {/* Pagination controls */}

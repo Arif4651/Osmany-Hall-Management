@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CalendarDays, Download, Edit2, Power, Search, Settings2, Users } from 'lucide-react';
+import { AlertCircle, CalendarDays, Download, Edit2, Loader2, Power, Search, Settings2, Users } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
@@ -9,6 +9,9 @@ import useAdminMealModule from '../../hooks/useAdminMealModule';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { useQueryCache } from '../../context/QueryCacheContext';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 
 const tomorrowLocal = () => {
   const date = new Date();
@@ -80,9 +83,8 @@ export default function AdminMealManagement() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [message, setMessage] = useState('');
   const [menuFormError, setMenuFormError] = useState('');
+  const [overrideFormError, setOverrideFormError] = useState('');
   const [countDate, setCountDate] = useState(tomorrowLocal());
-  const [counts, setCounts] = useState(null);
-  const [overrides, setOverrides] = useState([]);
   const [studentSearch, setStudentSearch] = useState('');
   const [studentSearchLoading, setStudentSearchLoading] = useState(false);
   const [studentSearchResults, setStudentSearchResults] = useState([]);
@@ -97,23 +99,52 @@ export default function AdminMealManagement() {
   });
   const [overrideForm, setOverrideForm] = useState(emptyOverride);
 
-  const loadOperations = useCallback(async (date = countDate) => {
-    setMessage('');
-    try {
-      const [countRows, overrideRows] = await Promise.all([
-        adminDataService.getMealCounts(date, selectedWing),
-        adminDataService.getGlobalOverrides(date, date, selectedWing),
-      ]);
-      setCounts(countRows);
-      setOverrides(overrideRows);
-    } catch (error) {
-      setMessage(error.message || 'Unable to load meal operations.');
-    }
-  }, [countDate, selectedWing]);
+  const { invalidate } = useQueryCache();
 
-  useEffect(() => {
-    loadOperations();
-  }, [loadOperations]);
+  const countsCacheKey = `meal-counts-${countDate}-${selectedWing}`;
+  const {
+    data: counts,
+    isLoading: isCountsLoading,
+    isRefreshing: isCountsRefreshing,
+    refresh: refreshCounts,
+    refreshInBackground: refreshCountsInBackground,
+  } = useCachedFetch(
+    countsCacheKey,
+    () => adminDataService.getMealCounts(countDate, selectedWing),
+    { ttl: 30_000 }
+  );
+
+  const overridesCacheKey = `meal-overrides-${countDate}-${selectedWing}`;
+  const {
+    data: overridesData,
+    refresh: refreshOverrides,
+  } = useCachedFetch(
+    overridesCacheKey,
+    () => adminDataService.getGlobalOverrides(countDate, countDate, selectedWing),
+    { ttl: 30_000 }
+  );
+
+  const overrides = useMemo(() => overridesData || [], [overridesData]);
+
+  const loadOperations = useCallback(() => {
+    invalidate('meal-counts');
+    invalidate('meal-overrides');
+    invalidate('meal-sheet-');
+    invalidate('student-meal-preferences-');
+    invalidate('meal-snapshot-');
+    invalidate('guest-meals-');
+    refreshCounts();
+    refreshOverrides();
+  }, [invalidate, refreshCounts, refreshOverrides]);
+
+  const syncAfterStudentMealChange = useCallback(() => {
+    invalidate('meal-counts');
+    invalidate('meal-sheet-');
+    invalidate('student-meal-preferences-');
+    invalidate('meal-snapshot-');
+    invalidate('guest-meals-');
+    refreshCountsInBackground();
+  }, [invalidate, refreshCountsInBackground]);
 
   useEffect(() => {
     setStudentSearch('');
@@ -174,6 +205,7 @@ export default function AdminMealManagement() {
   };
 
   const closeMenuEditor = () => {
+    if (saving) return;
     setMenuFormError('');
     setMenuModalOpen(false);
   };
@@ -198,6 +230,7 @@ export default function AdminMealManagement() {
   };
 
   const openOverride = (mealPeriod, isOn) => {
+    setOverrideFormError('');
     setOverrideForm({
       mealPeriod,
       effectiveFrom: countDate,
@@ -210,6 +243,8 @@ export default function AdminMealManagement() {
 
   const saveOverride = async (event) => {
     event.preventDefault();
+    setOverrideFormError('');
+    setMessage('');
     setSaving(true);
     try {
       await adminDataService.createGlobalOverride({
@@ -221,7 +256,7 @@ export default function AdminMealManagement() {
       await loadOperations(overrideForm.effectiveFrom);
       setMessage(`Global ${overrideForm.isOn ? 'ON' : 'OFF'} applied successfully.`);
     } catch (error) {
-      setMessage(error.message || 'Unable to apply global override.');
+      setOverrideFormError(error.message || 'Unable to apply global override.');
     } finally {
       setSaving(false);
     }
@@ -252,7 +287,7 @@ export default function AdminMealManagement() {
         optionItemId: isOn ? (meal?.optionItemId || null) : null,
       });
       setStudentMealControl(updated);
-      await loadOperations(countDate);
+      syncAfterStudentMealChange();
       setMessage(`${updated.name} meal was turned ${isOn ? 'ON' : 'OFF'} for ${mealPeriod}.`);
     } catch (error) {
       setMessage(error.message || 'Unable to update this student meal.');
@@ -278,7 +313,7 @@ export default function AdminMealManagement() {
         optionItemId: optionItemId || null,
       });
       setStudentMealControl(updated);
-      await loadOperations(countDate);
+      syncAfterStudentMealChange();
       setMessage(`${updated.name} optional choice was updated for ${mealPeriod}.`);
     } catch (error) {
       setMessage(error.message || 'Unable to update optional choice.');
@@ -484,19 +519,23 @@ export default function AdminMealManagement() {
                 <Download size={16} /> {isDownloading ? 'Preparing PDF...' : 'Download PDF'}
               </Button>
             </div>
-            <div className="admin-meal-table-wrap">
-              <table className="admin-meal-table">
-                <thead><tr><th>Day</th>{mealTypeOptions.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}</tr></thead>
-                <tbody>
-                  {menuRows.map((row) => (
-                    <tr key={row.dayId}>
-                      <td><strong>{row.dayLabel}</strong></td>
-                      {mealTypeOptions.map((mealType) => <td key={mealType.id}><MealCell meal={row.mealsByType[mealType.id]} onEdit={() => openMenuEditor(row.dayId, mealType.id)} /></td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {isLoading ? (
+              <TableSkeleton rows={7} cols={4} />
+            ) : (
+              <div className="admin-meal-table-wrap">
+                <table className="admin-meal-table">
+                  <thead><tr><th>Day</th>{mealTypeOptions.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}</tr></thead>
+                  <tbody>
+                    {menuRows.map((row) => (
+                      <tr key={row.dayId}>
+                        <td><strong>{row.dayLabel}</strong></td>
+                        {mealTypeOptions.map((mealType) => <td key={mealType.id}><MealCell meal={row.mealsByType[mealType.id]} onEdit={() => openMenuEditor(row.dayId, mealType.id)} /></td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
 
@@ -523,34 +562,47 @@ export default function AdminMealManagement() {
                 <span>Meal counts for dates beyond tomorrow are not displayed as student choices are subject to change.</span>
               </div>
             )}
-            <div className="admin-meal-count-grid">
-              {(counts?.meals || []).map((meal) => {
-                const onPercent = meal.totalStudents ? Math.round((meal.enabledStudents / meal.totalStudents) * 100) : 0;
-                return (
-                  <article key={meal.mealTypeId} className="admin-meal-count-card">
-                    <div className="admin-meal-count-title"><h3>{meal.mealTypeLabel}</h3><span>{onPercent}% active</span></div>
-                    <div className="admin-meal-progress"><i style={{ width: `${onPercent}%` }} /></div>
-                    <div className="admin-meal-count-numbers">
-                      <span className="count-on"><b>{meal.enabledStudents}</b> Meal On</span>
-                      <span className="count-off"><b>{meal.disabledStudents}</b> Meal Off</span>
-                      <span><b>{meal.totalStudents}</b> Students</span>
-                    </div>
-                    <div className="admin-meal-choice-breakdown">
-                      <h4>Meal Choice Breakdown</h4>
-                      {meal.optionalChoices.map((option) => (
-                        <div key={option.optionItemId}><span>{option.name}</span><b>{option.studentCount}</b></div>
-                      ))}
-                      {!meal.optionalChoices.length && <p>No optional choices configured for this meal.</p>}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            {isCountsLoading ? (
+              <div className="skeleton-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="skeleton-card">
+                    <div className="skeleton-block skeleton-card-title" />
+                    <div className="skeleton-block skeleton-card-body" />
+                    <div className="skeleton-block skeleton-card-body short" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="admin-meal-count-grid">
+                {(counts?.meals || []).map((meal) => {
+                  const onPercent = meal.totalStudents ? Math.round((meal.enabledStudents / meal.totalStudents) * 100) : 0;
+                  return (
+                    <article key={meal.mealTypeId} className="admin-meal-count-card">
+                      <div className="admin-meal-count-title"><h3>{meal.mealTypeLabel}</h3><span>{onPercent}% active</span></div>
+                      <div className="admin-meal-progress"><i style={{ width: `${onPercent}%` }} /></div>
+                      <div className="admin-meal-count-numbers">
+                        <span className="count-on"><b>{meal.enabledStudents}</b> Meal On</span>
+                        <span className="count-off"><b>{meal.disabledStudents}</b> Meal Off</span>
+                        <span><b>{meal.totalStudents}</b> Students</span>
+                      </div>
+                      <div className="admin-meal-choice-breakdown">
+                        <h4>Meal Choice Breakdown</h4>
+                        {meal.optionalChoices.map((option) => (
+                          <div key={option.optionItemId}><span>{option.name}</span><b>{option.studentCount}</b></div>
+                        ))}
+                        {!meal.optionalChoices.length && <p>No optional choices configured for this meal.</p>}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </section>
         )}
 
         {activeSection === 'controls' && (
           <section className="admin-meal-operations">
+            {isCountsRefreshing ? <div className="data-refreshing-bar" /> : null}
             <div className="admin-meal-section-head">
               <div><h2>Global Meal Controls</h2><p>Force a meal ON or OFF for every active student.</p></div>
               <div className="admin-meal-count-actions">
@@ -668,29 +720,41 @@ export default function AdminMealManagement() {
                 )}
               </div>
             </div>
-            <div className="admin-meal-control-grid">
-              {(counts?.meals || []).map((meal) => {
-                const override = activeOverrides[meal.mealTypeId];
-                return (
-                  <article key={meal.mealTypeId} className="admin-meal-control-card">
-                    <div>
-                      <h3>{meal.mealTypeLabel}</h3>
-                      <p>Affects all {meal.totalStudents} active students for the selected date or range.</p>
-                    </div>
-                    {override ? (
-                      <div className="admin-meal-active-override">
-                        <span className={`meal-force-badge ${override.isOn ? 'is-on' : 'is-off'}`}>Currently forced {override.isOn ? 'ON' : 'OFF'}</span>
-                        <button type="button" onClick={() => removeOverride(override)}>Remove override</button>
+            {isCountsLoading ? (
+              <div className="skeleton-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="skeleton-card">
+                    <div className="skeleton-block skeleton-card-title" />
+                    <div className="skeleton-block skeleton-card-body" />
+                    <div className="skeleton-block skeleton-card-body short" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="admin-meal-control-grid">
+                {(counts?.meals || []).map((meal) => {
+                  const override = activeOverrides[meal.mealTypeId];
+                  return (
+                    <article key={meal.mealTypeId} className="admin-meal-control-card">
+                      <div>
+                        <h3>{meal.mealTypeLabel}</h3>
+                        <p>Affects all {meal.totalStudents} active students for the selected date or range.</p>
                       </div>
-                    ) : <span className="meal-normal-status">Following student preferences</span>}
-                    <div className="admin-meal-force-actions">
-                      <button type="button" className="force-on" onClick={() => openOverride(meal.mealTypeId, true)}><Power size={15} /> Force ON</button>
-                      <button type="button" className="force-off" onClick={() => openOverride(meal.mealTypeId, false)}><Power size={15} /> Force OFF</button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                      {override ? (
+                        <div className="admin-meal-active-override">
+                          <span className={`meal-force-badge ${override.isOn ? 'is-on' : 'is-off'}`}>Currently forced {override.isOn ? 'ON' : 'OFF'}</span>
+                          <button type="button" onClick={() => removeOverride(override)}>Remove override</button>
+                        </div>
+                      ) : <span className="meal-normal-status">Following student preferences</span>}
+                      <div className="admin-meal-force-actions">
+                        <button type="button" className="force-on" onClick={() => openOverride(meal.mealTypeId, true)}><Power size={15} /> Force ON</button>
+                        <button type="button" className="force-off" onClick={() => openOverride(meal.mealTypeId, false)}><Power size={15} /> Force OFF</button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </section>
         )}
       </div>
@@ -699,9 +763,9 @@ export default function AdminMealManagement() {
         isOpen={menuModalOpen}
         onClose={closeMenuEditor}
         title="Meal Configuration"
-        actions={<><Button variant="secondary" onClick={closeMenuEditor}>Cancel</Button><Button type="submit" form="meal-config-form" disabled={saving}>{saving ? 'Saving...' : 'Save Menu'}</Button></>}
+        actions={<><Button variant="secondary" onClick={closeMenuEditor} disabled={saving}>Cancel</Button><Button type="submit" form="meal-config-form" disabled={saving}>{saving ? <><Loader2 size={16} className="spin-icon" /> Saving...</> : 'Save Menu'}</Button></>}
       >
-        <form id="meal-config-form" className="admin-meal-form" onSubmit={saveMenu}>
+        <form id="meal-config-form" className="admin-meal-form" onSubmit={saveMenu} aria-busy={saving}>
           {menuFormError ? (
             <div className="admin-meal-form-error" role="alert">
               <AlertCircle size={19} />
@@ -711,27 +775,50 @@ export default function AdminMealManagement() {
               </div>
             </div>
           ) : null}
+          {saving ? (
+            <div className="admin-meal-form-progress" role="status" aria-live="polite">
+              <Loader2 size={18} className="spin-icon" />
+              <span>Saving weekly menu and refreshing the table...</span>
+            </div>
+          ) : null}
           <div>
-            <label>Day<select value={formState.dayId} onChange={(event) => updateMenuForm('dayId', event.target.value)}>{dayOptions.map((day) => <option key={day.id} value={day.id}>{day.label}</option>)}</select></label>
-            <label>Meal<select value={formState.mealTypeId} onChange={(event) => updateMenuForm('mealTypeId', event.target.value)}>{mealTypeOptions.map((meal) => <option key={meal.id} value={meal.id}>{meal.label}</option>)}</select></label>
+            <label>Day<select value={formState.dayId} onChange={(event) => updateMenuForm('dayId', event.target.value)} disabled={saving}>{dayOptions.map((day) => <option key={day.id} value={day.id}>{day.label}</option>)}</select></label>
+            <label>Meal<select value={formState.mealTypeId} onChange={(event) => updateMenuForm('mealTypeId', event.target.value)} disabled={saving}>{mealTypeOptions.map((meal) => <option key={meal.id} value={meal.id}>{meal.label}</option>)}</select></label>
           </div>
-          <label>Regular Items<input value={formState.commonText} onChange={(event) => updateMenuForm('commonText', event.target.value)} placeholder="Rice-0, Dal-0" /></label>
-          <label className={menuFormError ? 'has-error' : ''}>Optional Items<input value={formState.optionalText} onChange={(event) => updateMenuForm('optionalText', event.target.value)} placeholder="Fish, Beef" aria-invalid={Boolean(menuFormError)} /></label>
+          <label>Regular Items<input value={formState.commonText} onChange={(event) => updateMenuForm('commonText', event.target.value)} placeholder="Rice-0, Dal-0" disabled={saving} /></label>
+          <label className={menuFormError ? 'has-error' : ''}>Optional Items<input value={formState.optionalText} onChange={(event) => updateMenuForm('optionalText', event.target.value)} placeholder="Fish, Beef" aria-invalid={Boolean(menuFormError)} disabled={saving} /></label>
         </form>
       </Modal>
 
       <Modal
         isOpen={overrideModalOpen}
-        onClose={() => setOverrideModalOpen(false)}
+        onClose={() => {
+          if (!saving) setOverrideModalOpen(false);
+        }}
         title={`Force ${overrideForm.mealPeriod} ${overrideForm.isOn ? 'ON' : 'OFF'} for all`}
-        actions={<><Button variant="secondary" onClick={() => setOverrideModalOpen(false)}>Cancel</Button><Button type="submit" form="meal-override-form" disabled={saving}>Apply Override</Button></>}
+        actions={<><Button variant="secondary" onClick={() => setOverrideModalOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="meal-override-form" disabled={saving}>{saving ? <><Loader2 size={16} className="spin-icon" /> Applying...</> : 'Apply Override'}</Button></>}
       >
-        <form id="meal-override-form" className="admin-meal-form" onSubmit={saveOverride}>
+        <form id="meal-override-form" className="admin-meal-form" onSubmit={saveOverride} aria-busy={saving}>
+          {overrideFormError ? (
+            <div className="admin-meal-form-error" role="alert">
+              <AlertCircle size={19} />
+              <div>
+                <strong>Could not apply override</strong>
+                <span>{overrideFormError}</span>
+              </div>
+            </div>
+          ) : null}
+          {saving ? (
+            <div className="admin-meal-form-progress" role="status" aria-live="polite">
+              <Loader2 size={18} className="spin-icon" />
+              <span>Applying override and refreshing meal views...</span>
+            </div>
+          ) : null}
           <div>
-            <label>From<input type="date" value={overrideForm.effectiveFrom} onChange={(event) => setOverrideForm({ ...overrideForm, effectiveFrom: event.target.value })} required /></label>
-            <label>To<input type="date" value={overrideForm.effectiveTo} onChange={(event) => setOverrideForm({ ...overrideForm, effectiveTo: event.target.value })} required /></label>
+            <label>From<input type="date" value={overrideForm.effectiveFrom} onChange={(event) => setOverrideForm({ ...overrideForm, effectiveFrom: event.target.value })} required disabled={saving} /></label>
+            <label>To<input type="date" value={overrideForm.effectiveTo} onChange={(event) => setOverrideForm({ ...overrideForm, effectiveTo: event.target.value })} required disabled={saving} /></label>
           </div>
-          <label>Note<textarea rows="3" value={overrideForm.note} onChange={(event) => setOverrideForm({ ...overrideForm, note: event.target.value })} placeholder="Reason for this hall-wide override" /></label>
+          <label>Note<textarea rows="3" value={overrideForm.note} onChange={(event) => setOverrideForm({ ...overrideForm, note: event.target.value })} placeholder="Reason for this hall-wide override" disabled={saving} /></label>
         </form>
       </Modal>
     </div>

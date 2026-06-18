@@ -4,12 +4,14 @@ import { summarizeBulkSelection } from '../utils/bulkSelectionHelpers';
 import { getCredentialNotice } from '../utils/credentialHelpers';
 import { getNextLevel } from '../utils/studentHelpers';
 import { studentService } from '../services/studentService';
+import { queryCache } from '../services/queryCache';
 
 const DEFAULT_PAGE_SIZE = 10;
 
 export default function useAdminStudentModule() {
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successNotice, setSuccessNotice] = useState(null);
@@ -30,7 +32,14 @@ export default function useAdminStudentModule() {
   const [selectedIds, setSelectedIds] = useState([]);
 
   const loadFilterOptions = useCallback(async () => {
+    // Cache for 10 minutes — departments/levels/halls rarely change
+    const cached = queryCache.get('student-filter-options');
+    if (cached) {
+      setFilterOptions(cached);
+      return;
+    }
     const options = await studentService.getFilterOptions();
+    queryCache.set('student-filter-options', options, 10 * 60_000);
     setFilterOptions(options);
   }, []);
 

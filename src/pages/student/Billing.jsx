@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { Receipt } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
 import BillingPeriodPicker from '../../components/financial/BillingPeriodPicker';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -9,33 +12,53 @@ const now = new Date();
 export default function Billing() {
   useDocumentTitle('Billing');
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
-  const [bill, setBill] = useState(null);
-  const [subsidies, setSubsidies] = useState([]);
-  const [error, setError] = useState('');
 
-  useEffect(() => {
-    setBill(null);
-    setSubsidies([]);
-    setError('');
-    Promise.all([
-      financialService.getMyBill(period.month, period.year),
-      financialService.getMyBillSubsidies(period.month, period.year),
-    ])
-      .then(([billResponse, subsidyRows]) => {
-        setBill(billResponse);
-        setSubsidies(subsidyRows);
-      })
-      .catch((loadError) => setError(loadError.message));
-  }, [period]);
+  const billKey      = `billing-me-${period.month}-${period.year}`;
+  const subsidiesKey = `billing-subsidies-me-${period.month}-${period.year}`;
+
+  const { data: bill, isLoading: billLoading, isRefreshing: billRefreshing, error: billError } =
+    useCachedFetch(billKey, () => financialService.getMyBill(period.month, period.year), { ttl: 2 * 60_000 });
+
+  const { data: subsidies = [], isLoading: subsidiesLoading, isRefreshing: subsidiesRefreshing } =
+    useCachedFetch(subsidiesKey, () => financialService.getMyBillSubsidies(period.month, period.year), { ttl: 2 * 60_000 });
+
+  const isLoading = billLoading || subsidiesLoading;
+  const isRefreshing = billRefreshing || subsidiesRefreshing;
+  const error = billError;
 
   return (
     <div className="financial-page">
-      <header>
-        <h1>Billing</h1>
-        <p>Select a month to view your calculated hall bill.</p>
+      {/* Thin progress bar during background refresh */}
+      {isRefreshing && <div className="data-refreshing-bar" />}
+
+      <header style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
+        <Receipt size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+        <div>
+          <h1 style={{ margin: 0 }}>Billing</h1>
+          <p style={{ margin: '0.25rem 0 0 0' }}>Select a month to view your calculated hall bill.</p>
+        </div>
       </header>
+
       {error && <div className="student-message student-message-error">{error}</div>}
+
       <BillingPeriodPicker value={period} onChange={setPeriod} />
+
+      {isLoading && !bill ? (
+        /* First-load skeleton */
+        <>
+          <div className="skeleton-cards">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="skeleton-card">
+                <div className="skeleton-block skeleton-card-title" />
+                <div className="skeleton-block skeleton-card-body" />
+                <div className="skeleton-block skeleton-card-body short" />
+              </div>
+            ))}
+          </div>
+          <TableSkeleton rows={4} cols={4} />
+        </>
+      ) : null}
+
       {bill && (
         <section className="summary-grid">
           <div className="financial-card">
@@ -78,6 +101,7 @@ export default function Billing() {
           </div>
         </section>
       )}
+
       {bill && subsidies.length > 0 && (
         <section className="financial-card" style={{ display: 'grid', gap: '0.85rem' }}>
           <div>

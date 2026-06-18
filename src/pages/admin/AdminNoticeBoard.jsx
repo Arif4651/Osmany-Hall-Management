@@ -1,6 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Megaphone, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, LoaderCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { useQueryCache } from '../../context/QueryCacheContext';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { noticeService } from '../../services/noticeService';
 import Button from '../../components/ui/Button';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
@@ -10,6 +13,7 @@ const ITEMS_PER_PAGE = 5;
 export default function AdminNoticeBoard() {
   useDocumentTitle('Notice Board');
   const { user, role } = useAuth();
+  const { invalidate } = useQueryCache();
 
   const isSuperAdmin = role === 'super_admin' || role === 'admin';
   const isMaleWingAdmin = role === 'male_wing_admin';
@@ -19,8 +23,6 @@ export default function AdminNoticeBoard() {
   // Determine initial target wing default for this admin
   const defaultTargetWing = isMaleWingAdmin ? 'Male' : isFemaleWingAdmin ? 'Female' : 'All';
 
-  const [notices, setNotices] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   
   // Form state
@@ -39,26 +41,34 @@ export default function AdminNoticeBoard() {
   // Expanded card state (track notice IDs that are expanded)
   const [expandedIds, setExpandedIds] = useState(new Set());
 
-  const fetchNotices = async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const data = await noticeService.getNotices();
-      setNotices(data);
-      // Automatically expand the first notice if exists
-      if (data.length > 0) {
-        setExpandedIds(new Set([data[0].id]));
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load notices.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Cached fetch for notices
+  const {
+    data: notices = [],
+    isLoading,
+    isRefreshing,
+    error: loadError,
+    refresh
+  } = useCachedFetch(
+    'notices-list',
+    () => noticeService.getNotices(),
+    { ttl: 5 * 60_000 }
+  );
 
+  // Sync load error
   useEffect(() => {
-    fetchNotices();
-  }, []);
+    if (loadError) {
+      setError(loadError.message);
+    } else {
+      setError('');
+    }
+  }, [loadError]);
+
+  // Auto-expand first notice when notices load
+  useEffect(() => {
+    if (notices.length > 0 && expandedIds.size === 0) {
+      setExpandedIds(new Set([notices[0].id]));
+    }
+  }, [notices, expandedIds]);
 
   const toggleExpand = (id, e) => {
     // Prevent expanding if they clicked on action buttons
@@ -130,7 +140,8 @@ export default function AdminNoticeBoard() {
         await noticeService.createNotice(formData);
       }
       handleCloseForm();
-      fetchNotices();
+      invalidate('notices-list');
+      refresh();
     } catch (err) {
       setError(err.message || 'Failed to post notice.');
     } finally {
@@ -142,7 +153,8 @@ export default function AdminNoticeBoard() {
     if (!window.confirm('Are you sure you want to delete this notice?')) return;
     try {
       await noticeService.deleteNotice(id);
-      fetchNotices();
+      invalidate('notices-list');
+      refresh();
     } catch (err) {
       setError(err.message || 'Failed to delete notice.');
     }
@@ -172,13 +184,10 @@ export default function AdminNoticeBoard() {
     return false;
   };
 
-  const getWingLabel = (wing) => {
-    if (wing === 'All') return 'All Wings';
-    return `${wing} Wing`;
-  };
-
   return (
     <div className="notice-board-page">
+      {isRefreshing && <div className="data-refreshing-bar" />}
+
       <header className="notice-board-header">
         <div>
           <h1>Notice Board</h1>
@@ -260,10 +269,15 @@ export default function AdminNoticeBoard() {
         </form>
       )}
 
-      {isLoading ? (
-        <div className="notice-empty-state">
-          <LoaderCircle size={24} className="spin" style={{ margin: '0 auto 0.5rem' }} />
-          <p>Loading notices...</p>
+      {isLoading && !notices.length ? (
+        <div className="skeleton-cards" style={{ display: 'grid', gap: '1rem', marginTop: '1rem' }}>
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="skeleton-card" style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '8px' }}>
+              <div className="skeleton-block skeleton-card-title" style={{ width: '40%', height: '1.2rem', marginBottom: '0.8rem' }} />
+              <div className="skeleton-block skeleton-card-body" style={{ height: '1rem', marginBottom: '0.5rem' }} />
+              <div className="skeleton-block skeleton-card-body short" style={{ width: '70%', height: '1rem' }} />
+            </div>
+          ))}
         </div>
       ) : notices.length === 0 ? (
         <div className="notice-empty-state">

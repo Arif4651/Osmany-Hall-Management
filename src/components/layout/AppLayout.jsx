@@ -89,13 +89,17 @@ export default function AppLayout({ role, navItems }) {
           <Outlet />
         </main>
         <footer className="app-footer">
-          <p>{`${BRANDING.hallName} · ${BRANDING.universityShortName}`}</p>
-          {role === 'admin' && (
-            <Link to={ROUTE_PATHS.adminDeveloperProfile} className="footer-dev-link">
-              Developer Profile
+          <p className="footer-brand">{`${BRANDING.hallName} · ${BRANDING.universityShortName}`}</p>
+          <div className="footer-developer">
+            Developed By-{' '}
+            <Link 
+              to={role === 'admin' ? ROUTE_PATHS.adminDeveloperProfile : ROUTE_PATHS.studentDeveloperProfile} 
+              className="footer-dev-link-text"
+            >
+              <strong>Arif Abdullah</strong>
             </Link>
-          )}
-          <small>{BRANDING.motto}</small>
+          </div>
+          <small className="footer-motto">{BRANDING.motto}</small>
         </footer>
       </div>
     </div>

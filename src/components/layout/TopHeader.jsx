@@ -6,6 +6,7 @@ import { BRANDING } from '../../constants/branding';
 import { useAuth } from '../../context/AuthContext';
 import { ROUTE_PATHS } from '../../constants/routePaths';
 import { adminDataService } from '../../services/adminDataService';
+import { STUDENT_NAV_ITEMS, ADMIN_NAV_ITEMS } from '../../constants/navigation';
 
 function generateHeading(pathname) {
   const section = pathname.split('/').filter(Boolean).slice(-1)[0] || 'landing';
@@ -53,6 +54,10 @@ export default function TopHeader({ onOpenSidebar, onToggleSidebarCollapsed, isS
     return <UserRound size={14} />;
   }
 
+  const allNavItems = [...(STUDENT_NAV_ITEMS || []), ...(ADMIN_NAV_ITEMS || [])];
+  const activeNavItem = allNavItems.find(item => item.path === location.pathname);
+  const ActiveIcon = activeNavItem ? activeNavItem.icon : null;
+
   return (
     <header className="top-header">
       <button type="button" className="menu-button" onClick={onOpenSidebar} aria-label="Open navigation">
@@ -71,7 +76,10 @@ export default function TopHeader({ onOpenSidebar, onToggleSidebarCollapsed, isS
 
       <div className="header-title-wrap">
         <p className="header-subtitle">{`${BRANDING.universityShortName} · ${BRANDING.hallName}`}</p>
-        <h2>{generateHeading(location.pathname)}</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {ActiveIcon && <ActiveIcon size={20} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />}
+          {generateHeading(location.pathname)}
+        </h2>
       </div>
 
       <div className="header-actions">

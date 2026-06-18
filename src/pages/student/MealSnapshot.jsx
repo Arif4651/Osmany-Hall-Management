@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 
 const tomorrow = () => {
@@ -16,39 +18,47 @@ const getPastDate = (daysAgo) => {
 
 export default function MealSnapshot() {
   useDocumentTitle('Meal Snapshot');
-  const [range, setRange] = useState({ from: getPastDate(30), to: tomorrow() });
-  const [rows, setRows] = useState([]);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [inputs, setInputs] = useState({ from: getPastDate(30), to: tomorrow() });
+  const [appliedRange, setAppliedRange] = useState({ from: getPastDate(30), to: tomorrow() });
 
-  const load = async () => {
-    const maxDate = tomorrow();
-    if (range.from > maxDate || range.to > maxDate) {
-      setError('Dates beyond tomorrow cannot be selected.');
-      return;
-    }
-    setLoading(true);
-    try {
-      const fetched = await financialService.getSnapshot(range.from, range.to);
-      setRows([...fetched].reverse());
-      setError('');
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const cacheKey = `meal-snapshot-${appliedRange.from}-${appliedRange.to}`;
+
+  const {
+    data: fetchedRows = [],
+    isLoading,
+    isRefreshing,
+    error: loadError,
+    refresh
+  } = useCachedFetch(
+    cacheKey,
+    async () => {
+      const maxDate = tomorrow();
+      if (appliedRange.from > maxDate || appliedRange.to > maxDate) {
+        throw new Error('Dates beyond tomorrow cannot be selected.');
+      }
+      const fetched = await financialService.getSnapshot(appliedRange.from, appliedRange.to);
+      return [...fetched].reverse();
+    },
+    { ttl: 60_000 }
+  );
+
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    setLoading(true);
-    financialService.getSnapshot(getPastDate(30), tomorrow())
-      .then((fetched) => setRows([...fetched].reverse()))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+    if (loadError) {
+      setError(loadError.message);
+    } else {
+      setError('');
+    }
+  }, [loadError]);
+
+  const applyRange = (event) => {
+    event.preventDefault();
+    setAppliedRange({ from: inputs.from, to: inputs.to });
+  };
 
   const renderCell = (row, period) => {
-    const meal = row.meals.find((entry) => entry.mealPeriod === period);
+    const meal = row.meals?.find((entry) => entry.mealPeriod === period);
     if (!meal) return <span style={{ color: 'var(--muted)' }}>—</span>;
 
     const baseStatus = meal.isOn ? (
@@ -103,6 +113,8 @@ export default function MealSnapshot() {
 
   return (
     <div className="financial-page">
+      {isRefreshing && <div className="data-refreshing-bar" />}
+      
       <header>
         <h1>Meal Snapshot</h1>
         <p>Historical meal status and choices by date.</p>
@@ -110,14 +122,14 @@ export default function MealSnapshot() {
 
       {error && <div className="student-message student-message-error">{error}</div>}
 
-      <section className="financial-card filter-row">
+      <form className="financial-card filter-row" onSubmit={applyRange}>
         <label>
           <span>From</span>
           <input
             type="date"
             max={tomorrow()}
-            value={range.from}
-            onChange={(e) => setRange({ ...range, from: e.target.value })}
+            value={inputs.from}
+            onChange={(e) => setInputs({ ...inputs, from: e.target.value })}
           />
         </label>
         <label>
@@ -125,58 +137,48 @@ export default function MealSnapshot() {
           <input
             type="date"
             max={tomorrow()}
-            value={range.to}
-            onChange={(e) => setRange({ ...range, to: e.target.value })}
+            value={inputs.to}
+            onChange={(e) => setInputs({ ...inputs, to: e.target.value })}
           />
         </label>
-        <button className="primary-action" onClick={load} disabled={loading}>
-          {loading ? 'Applying...' : 'Apply'}
+        <button className="primary-action" type="submit" disabled={isLoading}>
+          {isLoading ? 'Applying...' : 'Apply'}
         </button>
-      </section>
+      </form>
 
       <section className="financial-card table-wrap" style={{ position: 'relative' }}>
-        {loading && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(255, 255, 255, 0.72)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10,
-            borderRadius: 'var(--radius-lg)'
-          }}>
-            <span style={{ fontWeight: '600', color: 'var(--primary)' }}>Loading snapshot...</span>
-          </div>
-        )}
-        <table className="student-snapshot-table">
-          <thead>
-            <tr>
-              <th>Day</th>
-              <th>Breakfast</th>
-              <th>Lunch</th>
-              <th>Dinner</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+        {isLoading && !fetchedRows.length ? (
+          <TableSkeleton rows={5} cols={4} />
+        ) : (
+          <table className="student-snapshot-table">
+            <thead>
               <tr>
-                <td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)', padding: '2rem 1rem' }}>
-                  {loading ? 'Fetching records...' : 'No snapshot records found for the selected range.'}
-                </td>
+                <th>Day</th>
+                <th>Breakfast</th>
+                <th>Lunch</th>
+                <th>Dinner</th>
               </tr>
-            ) : (
-              rows.map((row) => (
-                <tr key={row.date}>
-                  <td>{row.date}</td>
-                  <td>{renderCell(row, 'breakfast')}</td>
-                  <td>{renderCell(row, 'lunch')}</td>
-                  <td>{renderCell(row, 'dinner')}</td>
+            </thead>
+            <tbody>
+              {fetchedRows.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)', padding: '2rem 1rem' }}>
+                    No snapshot records found for the selected range.
+                  </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                fetchedRows.map((row) => (
+                  <tr key={row.date}>
+                    <td>{row.date}</td>
+                    <td>{renderCell(row, 'breakfast')}</td>
+                    <td>{renderCell(row, 'lunch')}</td>
+                    <td>{renderCell(row, 'dinner')}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </section>
     </div>
   );

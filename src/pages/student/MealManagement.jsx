@@ -10,6 +10,8 @@ import useStudentMealModule from '../../hooks/useStudentMealModule';
 import { financialService } from '../../services/financialService';
 import { formatCutoffTimeLabel } from '../../constants/mealConfig';
 import { formatDate } from '../../utils/formatters';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { queryCache } from '../../services/queryCache';
 
 function formatLocalDate(date) {
   const year = date.getFullYear();
@@ -68,10 +70,8 @@ export default function MealManagement() {
   const [isSaving, setIsSaving] = useState(false);
   const [preferenceFeedback, setPreferenceFeedback] = useState(null);
   const [guestForm, setGuestForm] = useState({ date: '', mealPeriod: '', guestCount: 1 });
-  const [guestMeals, setGuestMeals] = useState([]);
-  const [guestError, setGuestError] = useState('');
+  const [guestActionError, setGuestActionError] = useState('');
   const [guestMessage, setGuestMessage] = useState('');
-  const [isGuestLoading, setIsGuestLoading] = useState(false);
   const [isGuestSaving, setIsGuestSaving] = useState(false);
 
   useEffect(() => {
@@ -99,22 +99,27 @@ export default function MealManagement() {
     }));
   }, [earliestGuestDate, mealTypes]);
 
-  const loadGuestMeals = useCallback(async () => {
-    setIsGuestLoading(true);
-    setGuestError('');
-    try {
-      const rows = await financialService.getGuestMeals(guestMonth, guestYear);
-      setGuestMeals(rows);
-    } catch (error) {
-      setGuestError(error instanceof Error ? error.message : 'Failed to load guest meals.');
-    } finally {
-      setIsGuestLoading(false);
-    }
-  }, [guestMonth, guestYear]);
+  const guestMealsCacheKey = user?.studentId ? `guest-meals-${guestMonth}-${guestYear}-${user.studentId}` : null;
+  const {
+    data: cachedGuestMeals,
+    isLoading: isGuestLoading,
+    error: guestFetchError,
+    refresh: refreshGuestMeals,
+  } = useCachedFetch(
+    guestMealsCacheKey,
+    () => financialService.getGuestMeals(guestMonth, guestYear),
+    { ttl: 30_000 }
+  );
 
-  useEffect(() => {
-    loadGuestMeals();
-  }, [loadGuestMeals]);
+  const guestMeals = cachedGuestMeals || [];
+
+  const guestError = guestActionError || guestFetchError || '';
+  const setGuestError = setGuestActionError;
+
+  const loadGuestMeals = useCallback(() => {
+    queryCache.invalidate('guest-meals-');
+    refreshGuestMeals();
+  }, [refreshGuestMeals]);
   const countdownLabel = useMemo(() => {
     const hours = Math.floor(minutesUntilCutoff / 60);
     const minutes = minutesUntilCutoff % 60;

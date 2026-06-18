@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { FileSpreadsheet, FileText, CalendarDays, ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import TableSkeleton from '../../components/ui/TableSkeleton';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
@@ -22,34 +24,29 @@ export default function DailyCost() {
     year: now.getFullYear(),
     gender: isLockedToWing ? (user?.wing || 'All') : 'All',
   });
-  const [report, setReport] = useState(null);
+
+  const cacheKey = `daily-cost-${filters.month}-${filters.year}-${filters.gender}`;
+
+  const {
+    data: report = null,
+    isLoading,
+    isRefreshing,
+    error: loadError
+  } = useCachedFetch(
+    cacheKey,
+    () => adminDataService.getDailyCost(filters.month, filters.year, filters.gender),
+    { ttl: 2 * 60_000 }
+  );
+
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const load = async () => {
-      setIsLoading(true);
+    if (loadError) {
+      setError(loadError.message);
+    } else {
       setError('');
-      try {
-        const nextReport = await adminDataService.getDailyCost(filters.month, filters.year, filters.gender);
-        if (!isMounted) return;
-        setReport(nextReport);
-      } catch (loadError) {
-        if (!isMounted) return;
-        setReport(null);
-        setError(loadError.message);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    };
-
-    load();
-    return () => {
-      isMounted = false;
-    };
-  }, [filters.month, filters.year, filters.gender]);
+    }
+  }, [loadError]);
 
   const currentMonthLabel = useMemo(
     () => new Date(filters.year, filters.month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
@@ -88,9 +85,9 @@ export default function DailyCost() {
     const fmt = (amount) => `Tk ${Number(amount || 0).toFixed(2)}`;
 
     const rowsData = (report?.rows || []).map((row) => {
-      const formatBreakdown = (meal) => {
-        if (!meal.options || meal.options.length === 0) return '';
-        return ' (' + meal.options.map(o => `${o.name}: ${fmt(o.cost)} [${o.students} std, ${fmt(o.perHead)}/h]`).join(', ') + ')';
+      const formatCost = (meal) => {
+        if (!meal.options || meal.options.length === 0) return fmt(meal.cost);
+        return meal.options.map(o => `${o.name}: ${fmt(o.cost)}`).join(' | ');
       };
       const formatHeaderBreakdown = (meal) => {
         if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
@@ -98,13 +95,13 @@ export default function DailyCost() {
       };
       return {
         Date: row.date,
-        'Breakfast Cost': `${fmt(row.breakfast.cost)}${formatBreakdown(row.breakfast)}`,
+        'Breakfast Cost': formatCost(row.breakfast),
         'B. Students': row.breakfast.students,
         'B. /Head': formatHeaderBreakdown(row.breakfast),
-        'Lunch Cost': `${fmt(row.lunch.cost)}${formatBreakdown(row.lunch)}`,
+        'Lunch Cost': formatCost(row.lunch),
         'L. Students': row.lunch.students,
         'L. /Head': formatHeaderBreakdown(row.lunch),
-        'Dinner Cost': `${fmt(row.dinner.cost)}${formatBreakdown(row.dinner)}`,
+        'Dinner Cost': formatCost(row.dinner),
         'D. Students': row.dinner.students,
         'D. /Head': formatHeaderBreakdown(row.dinner),
         'Total /Head': row.options && row.options.length > 0
@@ -114,9 +111,9 @@ export default function DailyCost() {
     });
 
     if (report && rowsData.length > 0) {
-      const formatTotalBreakdown = (meal) => {
-        if (!meal.options || meal.options.length === 0) return '';
-        return ' (' + meal.options.map(o => `${o.name}: ${fmt(o.cost)} [${o.students} std, ${fmt(o.perHead)}/h]`).join(', ') + ')';
+      const formatTotalCost = (meal) => {
+        if (!meal.options || meal.options.length === 0) return fmt(meal.cost);
+        return meal.options.map(o => `${o.name}: ${fmt(o.cost)}`).join(' | ');
       };
       const formatTotalHeaderBreakdown = (meal) => {
         if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
@@ -125,13 +122,13 @@ export default function DailyCost() {
 
       rowsData.push({
         Date: 'TOTAL / AVERAGE',
-        'Breakfast Cost': `${fmt(report.breakfast.cost)}${formatTotalBreakdown(report.breakfast)}`,
+        'Breakfast Cost': formatTotalCost(report.breakfast),
         'B. Students': report.breakfast.students,
         'B. /Head': formatTotalHeaderBreakdown(report.breakfast),
-        'Lunch Cost': `${fmt(report.lunch.cost)}${formatTotalBreakdown(report.lunch)}`,
+        'Lunch Cost': formatTotalCost(report.lunch),
         'L. Students': report.lunch.students,
         'L. /Head': formatTotalHeaderBreakdown(report.lunch),
-        'Dinner Cost': `${fmt(report.dinner.cost)}${formatTotalBreakdown(report.dinner)}`,
+        'Dinner Cost': formatTotalCost(report.dinner),
         'D. Students': report.dinner.students,
         'D. /Head': formatTotalHeaderBreakdown(report.dinner),
         'Total /Head': report.grandTotal.options && report.grandTotal.options.length > 0
@@ -186,10 +183,10 @@ export default function DailyCost() {
   };
 
   const renderCostCell = (meal, cellClass) => {
+    const hasOptions = meal.options && meal.options.length > 0;
     return (
       <td className={cellClass}>
-        <strong style={{ fontSize: '0.95rem' }}>{formatCurrency(meal.cost)}</strong>
-        {meal.options && meal.options.length > 0 && (
+        {hasOptions ? (
           <div className="cell-option-breakdown">
             {meal.options.map((opt) => (
               <div key={opt.name} className="cell-option-row">
@@ -198,6 +195,8 @@ export default function DailyCost() {
               </div>
             ))}
           </div>
+        ) : (
+          <strong style={{ fontSize: '0.95rem' }}>{formatCurrency(meal.cost)}</strong>
         )}
       </td>
     );
@@ -331,10 +330,13 @@ export default function DailyCost() {
 
   return (
     <div className="financial-page">
-      <div className="daily-cost-header">
+      {isRefreshing && <div className="data-refreshing-bar" />}
+      
+      <div className="daily-cost-header" style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
+        <CalendarDays size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div className="header-title">
-          <h1>Daily Cost</h1>
-          <p>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
+          <h1 style={{ margin: 0 }}>Daily Cost</h1>
+          <p style={{ margin: '0.25rem 0 0 0' }}>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
         </div>
         <div className="header-actions">
           {isLockedToWing ? (
@@ -403,7 +405,7 @@ export default function DailyCost() {
             </button>
           </div>
 
-          {isLoading ? (
+          {isRefreshing ? (
             <div className="daily-cost-live-indicator">
               <LoaderCircle size={15} className="spin" />
               <span>Updating</span>
@@ -425,14 +427,26 @@ export default function DailyCost() {
 
       {error && <div className="student-message student-message-error">{error}</div>}
 
-      {!error && isLoading ? (
-        <section className="daily-cost-loading-panel">
-          <LoaderCircle size={22} className="spin" />
-          <div>
-            <strong>Loading daily cost</strong>
-            <span>{`Preparing ${currentMonthLabel} for ${selectedWingLabel}.`}</span>
+      {!error && isLoading && !report ? (
+        <>
+          <section className="daily-cost-loading-panel" style={{ marginBottom: '1.5rem' }}>
+            <LoaderCircle size={22} className="spin" />
+            <div>
+              <strong>Loading daily cost</strong>
+              <span>{`Preparing ${currentMonthLabel} for ${selectedWingLabel}.`}</span>
+            </div>
+          </section>
+          <div className="skeleton-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="skeleton-card">
+                <div className="skeleton-block skeleton-card-title" />
+                <div className="skeleton-block skeleton-card-body" />
+                <div className="skeleton-block skeleton-card-body short" />
+              </div>
+            ))}
           </div>
-        </section>
+          <TableSkeleton rows={10} cols={11} />
+        </>
       ) : null}
 
       {!error && !isLoading && report && report.rows.length === 0 ? (
@@ -444,7 +458,7 @@ export default function DailyCost() {
         </section>
       ) : null}
 
-      {report && !isLoading && report.rows.length > 0 && (
+      {report && (report.rows.length > 0 || !isLoading) && (
         <>
           <section className="daily-cost-cards">
             <div className="daily-cost-card breakfast">
@@ -493,70 +507,72 @@ export default function DailyCost() {
             </div>
           </section>
 
-          <section className="daily-cost-table-card table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th rowSpan={2}>DATE</th>
-                  <th colSpan={3} className="th-breakfast">BREAKFAST</th>
-                  <th colSpan={3} className="th-lunch">LUNCH</th>
-                  <th colSpan={3} className="th-dinner">DINNER</th>
-                  <th rowSpan={2} className="th-total">TOTAL<br /><small style={{fontWeight:400,fontSize:'0.75em'}}>/Head</small></th>
-                </tr>
-                <tr>
-                  <th className="th-breakfast">Cost</th>
-                  <th className="th-breakfast">Students</th>
-                  <th className="th-breakfast">/Head</th>
-                  <th className="th-lunch">Cost</th>
-                  <th className="th-lunch">Students</th>
-                  <th className="th-lunch">/Head</th>
-                  <th className="th-dinner">Cost</th>
-                  <th className="th-dinner">Students</th>
-                  <th className="th-dinner">/Head</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.rows.map((row) => {
-                  const { dayName, dateLabel } = parseRowDate(row.date);
-                  return (
-                    <tr key={row.date}>
-                      <td>
-                        <div className="table-date-cell">
-                          <span className="day-name">{dayName}</span>
-                          <span className="date-label">{dateLabel}</span>
-                        </div>
-                      </td>
-                      {renderCostCell(row.breakfast, 'cell-breakfast')}
-                      {renderStudentsCell(row.breakfast)}
-                      {renderPerHeadCell(row.breakfast, 'cell-breakfast')}
-                      {renderCostCell(row.lunch, 'cell-lunch')}
-                      {renderStudentsCell(row.lunch)}
-                      {renderPerHeadCell(row.lunch, 'cell-lunch')}
-                      {renderCostCell(row.dinner, 'cell-dinner')}
-                      {renderStudentsCell(row.dinner)}
-                      {renderPerHeadCell(row.dinner, 'cell-dinner')}
-                      {renderRowTotalPerHeadCell(row)}
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="table-total-row">
-                  <td style={{ fontWeight: '700', color: '#1e293b' }}>TOTAL</td>
-                  <td className="cell-student">-</td>
-                  <td className="cell-student">-</td>
-                  {renderFooterPerHeadCell(report.breakfast, 'cell-breakfast')}
-                  <td className="cell-student">-</td>
-                  <td className="cell-student">-</td>
-                  {renderFooterPerHeadCell(report.lunch, 'cell-lunch')}
-                  <td className="cell-student">-</td>
-                  <td className="cell-student">-</td>
-                  {renderFooterPerHeadCell(report.dinner, 'cell-dinner')}
-                  {renderFooterGrandTotalCell(report.grandTotal)}
-                </tr>
-              </tfoot>
-            </table>
-          </section>
+          {report.rows.length > 0 && (
+            <section className="daily-cost-table-card table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th rowSpan={2}>DATE</th>
+                    <th colSpan={3} className="th-breakfast">BREAKFAST</th>
+                    <th colSpan={3} className="th-lunch">LUNCH</th>
+                    <th colSpan={3} className="th-dinner">DINNER</th>
+                    <th rowSpan={2} className="th-total">TOTAL<br /><small style={{fontWeight:400,fontSize:'0.75em'}}>/Head</small></th>
+                  </tr>
+                  <tr>
+                    <th className="th-breakfast">Cost</th>
+                    <th className="th-breakfast">Students</th>
+                    <th className="th-breakfast">/Head</th>
+                    <th className="th-lunch">Cost</th>
+                    <th className="th-lunch">Students</th>
+                    <th className="th-lunch">/Head</th>
+                    <th className="th-dinner">Cost</th>
+                    <th className="th-dinner">Students</th>
+                    <th className="th-dinner">/Head</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rows.map((row) => {
+                    const { dayName, dateLabel } = parseRowDate(row.date);
+                    return (
+                      <tr key={row.date}>
+                        <td>
+                          <div className="table-date-cell">
+                            <span className="day-name">{dayName}</span>
+                            <span className="date-label">{dateLabel}</span>
+                          </div>
+                        </td>
+                        {renderCostCell(row.breakfast, 'cell-breakfast')}
+                        {renderStudentsCell(row.breakfast)}
+                        {renderPerHeadCell(row.breakfast, 'cell-breakfast')}
+                        {renderCostCell(row.lunch, 'cell-lunch')}
+                        {renderStudentsCell(row.lunch)}
+                        {renderPerHeadCell(row.lunch, 'cell-lunch')}
+                        {renderCostCell(row.dinner, 'cell-dinner')}
+                        {renderStudentsCell(row.dinner)}
+                        {renderPerHeadCell(row.dinner, 'cell-dinner')}
+                        {renderRowTotalPerHeadCell(row)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="table-total-row">
+                    <td style={{ fontWeight: '700', color: '#1e293b' }}>TOTAL</td>
+                    <td className="cell-student">-</td>
+                    <td className="cell-student">-</td>
+                    {renderFooterPerHeadCell(report.breakfast, 'cell-breakfast')}
+                    <td className="cell-student">-</td>
+                    <td className="cell-student">-</td>
+                    {renderFooterPerHeadCell(report.lunch, 'cell-lunch')}
+                    <td className="cell-student">-</td>
+                    <td className="cell-student">-</td>
+                    {renderFooterPerHeadCell(report.dinner, 'cell-dinner')}
+                    {renderFooterGrandTotalCell(report.grandTotal)}
+                  </tr>
+                </tfoot>
+              </table>
+            </section>
+          )}
         </>
       )}
     </div>

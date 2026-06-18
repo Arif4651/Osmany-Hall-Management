@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { Download, ClipboardList } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import Button from '../../components/ui/Button';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import { useCachedFetch } from '../../hooks/useCachedFetch';
+import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 import { formatCurrency, todayLocal } from '../../utils/formatters';
 
@@ -32,18 +34,27 @@ function StudentMealCell({ meal }) {
 
 export default function ViewMenu() {
   useDocumentTitle('View Menu');
-  const [moduleData, setModuleData] = useState(null);
   const [error, setError] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
 
+  const {
+    data: moduleData = null,
+    isLoading,
+    isRefreshing,
+    error: loadError
+  } = useCachedFetch(
+    'weekly-menu',
+    () => financialService.getWeeklyMenu(),
+    { ttl: 5 * 60_000 }
+  );
+
   useEffect(() => {
-    financialService.getWeeklyMenu()
-      .then((data) => {
-        setModuleData(data);
-        setError('');
-      })
-      .catch((loadError) => setError(loadError.message));
-  }, []);
+    if (loadError) {
+      setError(loadError.message);
+    } else {
+      setError('');
+    }
+  }, [loadError]);
 
   const mealTypes = useMemo(() => moduleData?.settings?.mealTypes || [], [moduleData]);
   const menuRows = useMemo(() => (moduleData?.days || []).map((day) => ({
@@ -196,10 +207,15 @@ export default function ViewMenu() {
 
   return (
     <div className="admin-meal-page student-view-menu-page">
+      {isRefreshing && <div className="data-refreshing-bar" />}
+      
       <header className="admin-meal-header">
-        <div>
-          <h1>Weekly Menu</h1>
-          <p>View the complete day-by-day meal routine.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
+          <ClipboardList size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+          <div>
+            <h1 style={{ margin: 0 }}>Weekly Menu</h1>
+            <p style={{ margin: '0.25rem 0 0 0' }}>View the complete day-by-day meal routine.</p>
+          </div>
         </div>
       </header>
 
@@ -211,37 +227,43 @@ export default function ViewMenu() {
             <h2>Meal Routine</h2>
             <p>Regular items, optional choices, and meal costs for the full week.</p>
           </div>
-          <Button variant="secondary" onClick={downloadMealRoutine} disabled={!menuRows.length || isDownloading}>
+          <Button
+            variant="secondary"
+            onClick={downloadMealRoutine}
+            disabled={!menuRows.length || isDownloading || isLoading}
+          >
             <Download size={16} /> {isDownloading ? 'Preparing PDF...' : 'Download PDF'}
           </Button>
         </div>
 
-        {!moduleData && !error ? <div className="weekly-menu-loading">Loading weekly menu...</div> : null}
-
-        {moduleData ? (
-          <div className="admin-meal-table-wrap">
-            <table className="admin-meal-table">
-              <thead>
-                <tr>
-                  <th>Day</th>
-                  {mealTypes.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {menuRows.map((row) => (
-                  <tr key={row.dayId}>
-                    <td><strong>{row.dayLabel}</strong></td>
-                    {mealTypes.map((mealType) => (
-                      <td key={mealType.id}>
-                        <StudentMealCell meal={row.mealsByType[mealType.id]} />
-                      </td>
-                    ))}
+        {isLoading && !moduleData ? (
+          <TableSkeleton rows={7} cols={4} />
+        ) : (
+          moduleData && (
+            <div className="admin-meal-table-wrap">
+              <table className="admin-meal-table">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    {mealTypes.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+                </thead>
+                <tbody>
+                  {menuRows.map((row) => (
+                    <tr key={row.dayId}>
+                      <td><strong>{row.dayLabel}</strong></td>
+                      {mealTypes.map((mealType) => (
+                        <td key={mealType.id}>
+                          <StudentMealCell meal={row.mealsByType[mealType.id]} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        )}
       </section>
     </div>
   );

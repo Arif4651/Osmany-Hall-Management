@@ -7,6 +7,33 @@ export default function DeveloperProfile() {
   useDocumentTitle('Developer Profile');
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
+  const handleEmailClick = (e) => {
+    e.preventDefault();
+    const email = 'arif465109@gmail.com';
+    const webGmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${email}`;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isIOS) {
+        // iOS custom scheme to target Gmail app directly
+        window.location.href = `googlegmail:///co?to=${email}`;
+        setTimeout(() => {
+          window.location.href = webGmailUrl;
+        }, 800);
+      } else {
+        // Android Intent targeting Gmail app package specifically
+        window.location.href = `intent:#Intent;action=android.intent.action.SENDTO;category=android.intent.category.DEFAULT;data=mailto:${email};package=com.google.android.gm;end`;
+        setTimeout(() => {
+          window.location.href = webGmailUrl;
+        }, 800);
+      }
+    } else {
+      // Desktop: Open Gmail web composer directly (bypasses Outlook app launcher)
+      window.open(webGmailUrl, '_blank');
+    }
+  };
+
   return (
     <div className="dev-profile-container">
       {/* Hero Header Section */}
@@ -59,7 +86,7 @@ export default function DeveloperProfile() {
               <Facebook size={18} />
               <span>Facebook Profile</span>
             </a>
-            <a href="https://mail.google.com/mail/?view=cm&fs=1&to=arif465109@gmail.com" target="_blank" rel="noopener noreferrer" className="dev-social-btn email">
+            <a href="mailto:arif465109@gmail.com" onClick={handleEmailClick} className="dev-social-btn email">
               <Mail size={18} />
               <span>Send an Email</span>
             </a>
