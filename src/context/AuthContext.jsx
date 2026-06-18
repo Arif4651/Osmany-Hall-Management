@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   apiRequest,
   AUTH_UNAUTHORIZED_EVENT,
+  getAccessToken,
   setAccessToken,
 } from '../services/apiClient';
 
@@ -44,6 +45,16 @@ export function AuthProvider({ children }) {
     let isMounted = true;
 
     async function hydrateSession() {
+      const token = getAccessToken();
+      if (!token) {
+        setAccessToken('');
+        if (isMounted) {
+          setSession(null);
+          setIsSessionLoading(false);
+        }
+        return;
+      }
+
       try {
         const user = await apiRequest('/auth/me');
         if (isMounted) {

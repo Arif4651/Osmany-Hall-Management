@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, LockKeyhole, Mail, ShieldAlert } from 'lucide-react';
+import { Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
@@ -8,14 +8,6 @@ import mistLogo from '../../assets/images/mist-logo.png';
 import { BRANDING } from '../../constants/branding';
 import { useAuth } from '../../context/AuthContext';
 import { DEFAULT_REDIRECTS } from '../../constants/routePaths';
-
-function getDefaultCredentials(mode) {
-  if (mode === 'admin') {
-    return { email: 'admin@mist.ac.bd', password: 'Admin@123' };
-  }
-
-  return { email: '2023001', password: '2023001' };
-}
 
 export default function LoginPage({ mode = 'student' }) {
   const isAdminMode = mode === 'admin';
@@ -25,7 +17,7 @@ export default function LoginPage({ mode = 'student' }) {
   const location = useLocation();
   const { isAuthenticated, role: activeRole, loginStudent, loginAdmin } = useAuth();
 
-  const [form, setForm] = useState(() => getDefaultCredentials(mode));
+  const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -125,15 +117,6 @@ export default function LoginPage({ mode = 'student' }) {
             </Button>
           </form>
 
-          <div className="auth-hint">
-            <p>Demo credentials:</p>
-            <small>{isAdminMode ? 'admin@mist.ac.bd / Admin@123' : '2023001 / 2023001'}</small>
-            {isAdminMode ? (
-              <small className="auth-warning">
-                <ShieldAlert size={13} /> Admin route: <code>/halladmin</code>
-              </small>
-            ) : null}
-          </div>
         </Card>
       </div>
     </div>

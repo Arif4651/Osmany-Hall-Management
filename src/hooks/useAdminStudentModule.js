@@ -29,21 +29,22 @@ export default function useAdminStudentModule() {
 
   const [selectedIds, setSelectedIds] = useState([]);
 
+  const loadFilterOptions = useCallback(async () => {
+    const options = await studentService.getFilterOptions();
+    setFilterOptions(options);
+  }, []);
+
   const loadStudents = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage('');
 
     try {
-      const [response, options] = await Promise.all([
-        studentService.getStudents({ filters, page, pageSize }),
-        studentService.getFilterOptions(),
-      ]);
+      const response = await studentService.getStudents({ filters, page, pageSize });
       setStudents(response.items);
       setTotal(response.total);
       setTotalPages(response.totalPages);
       setFilteredIds(response.filteredIds);
       setPage(response.page);
-      setFilterOptions(options);
 
       setSelectedIds((prev) => prev.filter((id) => response.filteredIds.includes(id)));
     } catch (error) {
@@ -56,6 +57,12 @@ export default function useAdminStudentModule() {
   useEffect(() => {
     loadStudents();
   }, [loadStudents]);
+
+  useEffect(() => {
+    loadFilterOptions().catch((error) => {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load student filters.');
+    });
+  }, [loadFilterOptions]);
 
   const selectionSummary = useMemo(
     () => summarizeBulkSelection(filteredIds, selectedIds),
@@ -130,7 +137,7 @@ export default function useAdminStudentModule() {
 
     try {
       const created = await studentService.createStudent(payload);
-      await loadStudents();
+      await Promise.all([loadStudents(), loadFilterOptions()]);
       return {
         ok: true,
         notice: getCredentialNotice(created.studentId),
@@ -145,7 +152,7 @@ export default function useAdminStudentModule() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadStudents]);
+  }, [loadStudents, loadFilterOptions]);
 
   const updateStudent = useCallback((id, payload) => {
     return withSubmitState(async () => {
