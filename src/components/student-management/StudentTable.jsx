@@ -13,7 +13,7 @@ export default function StudentTable({
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedSet.has(id));
 
   return (
-    <div className="table-wrapper" role="region" aria-label="Student management table">
+    <div className="table-wrapper sticky-page-table" role="region" aria-label="Student management table">
       <table className="data-table student-data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>

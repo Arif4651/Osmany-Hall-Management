@@ -148,7 +148,7 @@ button {
 @media (max-width: 850px) {
   .app-footer {
     grid-template-columns: 1fr 1fr;
-    grid-template-areas: 
+    grid-template-areas:
       "brand motto"
       "dev dev";
     gap: 0.5rem 1rem;
@@ -171,7 +171,7 @@ button {
 @media (max-width: 480px) {
   .app-footer {
     grid-template-columns: 1fr 1fr;
-    grid-template-areas: 
+    grid-template-areas:
       "brand motto"
       "dev dev";
     gap: 0.4rem 0.6rem;
@@ -780,6 +780,25 @@ button {
   letter-spacing: 0.04em;
 }
 
+.sticky-page-table {
+  overflow: visible !important;
+}
+
+.sticky-page-table .data-table,
+.sticky-page-table .student-snapshot-table {
+  border-collapse: separate !important;
+  border-spacing: 0;
+}
+
+.sticky-page-table .data-table thead th,
+.sticky-page-table .student-snapshot-table thead th {
+  position: sticky;
+  top: 4.35rem;
+  z-index: 12;
+  background: #f5f8fd;
+  box-shadow: 0 1px 0 #dbe4f0, 0 8px 14px rgba(15, 23, 42, .06);
+}
+
 .menu-day-label {
   color: #163872;
   font-size: 0.9rem;
@@ -1081,6 +1100,7 @@ button {
     opacity: 0;
     transform: translateY(15px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1090,8 +1110,8 @@ button {
 .hero {
   border-radius: 1.5rem;
   border: 1px solid rgba(201, 218, 243, 0.6);
-  box-shadow: 
-    0 24px 48px rgba(16, 38, 84, 0.06), 
+  box-shadow:
+    0 24px 48px rgba(16, 38, 84, 0.06),
     0 8px 18px rgba(16, 38, 84, 0.04);
   background:
     radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.1) 0%, transparent 40%),
@@ -1165,7 +1185,7 @@ button {
 .hero-brand-panel:hover {
   transform: translateY(-4px);
   border-color: rgba(37, 99, 235, 0.25);
-  box-shadow: 
+  box-shadow:
     0 12px 30px rgba(16, 38, 84, 0.06),
     0 2px 8px rgba(37, 99, 235, 0.05);
 }
@@ -4747,7 +4767,7 @@ button {
 }
 
 .daily-cost-table-card {
-  overflow-x: auto;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: .9rem;
   background: #fff;
@@ -4757,7 +4777,8 @@ button {
 .daily-cost-table-card table {
   width: 100%;
   min-width: 1100px;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .daily-cost-table-card th,
@@ -4769,11 +4790,25 @@ button {
 }
 
 .daily-cost-table-card th {
+  position: sticky;
   background: #f7f9fd;
   color: #52627a;
   font-size: .73rem;
   font-weight: 750;
   text-transform: uppercase;
+  z-index: 4;
+}
+
+.daily-cost-table-card thead tr:first-child th {
+  top: 4.35rem;
+  min-height: 2.75rem;
+  box-shadow: 0 1px 0 #dbe4f0;
+}
+
+.daily-cost-table-card thead tr:nth-child(2) th {
+  top: 7.1rem;
+  z-index: 3;
+  box-shadow: 0 1px 0 #dbe4f0, 0 8px 14px rgba(15, 23, 42, .06);
 }
 
 .daily-cost-table-card th:first-child,
@@ -5161,7 +5196,7 @@ button {
 
 .student-snapshot-table {
   width: 100%;
-  min-width: 720px;
+  min-width: auto;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -6614,18 +6649,21 @@ button {
    ============================================================ */
 
 @keyframes skeleton-shimmer {
-  0% { background-position: -600px 0; }
-  100% { background-position: 600px 0; }
+  0% {
+    background-position: -600px 0;
+  }
+
+  100% {
+    background-position: 600px 0;
+  }
 }
 
 .skeleton-block {
   border-radius: 6px;
-  background: linear-gradient(
-    90deg,
-    #e8eef8 25%,
-    #f2f6fd 50%,
-    #e8eef8 75%
-  );
+  background: linear-gradient(90deg,
+      #e8eef8 25%,
+      #f2f6fd 50%,
+      #e8eef8 75%);
   background-size: 1200px 100%;
   animation: skeleton-shimmer 1.5s infinite linear;
 }
@@ -6639,8 +6677,15 @@ button {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Header area */
@@ -6648,11 +6693,13 @@ button {
   display: grid;
   gap: 0.5rem;
 }
+
 .skeleton-title {
   height: 28px;
   width: 240px;
   max-width: 60%;
 }
+
 .skeleton-subtitle {
   height: 14px;
   width: 340px;
@@ -6666,6 +6713,7 @@ button {
   align-items: center;
   flex-wrap: wrap;
 }
+
 .skeleton-chip {
   height: 34px;
   width: 120px;
@@ -6678,6 +6726,7 @@ button {
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
+
 .skeleton-card {
   background: #fff;
   border: 1px solid var(--border);
@@ -6687,14 +6736,17 @@ button {
   gap: 0.6rem;
   box-shadow: var(--shadow-soft);
 }
+
 .skeleton-card-title {
   height: 13px;
   width: 70%;
 }
+
 .skeleton-card-body {
   height: 28px;
   width: 55%;
 }
+
 .skeleton-card-body.short {
   height: 12px;
   width: 80%;
@@ -6708,6 +6760,7 @@ button {
   overflow: hidden;
   box-shadow: var(--shadow-soft);
 }
+
 .skeleton-table-header,
 .skeleton-table-row {
   display: flex;
@@ -6716,14 +6769,17 @@ button {
   padding: 0.72rem 1rem;
   border-bottom: 1px solid #eef3fb;
 }
+
 .skeleton-table-header {
   background: #f6faff;
 }
+
 .skeleton-th {
   height: 12px;
   flex: 1;
   border-radius: 4px;
 }
+
 .skeleton-td {
   height: 14px;
   flex: 1;
@@ -6742,8 +6798,155 @@ button {
   animation: progress-slide 1.4s ease-in-out infinite;
   transform-origin: left;
 }
+
 @keyframes progress-slide {
-  0%   { transform: scaleX(0);   opacity: 1; }
-  60%  { transform: scaleX(0.85); opacity: 1; }
-  100% { transform: scaleX(1);   opacity: 0; }
+  0% {
+    transform: scaleX(0);
+    opacity: 1;
+  }
+
+  60% {
+    transform: scaleX(0.85);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+/* Ensure table card container scrolls horizontally on desktop if table overflows */
+.financial-card.table-wrap.sticky-page-table {
+  overflow-x: auto !important;
+}
+
+/* Disable sticky table headers for payment verification to fix overlap visual rendering bugs */
+.payment-verification-table thead th {
+  position: static !important;
+}
+
+/* Responsive Payment Verification Page Styles */
+@media (max-width: 960px) {
+  .payment-verification-table {
+    min-width: 0 !important;
+  }
+
+  .payment-verification-table,
+  .payment-verification-table tbody,
+  .payment-verification-table tr,
+  .payment-verification-table td {
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  .payment-verification-table thead {
+    display: none !important;
+  }
+
+  /* Make the wrapper container clean on mobile */
+  .financial-card.table-wrap.sticky-page-table {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    overflow-x: visible !important;
+  }
+
+  /* Convert each row into a premium card */
+  .payment-verification-table tr {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: 1.25rem !important;
+    margin-bottom: 1.25rem !important;
+    box-shadow: var(--shadow-soft) !important;
+    position: relative;
+    transition: transform var(--transition-base), box-shadow var(--transition-base);
+  }
+
+  .payment-verification-table tr:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(16, 38, 84, 0.08) !important;
+  }
+
+  /* Style the Student row as a card header */
+  .payment-verification-table td.student-cell {
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+    color: var(--primary) !important;
+    border-bottom: 2px solid var(--border) !important;
+    padding: 0 0 0.75rem 0 !important;
+    margin-bottom: 0.75rem;
+    text-align: left !important;
+    background: transparent !important;
+  }
+
+  .payment-verification-table td.student-cell::before {
+    display: none !important;
+  }
+
+  /* Make other cells show labels and values on opposite ends */
+  .payment-verification-table td:not(.student-cell):not(.actions-cell) {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 0.65rem 0 !important;
+    border-bottom: 1px dashed #e2e8f0 !important;
+    text-align: right !important;
+    background: transparent !important;
+  }
+
+  .payment-verification-table td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    margin-right: 0.5rem;
+  }
+
+  /* Style Roll / Hall ID display in student header card on mobile */
+  .payment-verification-table td.student-cell .roll-id-value {
+    font-weight: 500 !important;
+    color: var(--muted) !important;
+  }
+
+  /* Align Status cell and badge */
+  .payment-verification-table td.status-cell {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+  .payment-verification-table td.status-cell span {
+    margin: 0 !important;
+  }
+
+  /* Style Actions cell and buttons for easy tap on mobile */
+  .payment-verification-table td.actions-cell {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 0.75rem !important;
+    padding: 1rem 0 0 0 !important;
+    border-bottom: none !important;
+    background: transparent !important;
+  }
+
+  .payment-verification-table td.actions-cell button {
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+
+  .payment-verification-table td.actions-cell::before {
+    display: none !important;
+  }
+
+  /* If actions-cell is empty (i.e. has no button children), don't display it */
+  .payment-verification-table td.actions-cell:empty {
+    display: none !important;
+  }
 }

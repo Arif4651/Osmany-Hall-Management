@@ -146,7 +146,7 @@ export default function MealSnapshot() {
         </button>
       </form>
 
-      <section className="financial-card table-wrap" style={{ position: 'relative' }}>
+      <section className="financial-card sticky-page-table" style={{ position: 'relative' }}>
         {isLoading && !fetchedRows.length ? (
           <TableSkeleton rows={5} cols={4} />
         ) : (

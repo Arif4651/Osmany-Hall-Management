@@ -520,7 +520,7 @@ export default function BillingManagement() {
                 <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--primary)' }}>
                   Applied DSW Subsidies for {filters.month}/{filters.year}
                 </h3>
-                <div className="table-wrap" style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
+                <div className="table-wrap sticky-page-table" style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
                   <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', minWidth: '720px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -585,7 +585,7 @@ export default function BillingManagement() {
         </div>
       </div>
 
-      <section className="financial-card table-wrap">
+      <section className="financial-card table-wrap sticky-page-table">
         {loading && !rows.length ? (
           <TableSkeleton rows={8} cols={10} />
         ) : (

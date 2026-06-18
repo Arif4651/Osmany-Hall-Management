@@ -335,7 +335,7 @@ export default function DueBill() {
         </div>
       </section>
 
-      <section className="financial-card table-wrap">
+      <section className="financial-card table-wrap sticky-page-table">
         {isLoading && !rows.length ? (
           <TableSkeleton rows={8} cols={7} />
         ) : (

@@ -16,7 +16,10 @@ const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'Jul
 export default function DailyCost() {
   useDocumentTitle('Daily Cost');
   const { user, role } = useAuth();
+  const isStudentView = role === 'student';
   const isLockedToWing = role === 'male_wing_admin' || role === 'female_wing_admin' || role === 'student';
+  const costColumnLabel = isStudentView ? 'My Cost' : '/Head';
+  const totalCostColumnLabel = isStudentView ? 'TOTAL My Cost' : 'TOTAL /Head';
 
   // Wing admins and students are locked to their wing gender; super_admin/admin default to 'All'
   const [filters, setFilters] = useState({
@@ -25,7 +28,7 @@ export default function DailyCost() {
     gender: isLockedToWing ? (user?.wing || 'All') : 'All',
   });
 
-  const cacheKey = `daily-cost-${filters.month}-${filters.year}-${filters.gender}`;
+  const cacheKey = `daily-cost-${role}-${user?.id || 'anonymous'}-${filters.month}-${filters.year}-${filters.gender}`;
 
   const {
     data: report = null,
@@ -60,7 +63,12 @@ export default function DailyCost() {
     return years;
   }, []);
 
-  const selectedWingLabel = isLockedToWing ? `${user?.wing} Wing` : filters.gender === 'All' ? 'All Wings' : `${filters.gender} Wing`;
+  const selectedWingLabel = isStudentView
+    ? `${user?.fullName || 'My'}`
+    : isLockedToWing ? `${user?.wing} Wing` : filters.gender === 'All' ? 'All Wings' : `${filters.gender} Wing`;
+
+  const getMealDisplayCost = (meal) => isStudentView ? meal.myCost : meal.perHead;
+  const getRowDisplayTotal = (row) => isStudentView ? row.totalMyCost : row.totalPerHead;
 
   const moveMonth = (direction) => {
     setFilters((prev) => {
@@ -89,71 +97,38 @@ export default function DailyCost() {
         if (!meal.options || meal.options.length === 0) return fmt(meal.cost);
         return meal.options.map(o => `${o.name}: ${fmt(o.cost)}`).join(' | ');
       };
-      const formatHeaderBreakdown = (meal) => {
-        if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
-        return meal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ');
-      };
       return {
         Date: row.date,
         'Breakfast Cost': formatCost(row.breakfast),
         'B. Students': row.breakfast.students,
-        'B. /Head': formatHeaderBreakdown(row.breakfast),
+        [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.breakfast)),
         'Lunch Cost': formatCost(row.lunch),
         'L. Students': row.lunch.students,
-        'L. /Head': formatHeaderBreakdown(row.lunch),
+        [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.lunch)),
         'Dinner Cost': formatCost(row.dinner),
         'D. Students': row.dinner.students,
-        'D. /Head': formatHeaderBreakdown(row.dinner),
-        'Total /Head': row.options && row.options.length > 0
-          ? row.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ')
-          : fmt(row.totalPerHead),
+        [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.dinner)),
+        [totalCostColumnLabel]: fmt(getRowDisplayTotal(row)),
       };
     });
 
     if (report && rowsData.length > 0) {
-      const formatTotalCost = (meal) => {
-        if (!meal.options || meal.options.length === 0) return fmt(meal.cost);
-        return meal.options.map(o => `${o.name}: ${fmt(o.cost)}`).join(' | ');
-      };
-      const formatTotalHeaderBreakdown = (meal) => {
-        if (!meal.options || meal.options.length === 0) return fmt(meal.perHead);
-        return meal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ');
-      };
-
       rowsData.push({
-        Date: 'TOTAL / AVERAGE',
-        'Breakfast Cost': formatTotalCost(report.breakfast),
+        Date: 'TOTAL',
+        'Breakfast Cost': fmt(report.breakfast.cost),
         'B. Students': report.breakfast.students,
-        'B. /Head': formatTotalHeaderBreakdown(report.breakfast),
-        'Lunch Cost': formatTotalCost(report.lunch),
+        [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.breakfast)),
+        'Lunch Cost': fmt(report.lunch.cost),
         'L. Students': report.lunch.students,
-        'L. /Head': formatTotalHeaderBreakdown(report.lunch),
-        'Dinner Cost': formatTotalCost(report.dinner),
+        [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.lunch)),
+        'Dinner Cost': fmt(report.dinner.cost),
         'D. Students': report.dinner.students,
-        'D. /Head': formatTotalHeaderBreakdown(report.dinner),
-        'Total /Head': report.grandTotal.options && report.grandTotal.options.length > 0
-          ? report.grandTotal.options.map(o => `${o.name}: ${fmt(o.perHead)}`).join(' | ')
-          : fmt(report.grandTotal.perHead),
+        [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.dinner)),
+        [totalCostColumnLabel]: fmt(getMealDisplayCost(report.grandTotal)),
       });
     }
 
     return rowsData;
-  };
-
-  const renderCardBreakdown = (meal, hasNoMainValues = false) => {
-    if (!meal.options || meal.options.length === 0) return null;
-    return (
-      <div className={`daily-cost-card-breakdown${hasNoMainValues ? ' no-border' : ''}`}>
-        {meal.options.map((opt) => (
-          <div key={opt.name} className="daily-cost-card-breakdown-row">
-            <span className="opt-name">{opt.name}:</span>
-            <span className="opt-val">
-              {formatCurrency(opt.cost)} ({formatCurrency(opt.perHead)}/h)
-            </span>
-          </div>
-        ))}
-      </div>
-    );
   };
 
   const getBadgeClass = (name) => {
@@ -171,11 +146,13 @@ export default function DailyCost() {
         <strong style={{ fontSize: '1rem', color: '#1e293b' }}>{meal.students}</strong>
         {meal.options && meal.options.length > 0 && (
           <div className="daily-cost-option-badge-list">
-            {meal.options.map((opt) => (
-              <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
-                {opt.name}: <b>{opt.students}</b>
-              </span>
-            ))}
+            {meal.options
+              .filter((opt) => opt.name.toLowerCase() !== 'common')
+              .map((opt) => (
+                <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
+                  {opt.name}: <b>{opt.students}</b>
+                </span>
+              ))}
           </div>
         )}
       </td>
@@ -205,18 +182,7 @@ export default function DailyCost() {
   const renderPerHeadCell = (meal, cellClass) => {
     return (
       <td className={cellClass}>
-        {meal.options && meal.options.length > 0 ? (
-          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-            {meal.options.map((opt) => (
-              <div key={opt.name} className="cell-option-row">
-                <span className="opt-name">{opt.name}:</span>
-                <span className="opt-val" style={{ fontWeight: 700 }}>{formatCurrency(opt.perHead)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <strong>{formatCurrency(meal.perHead)}</strong>
-        )}
+        <strong>{formatCurrency(getMealDisplayCost(meal))}</strong>
       </td>
     );
   };
@@ -224,18 +190,7 @@ export default function DailyCost() {
   const renderRowTotalPerHeadCell = (row) => {
     return (
       <td className="cell-total">
-        {row.options && row.options.length > 0 ? (
-          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-            {row.options.map((opt) => (
-              <div key={opt.name} className="cell-option-row">
-                <span className="opt-name">{opt.name}:</span>
-                <span className="opt-val" style={{ fontWeight: 800 }}>{formatCurrency(opt.perHead)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <strong>{formatCurrency(row.totalPerHead)}</strong>
-        )}
+        <strong>{formatCurrency(getRowDisplayTotal(row))}</strong>
       </td>
     );
   };
@@ -243,18 +198,7 @@ export default function DailyCost() {
   const renderFooterPerHeadCell = (meal, cellClass) => {
     return (
       <td className={cellClass} style={{ fontWeight: '750' }}>
-        {meal.options && meal.options.length > 0 ? (
-          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-            {meal.options.map((opt) => (
-              <div key={opt.name} className="cell-option-row">
-                <span className="opt-name" style={{ color: 'inherit' }}>{opt.name}:</span>
-                <span className="opt-val" style={{ fontWeight: 800, color: 'inherit' }}>{formatCurrency(opt.perHead)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          formatCurrency(meal.perHead)
-        )}
+        {formatCurrency(getMealDisplayCost(meal))}
       </td>
     );
   };
@@ -262,18 +206,7 @@ export default function DailyCost() {
   const renderFooterGrandTotalCell = (grand) => {
     return (
       <td className="cell-total" style={{ fontWeight: '800' }}>
-        {grand.options && grand.options.length > 0 ? (
-          <div className="cell-option-breakdown" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-            {grand.options.map((opt) => (
-              <div key={opt.name} className="cell-option-row">
-                <span className="opt-name" style={{ color: 'inherit' }}>{opt.name}:</span>
-                <span className="opt-val" style={{ fontWeight: 900, color: 'inherit' }}>{formatCurrency(opt.perHead)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          formatCurrency(grand.perHead)
-        )}
+        {formatCurrency(getMealDisplayCost(grand))}
       </td>
     );
   };
@@ -286,12 +219,12 @@ export default function DailyCost() {
 
   const pdf = () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    
+
     // Add visual page header
     doc.setFontSize(16);
     doc.setTextColor(23, 50, 100);
-    doc.text(`Daily Cost Report - ${selectedWingLabel}`, 40, 40);
-    
+    doc.text(`${isStudentView ? 'My Daily Cost' : 'Daily Cost Report'} - ${selectedWingLabel}`, 40, 40);
+
     doc.setFontSize(10);
     doc.setTextColor(100, 110, 130);
     doc.text(`Month: ${currentMonthLabel} | Exported: ${new Date().toLocaleDateString('en-GB')}`, 40, 55);
@@ -306,7 +239,7 @@ export default function DailyCost() {
       alternateRowStyles: { fillColor: [247, 249, 253] },
       theme: 'grid'
     });
-    
+
     doc.save(`daily-cost-${filters.year}-${filters.month}.pdf`);
   };
 
@@ -331,15 +264,30 @@ export default function DailyCost() {
   return (
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
-      
+
       <div className="daily-cost-header" style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
         <CalendarDays size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div className="header-title">
-          <h1 style={{ margin: 0 }}>Daily Cost</h1>
-          <p style={{ margin: '0.25rem 0 0 0' }}>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
+          <h1 style={{ margin: 0 }}>{isStudentView ? 'My Daily Cost' : 'Daily Cost'}</h1>
+          <p style={{ margin: '0.25rem 0 0 0' }}>{`${isStudentView ? 'Your meal cost' : 'Daily cost breakdown'} for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
         </div>
         <div className="header-actions">
-          {isLockedToWing ? (
+          {isStudentView ? (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              background: '#ecfdf5',
+              color: '#047857',
+              border: '1px solid #86efac',
+              borderRadius: '6px',
+              padding: '0.4rem 0.9rem',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+            }}>
+              My Account
+            </span>
+          ) : isLockedToWing ? (
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -463,52 +411,24 @@ export default function DailyCost() {
           <section className="daily-cost-cards">
             <div className="daily-cost-card breakfast">
               <span className="card-label">BREAKFAST</span>
-              {(!report.breakfast.options || report.breakfast.options.length === 0) ? (
-                <>
-                  <strong className="card-value">{formatCurrency(report.breakfast.cost)}</strong>
-                  <p className="card-subtext">{formatCurrency(report.breakfast.perHead)} / head</p>
-                </>
-              ) : (
-                renderCardBreakdown(report.breakfast, true)
-              )}
+              <strong className="card-value">{formatCurrency(getMealDisplayCost(report.breakfast))}</strong>
             </div>
             <div className="daily-cost-card lunch">
               <span className="card-label">LUNCH</span>
-              {(!report.lunch.options || report.lunch.options.length === 0) ? (
-                <>
-                  <strong className="card-value">{formatCurrency(report.lunch.cost)}</strong>
-                  <p className="card-subtext">{formatCurrency(report.lunch.perHead)} / head</p>
-                </>
-              ) : (
-                renderCardBreakdown(report.lunch, true)
-              )}
+              <strong className="card-value">{formatCurrency(getMealDisplayCost(report.lunch))}</strong>
             </div>
             <div className="daily-cost-card dinner">
               <span className="card-label">DINNER</span>
-              {(!report.dinner.options || report.dinner.options.length === 0) ? (
-                <>
-                  <strong className="card-value">{formatCurrency(report.dinner.cost)}</strong>
-                  <p className="card-subtext">{formatCurrency(report.dinner.perHead)} / head</p>
-                </>
-              ) : (
-                renderCardBreakdown(report.dinner, true)
-              )}
+              <strong className="card-value">{formatCurrency(getMealDisplayCost(report.dinner))}</strong>
             </div>
             <div className="daily-cost-card grand-total">
               <span className="card-label">GRAND TOTAL</span>
-              {(!report.grandTotal.options || report.grandTotal.options.length === 0) ? (
-                <>
-                  <strong className="card-value">{formatCurrency(report.grandTotal.cost)}</strong>
-                  <p className="card-subtext">{formatCurrency(report.grandTotal.perHead)} / head</p>
-                </>
-              ) : (
-                renderCardBreakdown(report.grandTotal, true)
-              )}
+              <strong className="card-value">{formatCurrency(getMealDisplayCost(report.grandTotal))}</strong>
             </div>
           </section>
 
           {report.rows.length > 0 && (
-            <section className="daily-cost-table-card table-wrap">
+            <section className="daily-cost-table-card">
               <table>
                 <thead>
                   <tr>
@@ -516,18 +436,18 @@ export default function DailyCost() {
                     <th colSpan={3} className="th-breakfast">BREAKFAST</th>
                     <th colSpan={3} className="th-lunch">LUNCH</th>
                     <th colSpan={3} className="th-dinner">DINNER</th>
-                    <th rowSpan={2} className="th-total">TOTAL<br /><small style={{fontWeight:400,fontSize:'0.75em'}}>/Head</small></th>
+                    <th rowSpan={2} className="th-total">TOTAL<br /><small style={{ fontWeight: 400, fontSize: '0.75em' }}>{costColumnLabel}</small></th>
                   </tr>
                   <tr>
                     <th className="th-breakfast">Cost</th>
                     <th className="th-breakfast">Students</th>
-                    <th className="th-breakfast">/Head</th>
+                    <th className="th-breakfast">{costColumnLabel}</th>
                     <th className="th-lunch">Cost</th>
                     <th className="th-lunch">Students</th>
-                    <th className="th-lunch">/Head</th>
+                    <th className="th-lunch">{costColumnLabel}</th>
                     <th className="th-dinner">Cost</th>
                     <th className="th-dinner">Students</th>
-                    <th className="th-dinner">/Head</th>
+                    <th className="th-dinner">{costColumnLabel}</th>
                   </tr>
                 </thead>
                 <tbody>

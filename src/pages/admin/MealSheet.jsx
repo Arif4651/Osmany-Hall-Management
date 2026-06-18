@@ -578,7 +578,7 @@ export default function MealSheet() {
       </section>
 
       {/* Main Table section */}
-      <section className="financial-card table-wrap" style={{ position: 'relative' }}>
+      <section className="financial-card table-wrap sticky-page-table" style={{ position: 'relative' }}>
         {loading ? (
           <TableSkeleton rows={rowsPerPage} cols={6} />
         ) : (

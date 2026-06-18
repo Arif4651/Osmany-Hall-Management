@@ -18,23 +18,25 @@ export default function PaymentVerification() {
   const { user, role } = useAuth();
   const { invalidate } = useQueryCache();
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
-  
+
   // Wing admins default to their own wing; admin/super_admin start on Male
   const [gender, setGender] = useState(() => user?.wing || 'Male');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [reviewing, setReviewing] = useState(null);
   const [approvedAmount, setApprovedAmount] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset page to 1 when gender filter changes
+  // Reset page to 1 when filters change
   useEffect(() => {
     setPage(1);
-  }, [gender]);
+  }, [gender, statusFilter, searchQuery]);
 
-  const cacheKey = `admin-payments-${gender}-${page}-${pageSize}`;
+  const cacheKey = `admin-payments-${gender}-${statusFilter}-${searchQuery}-${page}-${pageSize}`;
 
   const {
     data: paymentData = null,
@@ -44,7 +46,7 @@ export default function PaymentVerification() {
     refresh
   } = useCachedFetch(
     cacheKey,
-    () => adminDataService.getPayments({ gender, page, pageSize }),
+    () => adminDataService.getPayments({ gender, status: statusFilter, search: searchQuery, page, pageSize }),
     { ttl: 30_000 }
   );
 
@@ -97,7 +99,7 @@ export default function PaymentVerification() {
   return (
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
-      
+
       <header>
         <h1>Payment Verification</h1>
         <p>Review student payment submissions and update monthly dues atomically.</p>
@@ -138,17 +140,36 @@ export default function PaymentVerification() {
         )}
       </div>
 
-      <section className="financial-card table-wrap">
+      <div className="financial-card filter-row" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', padding: '1rem', marginTop: '0.5rem' }}>
+        <label className="field-control" style={{ flex: '1', minWidth: '220px' }}>
+          <span>Search Student / Roll / ID / Txn</span>
+          <input
+            type="text"
+            placeholder="Search name, roll, hall ID, transaction..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        <label className="field-control" style={{ minWidth: '180px' }}>
+          <span>Status Filter</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="All">All Statuses</option>
+            <option value="under_review">Under Review / Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+      </div>
+
+      <section className="financial-card table-wrap sticky-page-table">
         {loading && !rows.length ? (
           <TableSkeleton rows={8} cols={12} />
         ) : (
           <>
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="data-table payment-verification-table" style={{ width: '100%' }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Wing</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Roll / Hall ID</th>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Info</th>
                   <th style={{ textAlign: 'left', padding: '0.75rem' }}>Billing Period</th>
                   <th style={{ textAlign: 'right', padding: '0.75rem' }}>Amount</th>
                   <th style={{ textAlign: 'right', padding: '0.75rem' }}>Charges</th>
@@ -185,37 +206,35 @@ export default function PaymentVerification() {
 
                     return (
                       <tr key={row.id} style={{ borderBottom: '1px solid var(--border)', verticalAlign: 'middle' }}>
-                        <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
-                          {row.studentName}
+                        <td className="student-cell" style={{ padding: '0.75rem', textAlign: 'left' }}>
+                          <div style={{ fontWeight: '600', color: 'var(--primary)' }}>{row.studentName}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+                            <span style={{ fontWeight: '500' }}>{row.rollNumber}</span>
+                            {row.hallId && <span> / {row.hallId}</span>}
+                          </div>
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left' }}>{row.gender}</td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left' }}>
-                          <span style={{ fontWeight: '500' }}>{row.rollNumber}</span>
-                          <br />
-                          <span className="table-secondary" style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{row.hallId}</span>
-                        </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left' }}>
+                        <td className="billing-cell" data-label="Billing Period" style={{ padding: '0.75rem', textAlign: 'left' }}>
                           {monthNames[row.billingMonth - 1]} {row.billingYear}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
+                        <td className="amount-cell" data-label="Amount" style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
                           {formatCurrency(row.submittedAmount)}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--muted)' }}>
+                        <td className="charges-cell" data-label="Charges" style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--muted)' }}>
                           {formatCurrency(row.submittedCharge)}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: row.approvedAmount ? 'var(--success)' : 'inherit' }}>
+                        <td className="approved-amount-cell" data-label="Approved Amount" style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: row.approvedAmount ? 'var(--success)' : 'inherit' }}>
                           {row.approvedAmount == null ? '—' : formatCurrency(row.approvedAmount)}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left' }}>
+                        <td className="category-cell" data-label="Category" style={{ padding: '0.75rem', textAlign: 'left' }}>
                           {row.category}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
+                        <td className="transaction-cell" data-label="Transaction ID" style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
                           {row.transactionId}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.85rem' }}>
+                        <td className="submitted-at-cell" data-label="Submitted At" style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.85rem' }}>
                           {formatDate(row.submittedAtUtc)}
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                        <td className="status-cell" data-label="Status" style={{ padding: '0.75rem', textAlign: 'center' }}>
                           <span style={{
                             background: badgeBg,
                             color: badgeColor,
@@ -231,8 +250,7 @@ export default function PaymentVerification() {
                             {statusNorm}
                           </span>
                         </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                          {row.status === 'under_review' && (
+                        <td className="actions-cell" style={{ padding: '0.75rem', textAlign: 'center' }}>{row.status === 'under_review' && (
                             <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
                               <button
                                 className="approve-action"
@@ -277,8 +295,7 @@ export default function PaymentVerification() {
                                 <X size={14} /> Reject
                               </button>
                             </div>
-                          )}
-                        </td>
+                          )}</td>
                       </tr>
                     );
                   })
@@ -315,11 +332,11 @@ export default function PaymentVerification() {
         )}
       </section>
 
-      <Modal 
-        isOpen={!!reviewing} 
+      <Modal
+        isOpen={!!reviewing}
         onClose={() => {
           if (!submitting) setReviewing(null);
-        }} 
+        }}
         title="Approve Payment"
       >
         <div className="payment-review-summary">
@@ -329,14 +346,14 @@ export default function PaymentVerification() {
         </div>
         <label className="field-control">
           <span>Amount to deduct from due bill</span>
-          <input 
-            type="number" 
-            min="0" 
-            step="0.01" 
-            required 
-            value={approvedAmount} 
-            onChange={(event) => setApprovedAmount(event.target.value)} 
-            disabled={submitting} 
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            required
+            value={approvedAmount}
+            onChange={(event) => setApprovedAmount(event.target.value)}
+            disabled={submitting}
           />
         </label>
         {submitting && (
