@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using HallBackend.Application.Dtos;
 using HallBackend.Application.Services;
 using HallBackend.Infrastructure.Data;
@@ -10,14 +11,21 @@ namespace HallBackend.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthController(HallDbContext db, PasswordService passwords, JwtTokenService tokens) : ControllerBase
+public sealed class AuthController(
+    HallDbContext db,
+    PasswordService passwords,
+    JwtTokenService tokens,
+    ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("login")]
     [EnableRateLimiting("auth-login")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
+        var totalTimer = Stopwatch.StartNew();
         var identifier = request.Email.Trim().ToUpperInvariant();
         var isEmailIdentifier = identifier.Contains('@');
+
+        var stageTimer = Stopwatch.StartNew();
         var user = await db.Users
             .AsNoTracking()
             .Where(x => isEmailIdentifier ? x.NormalizedEmail == identifier : x.NormalizedUserName == identifier)
@@ -37,24 +45,44 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
                 x.PasswordHash,
                 x.IsActive))
             .FirstOrDefaultAsync(cancellationToken);
+        var userQueryMs = stageTimer.Elapsed.TotalMilliseconds;
 
         if (user is null || !user.IsActive)
         {
+            LogLoginTiming("invalid_or_inactive", userQueryMs, 0, 0, 0, totalTimer.Elapsed.TotalMilliseconds);
             return Unauthorized(new { message = "Invalid credentials. Please try again." });
         }
 
+        stageTimer.Restart();
         if (!passwords.Verify(request.Password, user.PasswordHash))
         {
+            var passwordVerifyMs = stageTimer.Elapsed.TotalMilliseconds;
+            LogLoginTiming("invalid_password", userQueryMs, passwordVerifyMs, 0, 0, totalTimer.Elapsed.TotalMilliseconds);
             return Unauthorized(new { message = "Invalid credentials. Please try again." });
         }
+        var successfulPasswordVerifyMs = stageTimer.Elapsed.TotalMilliseconds;
 
+        stageTimer.Restart();
         await db.Users
             .Where(x => x.Id == user.Id)
             .ExecuteUpdateAsync(
                 updates => updates.SetProperty(x => x.LastLoginAtUtc, DateTime.UtcNow),
                 cancellationToken);
+        var lastLoginUpdateMs = stageTimer.Elapsed.TotalMilliseconds;
 
-        return Ok(tokens.CreateToken(user.ToAuthUser()));
+        stageTimer.Restart();
+        var response = tokens.CreateToken(user.ToAuthUser());
+        var tokenCreateMs = stageTimer.Elapsed.TotalMilliseconds;
+
+        LogLoginTiming(
+            "success",
+            userQueryMs,
+            successfulPasswordVerifyMs,
+            lastLoginUpdateMs,
+            tokenCreateMs,
+            totalTimer.Elapsed.TotalMilliseconds);
+
+        return Ok(response);
     }
 
     [HttpPost("logout")]
@@ -118,6 +146,26 @@ public sealed class AuthController(HallDbContext db, PasswordService passwords, 
         }
 
         return user;
+    }
+
+    private void LogLoginTiming(
+        string outcome,
+        double userQueryMs,
+        double passwordVerifyMs,
+        double lastLoginUpdateMs,
+        double tokenCreateMs,
+        double totalMs)
+    {
+        logger.LogInformation(
+            "Authentication login completed. Outcome={Outcome} UserQueryMs={UserQueryMs:F1} " +
+            "PasswordVerifyMs={PasswordVerifyMs:F1} LastLoginUpdateMs={LastLoginUpdateMs:F1} " +
+            "TokenCreateMs={TokenCreateMs:F1} TotalMs={TotalMs:F1}",
+            outcome,
+            userQueryMs,
+            passwordVerifyMs,
+            lastLoginUpdateMs,
+            tokenCreateMs,
+            totalMs);
     }
 
     private sealed record LoginUser(
