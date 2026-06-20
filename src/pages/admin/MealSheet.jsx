@@ -578,12 +578,20 @@ export default function MealSheet() {
       </section>
 
       {/* Main Table section */}
-      <section className="financial-card table-wrap sticky-page-table" style={{ position: 'relative' }}>
+      <section className="financial-card meal-sheet-table-card">
         {loading ? (
           <TableSkeleton rows={rowsPerPage} cols={6} />
         ) : (
-          <>
-            <table className="data-table">
+          <div className="table-wrap sticky-page-table meal-sheet-table-scroll" role="region" aria-label="Meal sheet table" tabIndex={0}>
+            <table className="data-table meal-sheet-table">
+              <colgroup>
+                <col className="meal-sheet-col-hall" />
+                <col className="meal-sheet-col-student" />
+                <col className="meal-sheet-col-name" />
+                <col className="meal-sheet-col-room" />
+                <col className="meal-sheet-col-meals" />
+                <col className="meal-sheet-col-guest" />
+              </colgroup>
               <thead>
                 <tr>
                   <th onClick={() => toggleSort('hallId')} style={{ cursor: 'pointer' }}>
@@ -654,7 +662,7 @@ export default function MealSheet() {
                 )}
               </tbody>
             </table>
-          </>
+          </div>
         )}
       </section>
 

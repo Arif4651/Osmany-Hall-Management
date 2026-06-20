@@ -3,8 +3,10 @@ import {
   apiRequest,
   AUTH_UNAUTHORIZED_EVENT,
   getAccessToken,
+  isTokenExpired,
   setAccessToken,
 } from '../services/apiClient';
+import { queryCache } from '../services/queryCache';
 
 const STORAGE_KEY = 'osmany-hall-auth-session-v1';
 
@@ -19,9 +21,17 @@ function readStoredSession() {
   }
 }
 
+function hasUsableStoredSession(session) {
+  const token = getAccessToken();
+  return Boolean(session?.user && token && !isTokenExpired(token));
+}
+
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(() => readStoredSession());
-  const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isSessionLoading, setIsSessionLoading] = useState(() => {
+    const storedSession = readStoredSession();
+    return !hasUsableStoredSession(storedSession);
+  });
 
   useEffect(() => {
     if (session) {
@@ -34,6 +44,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const handleUnauthorized = () => {
+      queryCache.clear();
       setSession(null);
     };
 
@@ -60,7 +71,8 @@ export function AuthProvider({ children }) {
         if (isMounted) {
           setSession((prev) => ({
             user,
-            accessToken: prev?.accessToken || null,
+            accessToken: prev?.accessToken || token,
+            expiresAtUtc: prev?.expiresAtUtc || null,
             loggedInAt: prev?.loggedInAt || new Date().toISOString(),
           }));
         }
@@ -86,6 +98,7 @@ export function AuthProvider({ children }) {
       });
 
       setAccessToken(response.accessToken);
+      queryCache.clear();
 
       const nextSession = {
         user: response.user,
@@ -111,6 +124,7 @@ export function AuthProvider({ children }) {
       // Logging out locally is still valid when the token is already expired.
     }
     setAccessToken('');
+    queryCache.clear();
     setSession(null);
   }, []);
 

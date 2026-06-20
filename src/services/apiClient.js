@@ -1,4 +1,8 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5012/api';
+const configuredTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS);
+const REQUEST_TIMEOUT_MS = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+  ? configuredTimeoutMs
+  : 30_000;
 const TOKEN_STORAGE_KEY = 'osmany-hall-access-token-v1';
 export const AUTH_UNAUTHORIZED_EVENT = 'osmany-hall-auth-unauthorized';
 
@@ -22,7 +26,7 @@ function notifyUnauthorized(message) {
   }));
 }
 
-function isTokenExpired(token) {
+export function isTokenExpired(token) {
   try {
     const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     const paddedPayload = encodedPayload.padEnd(
@@ -33,6 +37,38 @@ function isTokenExpired(token) {
     return !payload.exp || payload.exp * 1000 <= Date.now();
   } catch {
     return true;
+  }
+}
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  let didTimeout = false;
+  const handleCallerAbort = () => controller.abort(options.signal?.reason);
+
+  if (options.signal?.aborted) {
+    handleCallerAbort();
+  } else {
+    options.signal?.addEventListener('abort', handleCallerAbort, { once: true });
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (didTimeout) {
+      const timeoutSeconds = Math.round(REQUEST_TIMEOUT_MS / 1000);
+      const timeoutError = new Error(`The server did not respond within ${timeoutSeconds} seconds. Please try again.`);
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    options.signal?.removeEventListener('abort', handleCallerAbort);
   }
 }
 
@@ -105,7 +141,7 @@ export async function apiRequest(path, options = {}) {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...options,
       headers,
     });

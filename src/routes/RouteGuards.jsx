@@ -1,13 +1,14 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
 import { useAuth } from '../context/AuthContext';
+import PageSkeleton from '../components/ui/PageSkeleton';
 
 export function ProtectedRoute({ children, role }) {
   const location = useLocation();
   const { isSessionLoading, isAuthenticated, role: loggedRole, mustChangePassword } = useAuth();
 
   if (isSessionLoading) {
-    return null;
+    return <PageSkeleton />;
   }
 
   if (!isAuthenticated) {
@@ -33,7 +34,7 @@ export function PublicOnlyRoute({ children }) {
   const { isSessionLoading, isAuthenticated, role, mustChangePassword } = useAuth();
 
   if (isSessionLoading) {
-    return null;
+    return <PageSkeleton />;
   }
 
   if (!isAuthenticated) {

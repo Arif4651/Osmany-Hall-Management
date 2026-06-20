@@ -4374,6 +4374,172 @@ button {
   background: #f8fbff;
 }
 
+/* Due Bill keeps a sticky header while maintaining stable column geometry. */
+.due-table-card {
+  padding: 0;
+  overflow: visible;
+}
+
+.due-table-scroll {
+  position: relative;
+  overflow: visible !important;
+  border-radius: inherit;
+  isolation: isolate;
+}
+
+.financial-page .due-table {
+  min-width: 900px;
+  table-layout: fixed;
+}
+
+.due-table .due-col-name {
+  width: 20%;
+}
+
+.due-table .due-col-student-id {
+  width: 12%;
+}
+
+.due-table .due-col-department {
+  width: 13%;
+}
+
+.due-table .due-col-mobile {
+  width: 16%;
+}
+
+.due-table .due-col-hall-id {
+  width: 9%;
+}
+
+.due-table .due-col-amount {
+  width: 17%;
+}
+
+.due-table .due-col-action {
+  width: 13%;
+}
+
+.due-table thead {
+  position: relative;
+  z-index: 13;
+}
+
+.sticky-page-table .due-table thead th {
+  z-index: 14;
+  box-sizing: border-box;
+  height: 3.25rem;
+  vertical-align: middle;
+  background: #f5f8fd;
+  background-clip: padding-box;
+}
+
+.due-table tbody {
+  position: relative;
+  z-index: 0;
+}
+
+.due-table th,
+.due-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.due-table .due-amount-cell {
+  text-align: right;
+}
+
+.due-table .due-action-cell {
+  text-align: center;
+}
+
+@media (max-width: 1180px) {
+  .due-table-scroll {
+    max-height: calc(100vh - 8rem);
+    overflow: auto !important;
+    overscroll-behavior-inline: contain;
+  }
+
+  .sticky-page-table .due-table thead th {
+    top: 0;
+  }
+}
+
+/* Meal Sheet uses the same isolated sticky-header layout as Due Bill. */
+.meal-sheet-table-card {
+  padding: 0;
+  overflow: visible;
+}
+
+.meal-sheet-table-scroll {
+  position: relative;
+  overflow: visible !important;
+  border-radius: inherit;
+  isolation: isolate;
+}
+
+.financial-page .meal-sheet-table {
+  min-width: 860px;
+  table-layout: fixed;
+}
+
+.meal-sheet-table .meal-sheet-col-hall {
+  width: 13%;
+}
+
+.meal-sheet-table .meal-sheet-col-student {
+  width: 17%;
+}
+
+.meal-sheet-table .meal-sheet-col-name {
+  width: 24%;
+}
+
+.meal-sheet-table .meal-sheet-col-room {
+  width: 12%;
+}
+
+.meal-sheet-table .meal-sheet-col-meals {
+  width: 22%;
+}
+
+.meal-sheet-table .meal-sheet-col-guest {
+  width: 12%;
+}
+
+.meal-sheet-table thead {
+  position: relative;
+  z-index: 13;
+}
+
+.sticky-page-table .meal-sheet-table thead th {
+  z-index: 14;
+  box-sizing: border-box;
+  height: 3.25rem;
+  vertical-align: middle;
+  background: #f5f8fd;
+  background-clip: padding-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meal-sheet-table tbody {
+  position: relative;
+  z-index: 0;
+}
+
+@media (max-width: 1180px) {
+  .meal-sheet-table-scroll {
+    max-height: calc(100vh - 8rem);
+    overflow: auto !important;
+    overscroll-behavior-inline: contain;
+  }
+
+  .sticky-page-table .meal-sheet-table thead th {
+    top: 0;
+  }
+}
+
 .student-message {
   display: flex;
   align-items: center;

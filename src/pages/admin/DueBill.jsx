@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -335,23 +335,33 @@ export default function DueBill() {
         </div>
       </section>
 
-      <section className="financial-card table-wrap sticky-page-table">
+      <section className="financial-card due-table-card">
         {isLoading && !rows.length ? (
           <TableSkeleton rows={8} cols={7} />
         ) : (
-          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Name</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student ID</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Department</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Mobile Number</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Hall ID</th>
-                <th style={{ textAlign: 'right', padding: '0.75rem' }}>Current Due Bill</th>
-                <th style={{ textAlign: 'center', padding: '0.75rem' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div className="table-wrap sticky-page-table due-table-scroll" role="region" aria-label="Due bill table" tabIndex={0}>
+            <table className="data-table due-table">
+              <colgroup>
+                <col className="due-col-name" />
+                <col className="due-col-student-id" />
+                <col className="due-col-department" />
+                <col className="due-col-mobile" />
+                <col className="due-col-hall-id" />
+                <col className="due-col-amount" />
+                <col className="due-col-action" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>Student ID</th>
+                  <th>Department</th>
+                  <th>Mobile Number</th>
+                  <th>Hall ID</th>
+                  <th className="due-amount-cell">Current Due Bill</th>
+                  <th className="due-action-cell">Action</th>
+                </tr>
+              </thead>
+              <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1.5rem' }}>
@@ -376,7 +386,7 @@ export default function DueBill() {
                     <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>
                       {row.hallId}
                     </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
+                    <td className="due-amount-cell" style={{ padding: '0.75rem', fontWeight: '600' }}>
                       {formatCurrency(row.dueBill)}
                       {row.isOverridden && (
                         <span className="warning-badge" style={{
@@ -393,7 +403,7 @@ export default function DueBill() {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                    <td className="due-action-cell" style={{ padding: '0.75rem' }}>
                       <button
                         onClick={() => {
                           setEditing(row);
@@ -427,8 +437,9 @@ export default function DueBill() {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 
