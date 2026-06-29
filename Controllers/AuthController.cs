@@ -81,8 +81,8 @@ public sealed class AuthController(
         Response.Cookies.Append(AuthCookieName, tokenString, new CookieOptions
         {
             HttpOnly = true,
-            Secure = !env.IsDevelopment(),   // Secure only over HTTPS (production)
-            SameSite = SameSiteMode.Strict,
+            Secure = ShouldUseSecureCookie(),
+            SameSite = GetAuthCookieSameSiteMode(),
             Expires = loginSuccess.ExpiresAtUtc,
             Path = "/",
         });
@@ -106,8 +106,8 @@ public sealed class AuthController(
         Response.Cookies.Delete(AuthCookieName, new CookieOptions
         {
             HttpOnly = true,
-            Secure = !env.IsDevelopment(),
-            SameSite = SameSiteMode.Strict,
+            Secure = ShouldUseSecureCookie(),
+            SameSite = GetAuthCookieSameSiteMode(),
             Path = "/",
         });
         return NoContent();
@@ -189,6 +189,15 @@ public sealed class AuthController(
             tokenCreateMs,
             totalMs);
     }
+
+    private bool ShouldUseSecureCookie()
+        => !env.IsDevelopment();
+
+    private SameSiteMode GetAuthCookieSameSiteMode()
+        // Production frontend and backend run on different sites
+        // (Vercel app -> Render API), so browsers require SameSite=None; Secure.
+        // Localhost development can keep Lax because both apps are same-site.
+        => env.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
 
     private sealed record LoginUser(
         Guid Id,
