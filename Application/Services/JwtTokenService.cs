@@ -9,10 +9,10 @@ namespace HallBackend.Application.Services;
 
 public sealed class JwtTokenService(IConfiguration configuration)
 {
-    public LoginResponse CreateToken(AppUser user)
+    public (string Token, LoginSuccess Response) CreateToken(AppUser user)
         => CreateToken(new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword));
 
-    public LoginResponse CreateToken(AuthUserDto user)
+    public (string Token, LoginSuccess Response) CreateToken(AuthUserDto user)
     {
         var expiresMinutes = configuration.GetValue("Jwt:ExpiresMinutes", 120);
         var expiresAt = DateTime.UtcNow.AddMinutes(expiresMinutes);
@@ -40,9 +40,7 @@ public sealed class JwtTokenService(IConfiguration configuration)
             expires: expiresAt,
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
 
-        return new LoginResponse(
-            new JwtSecurityTokenHandler().WriteToken(token),
-            expiresAt,
-            user);
+        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+        return (tokenString, new LoginSuccess(expiresAt, user));
     }
 }

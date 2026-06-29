@@ -103,15 +103,18 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
-        if (builder.Environment.IsDevelopment())
-        {
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-        }
-        else
-        {
-            var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
-            policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
-        }
+        // AllowCredentials() is required for HttpOnly cookies on cross-origin requests.
+        // AllowAnyOrigin() cannot be combined with AllowCredentials(), so we always use
+        // explicit origins.
+        var devOrigins = new[] { "http://localhost:5173", "https://localhost:5173" };
+        var origins = builder.Environment.IsDevelopment()
+            ? devOrigins
+            : builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+        policy.WithOrigins(origins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -128,6 +131,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
             ClockSkew = TimeSpan.FromMinutes(1),
+        };
+
+        // Read the JWT from the HttpOnly cookie instead of the Authorization header.
+        options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (context.Request.Cookies.TryGetValue("hall-auth-token", out var cookieToken)
+                    && !string.IsNullOrEmpty(cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
+                return Task.CompletedTask;
+            },
         };
     });
 

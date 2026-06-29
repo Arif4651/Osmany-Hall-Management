@@ -15,11 +15,14 @@ public sealed class AuthController(
     HallDbContext db,
     PasswordService passwords,
     JwtTokenService tokens,
+    IWebHostEnvironment env,
     ILogger<AuthController> logger) : ControllerBase
 {
+    private const string AuthCookieName = "hall-auth-token";
+
     [HttpPost("login")]
     [EnableRateLimiting("auth-login")]
-    public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<LoginSuccess>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         var totalTimer = Stopwatch.StartNew();
         var identifier = request.Email.Trim().ToUpperInvariant();
@@ -71,8 +74,18 @@ public sealed class AuthController(
         var lastLoginUpdateMs = stageTimer.Elapsed.TotalMilliseconds;
 
         stageTimer.Restart();
-        var response = tokens.CreateToken(user.ToAuthUser());
+        var (tokenString, loginSuccess) = tokens.CreateToken(user.ToAuthUser());
         var tokenCreateMs = stageTimer.Elapsed.TotalMilliseconds;
+
+        // Write the JWT into an HttpOnly cookie so JavaScript cannot read it.
+        Response.Cookies.Append(AuthCookieName, tokenString, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = !env.IsDevelopment(),   // Secure only over HTTPS (production)
+            SameSite = SameSiteMode.Strict,
+            Expires = loginSuccess.ExpiresAtUtc,
+            Path = "/",
+        });
 
         LogLoginTiming(
             "success",
@@ -82,15 +95,24 @@ public sealed class AuthController(
             tokenCreateMs,
             totalTimer.Elapsed.TotalMilliseconds);
 
-        return Ok(response);
+        return Ok(loginSuccess);
     }
 
     [HttpPost("logout")]
     [Authorize]
     public IActionResult Logout()
     {
+        // Clear the auth cookie on the client.
+        Response.Cookies.Delete(AuthCookieName, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = !env.IsDevelopment(),
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
+        });
         return NoContent();
     }
+
 
     [HttpPost("change-password")]
     [Authorize]
