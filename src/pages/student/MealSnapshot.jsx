@@ -1,25 +1,72 @@
-import { useState, useEffect } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 
-const tomorrow = () => {
+const dateFormatter = new Intl.DateTimeFormat('en-CA');
+const MEAL_PERIODS = ['breakfast', 'lunch', 'dinner'];
+
+const getTomorrow = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return new Intl.DateTimeFormat('en-CA').format(d);
+  return dateFormatter.format(d);
 };
 
 const getPastDate = (daysAgo) => {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
-  return new Intl.DateTimeFormat('en-CA').format(d);
+  return dateFormatter.format(d);
 };
+
+const createInitialRange = () => ({
+  from: getPastDate(30),
+  to: getTomorrow(),
+});
+
+function normalizeSnapshotRow(row) {
+  return {
+    ...row,
+    mealMap: Object.fromEntries((row.meals || []).map((meal) => [meal.mealPeriod, meal])),
+  };
+}
+
+const SnapshotCell = memo(function SnapshotCell({ meal }) {
+  if (!meal) return <span className="snapshot-empty-cell">-</span>;
+
+  return (
+    <div className="snapshot-meal-cell">
+      <span className={`snapshot-status-badge ${meal.isOn ? 'is-on' : 'is-off'}`}>
+        {meal.isOn ? `ON${meal.optionName ? ` (${meal.optionName})` : ''}` : 'OFF'}
+      </span>
+      {meal.guestCount > 0 ? (
+        <span className="snapshot-guest-badge" title={`${meal.guestCount} Guest Meals Added`}>
+          +{meal.guestCount} Guest
+        </span>
+      ) : null}
+    </div>
+  );
+});
+
+const SnapshotRow = memo(function SnapshotRow({ row }) {
+  return (
+    <tr>
+      <td>{row.date}</td>
+      {MEAL_PERIODS.map((period) => (
+        <td key={period}>
+          <SnapshotCell meal={row.mealMap[period]} />
+        </td>
+      ))}
+    </tr>
+  );
+});
 
 export default function MealSnapshot() {
   useDocumentTitle('Meal Snapshot');
-  const [inputs, setInputs] = useState({ from: getPastDate(30), to: tomorrow() });
-  const [appliedRange, setAppliedRange] = useState({ from: getPastDate(30), to: tomorrow() });
+  const tomorrowDate = useMemo(() => getTomorrow(), []);
+  const initialRange = useMemo(() => createInitialRange(), []);
+  const [inputs, setInputs] = useState(initialRange);
+  const [appliedRange, setAppliedRange] = useState(initialRange);
 
   const cacheKey = `meal-snapshot-${appliedRange.from}-${appliedRange.to}`;
 
@@ -28,16 +75,14 @@ export default function MealSnapshot() {
     isLoading,
     isRefreshing,
     error: loadError,
-    refresh
   } = useCachedFetch(
     cacheKey,
     async () => {
-      const maxDate = tomorrow();
-      if (appliedRange.from > maxDate || appliedRange.to > maxDate) {
+      if (appliedRange.from > tomorrowDate || appliedRange.to > tomorrowDate) {
         throw new Error('Dates beyond tomorrow cannot be selected.');
       }
       const fetched = await financialService.getSnapshot(appliedRange.from, appliedRange.to);
-      return [...fetched].reverse();
+      return [...fetched].reverse().map(normalizeSnapshotRow);
     },
     { ttl: 60_000 }
   );
@@ -52,64 +97,22 @@ export default function MealSnapshot() {
     }
   }, [loadError]);
 
-  const applyRange = (event) => {
+  const applyRange = useCallback((event) => {
     event.preventDefault();
     setAppliedRange({ from: inputs.from, to: inputs.to });
-  };
+  }, [inputs.from, inputs.to]);
 
-  const renderCell = (row, period) => {
-    const meal = row.meals?.find((entry) => entry.mealPeriod === period);
-    if (!meal) return <span style={{ color: 'var(--muted)' }}>—</span>;
+  const handleFromChange = useCallback((event) => {
+    setInputs((current) => (
+      current.from === event.target.value ? current : { ...current, from: event.target.value }
+    ));
+  }, []);
 
-    const baseStatus = meal.isOn ? (
-      <span style={{
-        background: '#eef2ff',
-        color: '#4f46e5',
-        padding: '0.2rem 0.5rem',
-        borderRadius: '6px',
-        fontSize: '0.8rem',
-        fontWeight: '600'
-      }}>
-        ON{meal.optionName ? ` (${meal.optionName})` : ''}
-      </span>
-    ) : (
-      <span style={{
-        background: '#f1f5f9',
-        color: '#64748b',
-        padding: '0.2rem 0.5rem',
-        borderRadius: '6px',
-        fontSize: '0.8rem',
-        fontWeight: '600'
-      }}>
-        OFF
-      </span>
-    );
-
-    const guestBadge = meal.guestCount > 0 ? (
-      <span style={{
-        background: '#fef3c7',
-        color: '#d97706',
-        border: '1px solid #fde68a',
-        padding: '0.2rem 0.5rem',
-        borderRadius: '6px',
-        fontSize: '0.8rem',
-        fontWeight: '600',
-        marginLeft: '0.4rem',
-        display: 'inline-flex',
-        alignItems: 'center',
-        boxShadow: '0 1px 2px rgba(217,119,6,0.1)'
-      }} title={`${meal.guestCount} Guest Meals Added`}>
-        +{meal.guestCount} Guest
-      </span>
-    ) : null;
-
-    return (
-      <div style={{ display: 'inline-flex', alignItems: 'center' }}>
-        {baseStatus}
-        {guestBadge}
-      </div>
-    );
-  };
+  const handleToChange = useCallback((event) => {
+    setInputs((current) => (
+      current.to === event.target.value ? current : { ...current, to: event.target.value }
+    ));
+  }, []);
 
   return (
     <div className="financial-page">
@@ -127,18 +130,18 @@ export default function MealSnapshot() {
           <span>From</span>
           <input
             type="date"
-            max={tomorrow()}
+            max={tomorrowDate}
             value={inputs.from}
-            onChange={(e) => setInputs({ ...inputs, from: e.target.value })}
+            onChange={handleFromChange}
           />
         </label>
         <label>
           <span>To</span>
           <input
             type="date"
-            max={tomorrow()}
+            max={tomorrowDate}
             value={inputs.to}
-            onChange={(e) => setInputs({ ...inputs, to: e.target.value })}
+            onChange={handleToChange}
           />
         </label>
         <button className="primary-action" type="submit" disabled={isLoading}>
@@ -146,7 +149,7 @@ export default function MealSnapshot() {
         </button>
       </form>
 
-      <section className="financial-card sticky-page-table" style={{ position: 'relative' }}>
+      <section className="financial-card sticky-page-table snapshot-table-card">
         {isLoading && !fetchedRows.length ? (
           <TableSkeleton rows={5} cols={4} />
         ) : (
@@ -162,18 +165,13 @@ export default function MealSnapshot() {
             <tbody>
               {fetchedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)', padding: '2rem 1rem' }}>
+                  <td colSpan={4} className="snapshot-empty-row">
                     No snapshot records found for the selected range.
                   </td>
                 </tr>
               ) : (
                 fetchedRows.map((row) => (
-                  <tr key={row.date}>
-                    <td>{row.date}</td>
-                    <td>{renderCell(row, 'breakfast')}</td>
-                    <td>{renderCell(row, 'lunch')}</td>
-                    <td>{renderCell(row, 'dinner')}</td>
-                  </tr>
+                  <SnapshotRow key={row.date} row={row} />
                 ))
               )}
             </tbody>

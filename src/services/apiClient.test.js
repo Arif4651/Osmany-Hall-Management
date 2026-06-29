@@ -2,16 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-function createToken(payload) {
-  const encode = (value) => window.btoa(JSON.stringify(value))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.signature`;
-}
-
-describe('apiClient authentication helpers', () => {
+describe('apiClient helpers', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -19,24 +10,21 @@ describe('apiClient authentication helpers', () => {
     vi.useRealTimers();
   });
 
-  it('recognizes unexpired and expired access tokens', async () => {
-    const { isTokenExpired } = await import('./apiClient');
-    const nowInSeconds = Math.floor(Date.now() / 1000);
+  it('recognizes an expired session by expiresAtUtc', async () => {
+    const { isSessionExpired } = await import('./apiClient');
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const past = new Date(Date.now() - 60_000).toISOString();
 
-    expect(isTokenExpired(createToken({ exp: nowInSeconds + 60 }))).toBe(false);
-    expect(isTokenExpired(createToken({ exp: nowInSeconds - 60 }))).toBe(true);
-    expect(isTokenExpired('not-a-token')).toBe(true);
+    expect(isSessionExpired(future)).toBe(false);
+    expect(isSessionExpired(past)).toBe(true);
+    expect(isSessionExpired(null)).toBe(true);
+    expect(isSessionExpired(undefined)).toBe(true);
   });
 
   it('aborts a request when the configured timeout is reached', async () => {
     vi.useFakeTimers();
     vi.stubEnv('VITE_API_TIMEOUT_MS', '1000');
     vi.resetModules();
-    vi.stubGlobal('localStorage', {
-      getItem: vi.fn(() => null),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-    });
 
     vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((resolve, reject) => {
       options.signal.addEventListener('abort', () => {
@@ -52,5 +40,23 @@ describe('apiClient authentication helpers', () => {
     });
     await vi.advanceTimersByTimeAsync(1000);
     await expectation;
+  });
+
+  it('sends credentials: include on every request', async () => {
+    vi.resetModules();
+    const mockFetch = vi.fn().mockResolvedValue({
+      status: 204,
+      ok: true,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const { apiRequest } = await import('./apiClient');
+    await apiRequest('/auth/logout', { method: 'POST' });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/logout'),
+      expect.objectContaining({ credentials: 'include' }),
+    );
   });
 });

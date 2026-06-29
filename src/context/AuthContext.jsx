@@ -2,12 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   apiRequest,
   AUTH_UNAUTHORIZED_EVENT,
-  getAccessToken,
-  isTokenExpired,
-  setAccessToken,
+  isSessionExpired,
 } from '../services/apiClient';
 import { queryCache } from '../services/queryCache';
 
+// Stores only non-sensitive session metadata (user info + expiry).
+// The JWT itself lives in an HttpOnly cookie and is never accessible to JavaScript.
 const STORAGE_KEY = 'osmany-hall-auth-session-v1';
 
 const AuthContext = createContext(null);
@@ -22,8 +22,10 @@ function readStoredSession() {
 }
 
 function hasUsableStoredSession(session) {
-  const token = getAccessToken();
-  return Boolean(session?.user && token && !isTokenExpired(token));
+  // Session is valid if there is user data and the recorded expiry has not passed.
+  // The actual JWT expiry is enforced server-side; this is just a client-side
+  // optimistic check to skip a redundant /auth/me call on fresh page loads.
+  return Boolean(session?.user && !isSessionExpired(session.expiresAtUtc));
 }
 
 export function AuthProvider({ children }) {
@@ -33,6 +35,8 @@ export function AuthProvider({ children }) {
     return !hasUsableStoredSession(storedSession);
   });
 
+  // Persist non-sensitive session metadata to localStorage so the user
+  // appears logged-in across page refreshes without an immediate /auth/me round-trip.
   useEffect(() => {
     if (session) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -56,28 +60,26 @@ export function AuthProvider({ children }) {
     let isMounted = true;
 
     async function hydrateSession() {
-      const token = getAccessToken();
-      if (!token) {
-        setAccessToken('');
-        if (isMounted) {
-          setSession(null);
-          setIsSessionLoading(false);
-        }
+      // If we have a locally-stored session that hasn't expired yet, skip the
+      // /auth/me round-trip and trust the stored metadata. The cookie will be
+      // validated by the server on the next real API call.
+      const stored = readStoredSession();
+      if (hasUsableStoredSession(stored)) {
+        if (isMounted) setIsSessionLoading(false);
         return;
       }
 
+      // No valid local session — ask the server to verify the cookie.
       try {
         const user = await apiRequest('/auth/me');
         if (isMounted) {
           setSession((prev) => ({
             user,
-            accessToken: prev?.accessToken || token,
             expiresAtUtc: prev?.expiresAtUtc || null,
             loggedInAt: prev?.loggedInAt || new Date().toISOString(),
           }));
         }
       } catch {
-        setAccessToken('');
         if (isMounted) setSession(null);
       } finally {
         if (isMounted) setIsSessionLoading(false);
@@ -97,12 +99,12 @@ export function AuthProvider({ children }) {
         body: JSON.stringify({ email, password, role: allowedRole }),
       });
 
-      setAccessToken(response.accessToken);
+      // The JWT is now set by the server as an HttpOnly cookie — response only
+      // contains { expiresAtUtc, user }.
       queryCache.clear();
 
       const nextSession = {
         user: response.user,
-        accessToken: response.accessToken,
         expiresAtUtc: response.expiresAtUtc,
         loggedInAt: new Date().toISOString(),
       };
@@ -119,11 +121,11 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
+      // The server clears the HttpOnly cookie in its response headers.
       await apiRequest('/auth/logout', { method: 'POST' });
     } catch {
       // Logging out locally is still valid when the token is already expired.
     }
-    setAccessToken('');
     queryCache.clear();
     setSession(null);
   }, []);

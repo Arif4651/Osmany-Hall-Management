@@ -3,41 +3,23 @@ const configuredTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS);
 const REQUEST_TIMEOUT_MS = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
   ? configuredTimeoutMs
   : 30_000;
-const TOKEN_STORAGE_KEY = 'osmany-hall-access-token-v1';
+
 export const AUTH_UNAUTHORIZED_EVENT = 'osmany-hall-auth-unauthorized';
 
-export function getAccessToken() {
-  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
-}
-
-export function setAccessToken(token) {
-  if (token) {
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    return;
-  }
-
-  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+/**
+ * Decodes the exp claim from a JWT string and checks if it is past expiry.
+ * Used by AuthContext to validate the locally-stored expiresAtUtc value — the
+ * raw token is no longer stored client-side; this operates on a UTC date string.
+ */
+export function isSessionExpired(expiresAtUtc) {
+  if (!expiresAtUtc) return true;
+  return new Date(expiresAtUtc).getTime() <= Date.now();
 }
 
 function notifyUnauthorized(message) {
-  setAccessToken('');
   window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, {
     detail: { message },
   }));
-}
-
-export function isTokenExpired(token) {
-  try {
-    const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const paddedPayload = encodedPayload.padEnd(
-      encodedPayload.length + ((4 - encodedPayload.length % 4) % 4),
-      '=',
-    );
-    const payload = JSON.parse(window.atob(paddedPayload));
-    return !payload.exp || payload.exp * 1000 <= Date.now();
-  } catch {
-    return true;
-  }
 }
 
 async function fetchWithTimeout(url, options) {
@@ -120,30 +102,18 @@ export async function apiRequest(path, options = {}) {
 
   const fetchPromise = (async () => {
     const headers = new Headers(options.headers || {});
-    let token = getAccessToken();
     const isLoginRequest = path === '/auth/login';
-
-    if (token && isTokenExpired(token)) {
-      notifyUnauthorized('Your session has expired. Please sign in again.');
-      token = null;
-      if (!isLoginRequest) {
-        const error = new Error('Your session has expired. Please sign in again.');
-        error.status = 401;
-        throw error;
-      }
-    }
 
     if (!headers.has('Content-Type') && options.body) {
       headers.set('Content-Type', 'application/json');
     }
 
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-
     const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...options,
       headers,
+      // 'include' causes the browser to send the HttpOnly auth cookie automatically
+      // on every request (including cross-origin ones when the server uses AllowCredentials).
+      credentials: 'include',
     });
 
     if (response.status === 204) {
