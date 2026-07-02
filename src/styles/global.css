@@ -4540,6 +4540,31 @@ button {
   }
 }
 
+/* Billing Management uses the same isolated sticky-header layout as Due Bill and Meal Sheet. */
+.billing-table-card {
+  padding: 0;
+  overflow: visible;
+}
+
+.billing-table-scroll {
+  position: relative;
+  overflow: visible !important;
+  border-radius: inherit;
+  isolation: isolate;
+}
+
+@media (max-width: 1180px) {
+  .billing-table-scroll {
+    max-height: calc(100vh - 8rem);
+    overflow: auto !important;
+    overscroll-behavior-inline: contain;
+  }
+
+  .sticky-page-table.billing-table-scroll .data-table thead th {
+    top: 0;
+  }
+}
+
 .student-message {
   display: flex;
   align-items: center;

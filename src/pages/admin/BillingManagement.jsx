@@ -520,7 +520,7 @@ export default function BillingManagement() {
                 <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--primary)' }}>
                   Applied DSW Subsidies for {filters.month}/{filters.year}
                 </h3>
-                <div className="table-wrap sticky-page-table" style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
+                <div className="table-wrap" style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
                   <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', minWidth: '720px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -585,63 +585,65 @@ export default function BillingManagement() {
         </div>
       </div>
 
-      <section className="financial-card table-wrap sticky-page-table">
+      <section className="financial-card billing-table-card">
         {loading && !rows.length ? (
           <TableSkeleton rows={8} cols={10} />
         ) : (
-          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {headers.map((header) => (
-                  <th key={header} style={{ textAlign: getAlign(header), padding: '0.75rem' }}>{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
+          <div className="table-wrap sticky-page-table billing-table-scroll">
+            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
                 <tr>
-                  <td colSpan={headers.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                    No billing records found.
-                  </td>
+                  {headers.map((header) => (
+                    <th key={header} style={{ textAlign: getAlign(header), padding: '0.75rem' }}>{header}</th>
+                  ))}
                 </tr>
-              ) : (
-              rows.map((row) => {
-                const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ').trim();
-                let badgeBg = '#f1f5f9';
-                let badgeColor = '#64748b';
-                if (statusNorm === 'paid') { badgeBg = '#ecfdf5'; badgeColor = '#047857'; }
-                else if (statusNorm === 'partial paid' || statusNorm === 'partial_paid') { badgeBg = '#fffbeb'; badgeColor = '#b45309'; }
-                else if (statusNorm === 'unpaid') { badgeBg = '#fef2f2'; badgeColor = '#b91c1c'; }
-
-                return (
-                  <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>{row.studentName}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>{row.rollNumber}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>{row.hallId}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.serviceBill)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.monthlyBill)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', color: '#047857', fontWeight: '700' }}>{formatCurrency(row.dswSubsidy || 0)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.guestMealBill || 0)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500' }}>
-                      {formatCurrency(row.dueBill)}
-                      {row.isOverridden && (
-                        <span className="warning-badge" style={{ marginLeft: '0.35rem', background: '#fffbeb', color: '#b45309', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '600' }}>
-                          Override
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: 'var(--primary)' }}>{formatCurrency(row.totalBill)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                      <span style={{ background: badgeBg, color: badgeColor, padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '600', textTransform: 'capitalize', display: 'inline-block', textAlign: 'center', minWidth: '95px' }}>
-                        {statusNorm}
-                      </span>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={headers.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
+                      No billing records found.
                     </td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                ) : (
+                rows.map((row) => {
+                  const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ').trim();
+                  let badgeBg = '#f1f5f9';
+                  let badgeColor = '#64748b';
+                  if (statusNorm === 'paid') { badgeBg = '#ecfdf5'; badgeColor = '#047857'; }
+                  else if (statusNorm === 'partial paid' || statusNorm === 'partial_paid') { badgeBg = '#fffbeb'; badgeColor = '#b45309'; }
+                  else if (statusNorm === 'unpaid') { badgeBg = '#fef2f2'; badgeColor = '#b91c1c'; }
+
+                  return (
+                    <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>{row.studentName}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>{row.rollNumber}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>{row.hallId}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.serviceBill)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.monthlyBill)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', color: '#047857', fontWeight: '700' }}>{formatCurrency(row.dswSubsidy || 0)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.guestMealBill || 0)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500' }}>
+                        {formatCurrency(row.dueBill)}
+                        {row.isOverridden && (
+                          <span className="warning-badge" style={{ marginLeft: '0.35rem', background: '#fffbeb', color: '#b45309', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '600' }}>
+                            Override
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: 'var(--primary)' }}>{formatCurrency(row.totalBill)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                        <span style={{ background: badgeBg, color: badgeColor, padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '600', textTransform: 'capitalize', display: 'inline-block', textAlign: 'center', minWidth: '95px' }}>
+                          {statusNorm}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
 
