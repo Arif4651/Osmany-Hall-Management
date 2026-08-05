@@ -19,6 +19,36 @@ public sealed class StockTransaction : Entity
     public Guid? UpdatedById { get; set; }
     public AppUser? UpdatedBy { get; set; }
     public int? ParticipantCount { get; set; }
+
+    // ── Batch (lot) costing ──────────────────────────────────────────────────
+    // Every stock-in is a batch that keeps its own unit rate; stock-outs draw from one
+    // named batch rather than from a blended weighted average across the whole item.
+
+    /// <summary>
+    /// On a stock-in: how much of this batch is still available. Always zero on a stock-out.
+    /// Recomputed from scratch by the ledger replay, never edited directly.
+    /// </summary>
+    public decimal RemainingQuantity { get; set; }
+
+    /// <summary>
+    /// On a stock-out of a stored item: the stock-in row this quantity was drawn from, which
+    /// fixes the rate it is costed at. Null for stock-ins, non-stored items and legacy rows.
+    /// </summary>
+    public Guid? SourceBatchId { get; set; }
+    public StockTransaction? SourceBatch { get; set; }
+
+    /// <summary>
+    /// The synthetic batch created at the batch-costing cutover, carrying the stock an item
+    /// held at that moment valued at its final weighted average.
+    /// </summary>
+    public bool IsOpeningBatch { get; set; }
+
+    /// <summary>
+    /// Recorded before batch costing existed and priced by the old weighted average. The
+    /// replay leaves these rows exactly as they are so historical bills never move; the
+    /// opening batch accounts for whatever stock they left behind.
+    /// </summary>
+    public bool IsPreBatchLegacy { get; set; }
 }
 
 public sealed class MealPreferenceHistory : Entity

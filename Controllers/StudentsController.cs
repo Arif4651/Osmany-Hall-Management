@@ -242,8 +242,14 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     {
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim().ToLower();
-            query = query.Where(x => x.StudentName.ToLower().Contains(term) || x.StudentId.ToLower().Contains(term) || x.RollNumber.ToLower().Contains(term) || x.HallId.ToLower().Contains(term) || x.MobileNumber.ToLower().Contains(term));
+            // ILIKE (not ToLower().Contains) so the gin_trgm_ops indexes can be used.
+            var pattern = SearchPattern.Contains(search);
+            query = query.Where(x =>
+                EF.Functions.ILike(x.StudentName, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.StudentId, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.RollNumber, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.HallId, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.MobileNumber, pattern, SearchPattern.EscapeCharacter));
         }
         if (!IsAll(department)) query = query.Where(x => x.Department == department);
         if (!IsAll(level)) query = query.Where(x => x.Level == level);

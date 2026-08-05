@@ -23,12 +23,8 @@ public sealed class DueController(
     {
         if (month is < 1 or > 12) return [];
 
-        var hasCacheEntries = await db.MonthlyBillCache.AsNoTracking()
-            .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
-        if (!hasCacheEntries)
-        {
-            await billing.RecalculateMonthAsync(month, year, cancellationToken);
-        }
+        // Calculates only on a cache miss, and at most once across concurrent viewers.
+        await billing.EnsureMonthCalculatedAsync(month, year, cancellationToken);
 
         var overrides = await db.DueAdjustments.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year)

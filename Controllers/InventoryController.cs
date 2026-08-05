@@ -195,14 +195,16 @@ public sealed class InventoryController(
             db.InventoryItems.Remove(item);
             await db.SaveChangesAsync(cancellationToken);
 
+            await transaction.CommitAsync(cancellationToken);
+
             if (earliestBilledDate.HasValue)
             {
-                billing.QueueRecalculateForward(
+                await billing.RecalculateForwardAsync(
                     earliestBilledDate.Value.Month,
-                    earliestBilledDate.Value.Year);
+                    earliestBilledDate.Value.Year,
+                    cancellationToken);
             }
 
-            await transaction.CommitAsync(cancellationToken);
             return Ok(new
             {
                 deletedTransactions = stockTransactions.Count,
@@ -229,54 +231,10 @@ public sealed class InventoryController(
         if (item is null) return NotFound("Item not found");
         if (item.Wing != selectedWing) return Forbid();
 
-        var students = await db.Students.AsNoTracking().Where(x => x.Gender == selectedWing).ToListAsync(cancellationToken);
-        var overrides = await db.GlobalMealOverrides.AsNoTracking()
-            .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= date && x.EffectiveTo >= date)
-            .ToListAsync(cancellationToken);
-        var statuses = await db.MealStatusHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-            .ToListAsync(cancellationToken);
-        var preferences = await db.MealPreferenceHistory.AsNoTracking()
-            .Where(x => x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-            .ToListAsync(cancellationToken);
-
-        var count = students.Count(student =>
-        {
-            var globalOverride = overrides
-                .Where(x => x.Wing == student.Gender
-                    && x.MealPeriod == mealPeriod
-                    && x.EffectiveFrom <= date
-                    && x.EffectiveTo >= date)
-                .OrderByDescending(x => x.EffectiveFrom)
-                .FirstOrDefault();
-
-            bool on;
-            if (globalOverride is not null)
-            {
-                on = globalOverride.IsOn;
-            }
-            else
-            {
-                on = statuses
-                    .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault()?.IsOn ?? false;
-            }
-
-            var selected = preferences
-                .Where(x => x.StudentId == student.Id && x.MealPeriod == mealPeriod && x.DayOfWeek == date.DayOfWeek && x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-                .OrderByDescending(x => x.EffectiveFrom)
-                .FirstOrDefault()?.OptionItemId;
-
-            return FinancialMath.IsChargeParticipant(
-                item.Category,
-                item.Id,
-                item.LinkedOptionId,
-                on,
-                selected);
-        });
-
-        return Ok(count);
+        // Same context the billing pass uses, so this preview cannot drift from the headcount
+        // the bill is actually divided by.
+        var meals = await MealResolutionContext.LoadAsync(db, date, date, cancellationToken);
+        return Ok(meals.CountParticipants(item, mealPeriod, date));
     }
 
     [HttpGet("transactions")]
@@ -288,6 +246,7 @@ public sealed class InventoryController(
         var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
         var query = db.StockTransactions.AsNoTracking()
             .Include(x => x.Item)
+            .Include(x => x.SourceBatch)
             .Where(x => x.Item != null && x.Item.Wing == selectedWing)
             .AsQueryable();
         if (itemId.HasValue) query = query.Where(x => x.ItemId == itemId);
@@ -346,13 +305,17 @@ public sealed class InventoryController(
                 TotalCost = isStockInOrNonStock ? (updatedRequest.TotalPrice ?? 0m) : 0m,
                 Note = updatedRequest.Note?.Trim(),
                 CreatedById = currentUser.UserId,
+                // Stored stock-outs draw from one named batch; the replay prices them from it.
+                SourceBatchId = item.IsStored && updatedRequest.TransactionType == "out"
+                    ? updatedRequest.SourceBatchId
+                    : null,
             };
             db.StockTransactions.Add(row);
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(updatedRequest.ItemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            billing.QueueRecalculateForward(updatedRequest.Date.Month, updatedRequest.Date.Year);
+            await billing.RecalculateForwardAsync(updatedRequest.Date.Month, updatedRequest.Date.Year, cancellationToken);
             await db.Entry(row).Reference(x => x.Item).LoadAsync(cancellationToken);
             return CreatedAtAction(nameof(GetTransactions), ToDto(row, false));
         }
@@ -368,6 +331,13 @@ public sealed class InventoryController(
         if (row is null) return NotFound();
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
         if (row.Item?.Wing != selectedWing) return Forbid();
+        if (row.IsPreBatchLegacy)
+        {
+            return Conflict(new
+            {
+                message = "This movement predates batch tracking and is locked so historical bills stay unchanged.",
+            });
+        }
 
         var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.ItemId && !x.IsDeleted, cancellationToken);
         if (item is null) return BadRequest(new { message = "Inventory item was not found." });
@@ -411,13 +381,16 @@ public sealed class InventoryController(
             row.TotalCost = isStockInOrNonStock ? (updatedRequest.TotalPrice ?? 0m) : 0m;
             row.Note = updatedRequest.Note?.Trim();
             row.UpdatedById = currentUser.UserId;
+            row.SourceBatchId = item.IsStored && updatedRequest.TransactionType == "out"
+                ? updatedRequest.SourceBatchId
+                : null;
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(oldItemId, cancellationToken);
             if (oldItemId != updatedRequest.ItemId) await inventory.RebuildItemAsync(updatedRequest.ItemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             var first = oldDate.Year * 12 + oldDate.Month <= updatedRequest.Date.Year * 12 + updatedRequest.Date.Month ? oldDate : updatedRequest.Date;
-            billing.QueueRecalculateForward(first.Month, first.Year);
+            await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
             return ToDto(row, false);
         }
         catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
@@ -432,6 +405,25 @@ public sealed class InventoryController(
         if (row is null) return NotFound();
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(adminWing) && row.Item?.Wing != adminWing) return Forbid();
+        if (row.IsPreBatchLegacy)
+        {
+            return Conflict(new
+            {
+                message = "This movement predates batch tracking and is locked so historical bills stay unchanged.",
+            });
+        }
+        if (row.TransactionType == "in")
+        {
+            var consumers = await db.StockTransactions.AsNoTracking()
+                .CountAsync(x => x.SourceBatchId == id, cancellationToken);
+            if (consumers > 0)
+            {
+                return Conflict(new
+                {
+                    message = $"This batch has {consumers} stock-out(s) drawn from it. Delete those first.",
+                });
+            }
+        }
         try
         {
             await periods.EnsureOpenAsync(row.Date, cancellationToken);
@@ -441,7 +433,7 @@ public sealed class InventoryController(
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(itemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
-            billing.QueueRecalculateForward(date.Month, date.Year);
+            await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
             return NoContent();
         }
         catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
@@ -485,10 +477,114 @@ public sealed class InventoryController(
         else
         {
             if (request.TransactionType == "in" && (!request.Rate.HasValue || request.Rate < 0m)) return "Rate is required for stock-in.";
-            if (request.TransactionType == "out" && (string.IsNullOrWhiteSpace(request.MealPeriod) || !MealPeriods.Contains(request.MealPeriod)))
-                return "Meal period is required for stock-out.";
+            if (request.TransactionType == "out")
+            {
+                if (string.IsNullOrWhiteSpace(request.MealPeriod) || !MealPeriods.Contains(request.MealPeriod))
+                    return "Meal period is required for stock-out.";
+
+                // A stored stock-out is costed at one batch's rate, so the batch must be named
+                // and must actually hold the quantity. Nothing is averaged across batches.
+                if (!request.SourceBatchId.HasValue)
+                    return "Select which batch this stock-out is taken from.";
+
+                var batch = await db.StockTransactions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == request.SourceBatchId, cancellationToken);
+                if (batch is null || batch.TransactionType != "in" || batch.ItemId != request.ItemId)
+                    return "The selected batch does not belong to this item.";
+                if (batch.IsPreBatchLegacy)
+                    return "The selected batch predates batch tracking and cannot be drawn from.";
+                if (request.Date < batch.Date)
+                    return $"This batch was only received on {batch.Date:yyyy-MM-dd}; the stock-out cannot be dated earlier.";
+            }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Open batches for every stored item in the wing, so the inventory list can show each
+    /// item's lots without a request per item. Labels are positional within their own item.
+    /// </summary>
+    [HttpGet("batches")]
+    public async Task<IReadOnlyList<InventoryBatchDto>> GetAllBatches(
+        [FromQuery] string? wing = null,
+        CancellationToken cancellationToken = default)
+    {
+        var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+        var rows = await db.StockTransactions.AsNoTracking()
+            .Include(x => x.Item)
+            .Where(x => x.Item != null
+                && x.Item.Wing == selectedWing
+                && x.Item.IsStored
+                && !x.Item.IsDeleted
+                && x.TransactionType == "in"
+                && !x.IsPreBatchLegacy
+                && x.RemainingQuantity > 0m)
+            .OrderBy(x => x.Date)
+            .ThenBy(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(x => x.ItemId)
+            .SelectMany(group => group.Select((batch, index) => new InventoryBatchDto(
+                batch.Id,
+                batch.ItemId,
+                batch.Item!.Item,
+                batch.Item.Unit,
+                $"{batch.Item.Item}-{index + 1}",
+                index + 1,
+                batch.Date,
+                batch.Quantity,
+                batch.RemainingQuantity,
+                batch.Rate,
+                batch.RemainingQuantity * batch.Rate,
+                batch.IsOpeningBatch,
+                batch.Note)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Open batches for an item, oldest first — the source list for the stock-out picker.
+    /// Labels are positional and renumber as batches are used up, so the caller must send back
+    /// the batch id, never the label.
+    /// </summary>
+    [HttpGet("items/{id:guid}/batches")]
+    public async Task<ActionResult<IReadOnlyList<InventoryBatchDto>>> GetBatches(
+        Guid id,
+        [FromQuery] bool includeEmpty = false,
+        [FromQuery] string? wing = null,
+        CancellationToken cancellationToken = default)
+    {
+        var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+        var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (item is null) return NotFound(new { message = "Inventory item was not found." });
+        if (item.Wing != selectedWing) return Forbid();
+        if (!item.IsStored) return Ok(Array.Empty<InventoryBatchDto>());
+
+        var batches = await db.StockTransactions.AsNoTracking()
+            .Where(x => x.ItemId == id
+                && x.TransactionType == "in"
+                && !x.IsPreBatchLegacy
+                && (includeEmpty || x.RemainingQuantity > 0m))
+            .OrderBy(x => x.Date)
+            .ThenBy(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        return batches.Select((batch, index) => new InventoryBatchDto(
+            batch.Id,
+            item.Id,
+            item.Item,
+            item.Unit,
+            $"{item.Item}-{index + 1}",
+            index + 1,
+            batch.Date,
+            batch.Quantity,
+            batch.RemainingQuantity,
+            batch.Rate,
+            batch.RemainingQuantity * batch.Rate,
+            batch.IsOpeningBatch,
+            batch.Note)).ToList();
     }
 
     private static InventoryItemFinancialDto ToDto(InventoryItem x)
@@ -497,5 +593,10 @@ public sealed class InventoryController(
     private static StockTransactionDto ToDto(StockTransaction x, bool locked)
         => new(x.Id, x.ItemId, x.Item?.Item ?? string.Empty, x.Item?.Wing ?? "Male", x.Item?.Category ?? string.Empty,
             x.TransactionType, x.Date, x.MealPeriod, x.Quantity, x.Rate, x.WacSnapshot,
-            x.TotalCost, x.Note, locked, x.ParticipantCount);
+            x.TotalCost, x.Note, locked, x.ParticipantCount,
+            x.SourceBatchId,
+            // Dated rather than positional: a ledger row is historical, and batch positions
+            // renumber as batches are used up, so "Rice-2" would drift over time.
+            x.SourceBatch is null ? null : $"Batch of {x.SourceBatch.Date:dd MMM yyyy}",
+            x.IsPreBatchLegacy);
 }

@@ -25,16 +25,11 @@ public sealed class BillingController(
         [FromQuery] string? status, CancellationToken cancellationToken)
     {
         // ── Performance: read from cache first ───────────────────────────────
-        // Only run full recalculation if the cache has NO entries for this month.
-        // Explicit recalculation is available via POST /billing/recalculate.
-        // Write operations (save service bill, close/unlock period, payment approval,
-        // subsidy changes) continue to trigger RecalculateForwardAsync automatically.
-        var hasCacheEntries = await db.MonthlyBillCache.AsNoTracking()
-            .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
-        if (!hasCacheEntries)
-        {
-            await billing.RecalculateMonthAsync(month, year, cancellationToken);
-        }
+        // Calculates only on a cache miss, and at most once even when several admins open
+        // the same month together. Explicit recalculation is available via POST
+        // /billing/recalculate. Write operations (save service bill, close/unlock period,
+        // payment approval, subsidy changes) trigger RecalculateForwardAsync automatically.
+        await billing.EnsureMonthCalculatedAsync(month, year, cancellationToken);
 
         var locked = await periods.IsLockedAsync(month, year, cancellationToken);
         var overrides = await db.DueAdjustments.AsNoTracking()
@@ -74,16 +69,13 @@ public sealed class BillingController(
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
 
-        // ── Performance: read from cache, only recalc if no entry exists ─────
+        // ── Performance: read from cache, only recalc if the month has none ──
+        // Validates the period and collapses concurrent first-views of a month into a single
+        // calculation — this endpoint is student-reachable with an arbitrary month and year.
+        await billing.EnsureMonthCalculatedAsync(month, year, cancellationToken);
+
         var row = await db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
             .FirstOrDefaultAsync(x => x.StudentId == studentId && x.Month == month && x.Year == year, cancellationToken);
-        if (row is null)
-        {
-            // First time this month has been viewed — run calculation once.
-            await billing.RecalculateMonthAsync(month, year, cancellationToken);
-            row = await db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
-                .FirstOrDefaultAsync(x => x.StudentId == studentId && x.Month == month && x.Year == year, cancellationToken);
-        }
         if (row is null) return NotFound();
 
         var overridden = await db.DueAdjustments.AnyAsync(x => x.StudentId == studentId && x.BillingMonth == month && x.BillingYear == year, cancellationToken);

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -24,11 +25,26 @@ public sealed class BillingPeriodClosedException : InvalidOperationException
     public BillingPeriodClosedException() : base("Billing period is closed.") { }
 }
 
+/// <summary>
+/// A request supplied values the domain rejects. Carries a message written for the user, so
+/// the exception middleware may safely return it with HTTP 400 — unlike a bare
+/// <see cref="InvalidOperationException"/>, which may come from the framework and whose
+/// message could expose internals.
+/// </summary>
+public sealed class DomainValidationException(string message) : InvalidOperationException(message);
+
 public sealed class InventoryTransactionService(
     HallDbContext db,
     BillingPeriodService periods)
 {
     public async Task RebuildItemAsync(Guid itemId, CancellationToken cancellationToken)
+        => await RebuildItemAsync(itemId, null, cancellationToken);
+
+    /// <param name="meals">
+    /// Pre-loaded meal history shared across a batch of rebuilds. Must span every transaction
+    /// date of this item; pass null to have the item load its own for exactly its own range.
+    /// </param>
+    public async Task RebuildItemAsync(Guid itemId, MealResolutionContext? meals, CancellationToken cancellationToken)
     {
         var item = await db.InventoryItems.FirstOrDefaultAsync(x => x.Id == itemId, cancellationToken)
             ?? throw new InvalidOperationException("Inventory item was not found.");
@@ -43,18 +59,11 @@ public sealed class InventoryTransactionService(
         {
             if (transactions.Count > 0)
             {
-                var minDate = transactions.Min(x => x.Date);
-                var maxDate = transactions.Max(x => x.Date);
-                var students = await db.Students.AsNoTracking().Where(x => x.Gender == item.Wing).ToListAsync(cancellationToken);
-                var overrides = await db.GlobalMealOverrides.AsNoTracking()
-                    .Where(x => x.Wing == item.Wing && x.EffectiveFrom <= maxDate && x.EffectiveTo >= minDate)
-                    .ToListAsync(cancellationToken);
-                var statuses = await db.MealStatusHistory.AsNoTracking()
-                    .Where(x => x.EffectiveFrom <= maxDate && (x.EffectiveTo == null || x.EffectiveTo >= minDate))
-                    .ToListAsync(cancellationToken);
-                var preferences = await db.MealPreferenceHistory.AsNoTracking()
-                    .Where(x => x.EffectiveFrom <= maxDate && (x.EffectiveTo == null || x.EffectiveTo >= minDate))
-                    .ToListAsync(cancellationToken);
+                meals ??= await MealResolutionContext.LoadAsync(
+                    db,
+                    transactions.Min(x => x.Date),
+                    transactions.Max(x => x.Date),
+                    cancellationToken);
 
                 foreach (var transaction in transactions)
                 {
@@ -67,41 +76,7 @@ public sealed class InventoryTransactionService(
                         continue;
                     }
 
-                    var participantsCount = students.Count(student =>
-                    {
-                        var globalOverride = overrides
-                            .Where(x => x.Wing == student.Gender
-                                && x.MealPeriod == transaction.MealPeriod
-                                && x.EffectiveFrom <= transaction.Date
-                                && x.EffectiveTo >= transaction.Date)
-                            .OrderByDescending(x => x.EffectiveFrom)
-                            .FirstOrDefault();
-
-                        bool on;
-                        if (globalOverride is not null)
-                        {
-                            on = globalOverride.IsOn;
-                        }
-                        else
-                        {
-                            on = statuses
-                                .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
-                                .OrderByDescending(x => x.EffectiveFrom)
-                                .FirstOrDefault()?.IsOn ?? false;
-                        }
-
-                        var selected = preferences
-                            .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.DayOfWeek == transaction.Date.DayOfWeek && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
-                            .OrderByDescending(x => x.EffectiveFrom)
-                            .FirstOrDefault()?.OptionItemId;
-
-                        return FinancialMath.IsChargeParticipant(
-                            item.Category,
-                            item.Id,
-                            item.LinkedOptionId,
-                            on,
-                            selected);
-                    });
+                    var participantsCount = meals.CountParticipants(item, transaction.MealPeriod, transaction.Date);
 
                     transaction.ParticipantCount = participantsCount;
                     transaction.Rate = participantsCount > 0 ? (transaction.TotalCost / participantsCount) : 0m;
@@ -118,39 +93,65 @@ public sealed class InventoryTransactionService(
         }
         else
         {
-            decimal quantity = 0m;
-            decimal wac = 0m;
+            // ── Batch (lot) costing ──────────────────────────────────────────────────
+            // Each stock-in keeps its own rate; a stock-out is priced at the rate of the one
+            // batch it names. Rows recorded before the cutover stay exactly as the old
+            // weighted-average run left them, so no historical bill moves — the opening batch
+            // created by the migration carries whatever stock they left behind.
+            var batches = new Dictionary<Guid, StockTransaction>();
+
             foreach (var transaction in transactions)
             {
                 if (transaction.Quantity <= 0m) throw new InvalidOperationException("Quantity must be greater than zero.");
-                
+
+                if (transaction.IsPreBatchLegacy)
+                {
+                    transaction.RemainingQuantity = 0m;
+                    continue;
+                }
+
                 if (transaction.TransactionType == "in")
                 {
                     if (transaction.Rate < 0m) throw new InvalidOperationException("Rate cannot be negative.");
-                    var nextQuantity = quantity + transaction.Quantity;
-                    wac = FinancialMath.WeightedAverageCost(quantity, wac, transaction.Quantity, transaction.Rate);
-                    quantity = nextQuantity;
-                    transaction.WacSnapshot = wac;
+                    transaction.RemainingQuantity = transaction.Quantity;
+                    transaction.WacSnapshot = transaction.Rate;
                     transaction.TotalCost = transaction.Quantity * transaction.Rate;
+                    batches[transaction.Id] = transaction;
                 }
                 else
                 {
-                    if (transaction.Quantity > quantity)
+                    if (!transaction.SourceBatchId.HasValue || !batches.TryGetValue(transaction.SourceBatchId.Value, out var batch))
                     {
-                        throw new InvalidOperationException($"Stock-out quantity exceeds available stock for {item.Item} on {transaction.Date:yyyy-MM-dd}.");
+                        throw new InvalidOperationException(
+                            $"The stock-out of {item.Item} on {transaction.Date:yyyy-MM-dd} is not linked to a stock-in batch.");
                     }
-                    transaction.Rate = wac;
-                    transaction.WacSnapshot = wac;
-                    transaction.TotalCost = transaction.Quantity * wac;
-                    quantity -= transaction.Quantity;
+                    if (transaction.Quantity > batch.RemainingQuantity)
+                    {
+                        throw new InvalidOperationException(
+                            $"Stock-out of {transaction.Quantity:0.####} {item.Unit} on {transaction.Date:yyyy-MM-dd} exceeds the "
+                            + $"{batch.RemainingQuantity:0.####} {item.Unit} left in the {item.Item} batch received on {batch.Date:yyyy-MM-dd}.");
+                    }
+
+                    // Priced at the batch's own rate — no blending across batches.
+                    transaction.Rate = batch.Rate;
+                    transaction.WacSnapshot = batch.Rate;
+                    transaction.TotalCost = transaction.Quantity * batch.Rate;
+                    transaction.RemainingQuantity = 0m;
+                    batch.RemainingQuantity -= transaction.Quantity;
                 }
             }
 
+            var openBatches = batches.Values.Where(x => x.RemainingQuantity > 0m).ToList();
+            var quantity = openBatches.Sum(x => x.RemainingQuantity);
+            var stockValue = openBatches.Sum(x => x.RemainingQuantity * x.Rate);
+
             item.CurrentStockQuantity = quantity;
-            item.CurrentWac = wac;
+            // Kept only as a headline valuation figure for reports and the item list; nothing
+            // is costed from it any more.
+            item.CurrentWac = quantity == 0m ? 0m : stockValue / quantity;
             item.Stock = quantity;
-            item.AveragePrice = wac;
-            item.TotalStockValue = quantity * wac;
+            item.AveragePrice = item.CurrentWac;
+            item.TotalStockValue = stockValue;
         }
         item.LastMovementDate = transactions.LastOrDefault()?.Date;
         item.Status = item.IsDeleted ? "archived" : item.Stock <= item.Threshold ? "low-stock" : "active";
@@ -485,29 +486,76 @@ public sealed record MonthlyBillResult(
 public sealed class BillingCalculationService(
     HallDbContext db,
     BillingPeriodService periods,
-    InventoryTransactionService inventory,
-    Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopeFactory)
+    InventoryTransactionService inventory)
 {
-    public void QueueRecalculateForward(int month, int year)
+    /// <summary>Earliest billing year accepted from a request. Guards against absurd inputs.</summary>
+    private const int EarliestBillingYear = 2000;
+
+    /// <summary>
+    /// One in-flight recalculation per billing month. Recalculating is whole-hall work, and
+    /// read endpoints trigger it on a cache miss — so without this gate, every student opening
+    /// their bill on the 1st of the month starts an identical computation simultaneously.
+    /// </summary>
+    private static readonly ConcurrentDictionary<(int Year, int Month), SemaphoreSlim> MonthLocks = new();
+
+    /// <summary>
+    /// Rejects out-of-range periods before they reach the calculation. Callers reach this from
+    /// query strings, so an unvalidated year would let anyone force work for arbitrary dates.
+    /// </summary>
+    public static void ValidatePeriod(int month, int year)
     {
-        _ = Task.Run(async () =>
+        if (month is < 1 or > 12)
         {
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var bgBilling = scope.ServiceProvider.GetRequiredService<BillingCalculationService>();
-                await bgBilling.RecalculateForwardAsync(month, year, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Background recalculation failed: {ex}");
-            }
-        });
+            throw new DomainValidationException("Month must be between 1 and 12.");
+        }
+        var latestYear = DateTime.UtcNow.Year + 1;
+        if (year < EarliestBillingYear || year > latestYear)
+        {
+            throw new DomainValidationException($"Year must be between {EarliestBillingYear} and {latestYear}.");
+        }
     }
 
-    public async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(int month, int year, CancellationToken cancellationToken)
+    /// <summary>
+    /// Ensures the month has been calculated, doing the work at most once across concurrent
+    /// callers. Read endpoints should prefer this over recalculating on every cache miss.
+    /// </summary>
+    public async Task EnsureMonthCalculatedAsync(int month, int year, CancellationToken cancellationToken)
     {
-        if (month is < 1 or > 12) throw new InvalidOperationException("Month must be between 1 and 12.");
+        ValidatePeriod(month, year);
+        if (await HasCachedBillsAsync(month, year, cancellationToken)) return;
+
+        var gate = MonthLocks.GetOrAdd((year, month), _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            // A concurrent caller may have finished the work while we waited on the gate.
+            if (await HasCachedBillsAsync(month, year, cancellationToken)) return;
+            await RecalculateMonthAsync(month, year, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<bool> HasCachedBillsAsync(int month, int year, CancellationToken cancellationToken)
+        => await db.MonthlyBillCache.AsNoTracking()
+            .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
+
+    public async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(int month, int year, CancellationToken cancellationToken)
+        => await RecalculateMonthAsync(month, year, null, cancellationToken);
+
+    /// <param name="sharedMeals">
+    /// Meal history already loaded and rebuilt against by the caller, spanning at least this
+    /// month. Null means this call owns the rebuild and loads history for its own month.
+    /// </param>
+    private async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(
+        int month,
+        int year,
+        MealResolutionContext? sharedMeals,
+        CancellationToken cancellationToken)
+    {
+        ValidatePeriod(month, year);
         if (await periods.IsLockedAsync(month, year, cancellationToken))
         {
             return await ReadCacheAsync(month, year, cancellationToken);
@@ -516,33 +564,15 @@ public sealed class BillingCalculationService(
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
 
-        var nonStoredItemIds = await db.StockTransactions.AsNoTracking()
-            .Include(x => x.Item)
-            .Where(x => x.Date >= from && x.Date <= to && x.Item != null && !x.Item.IsStored)
-            .Select(x => x.ItemId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
+        // A range recalculation rebuilds every affected item once up front and hands the same
+        // history down; rebuilding and reloading per month would repeat identical work.
+        var meals = sharedMeals ?? await RebuildNonStoredItemsAsync(from, to, cancellationToken);
+        var students = meals.Students;
 
-        foreach (var itemId in nonStoredItemIds)
-        {
-            await inventory.RebuildItemAsync(itemId, cancellationToken);
-        }
-
-        var students = await db.Students.AsNoTracking().ToListAsync(cancellationToken);
         var transactions = await db.StockTransactions.AsNoTracking()
             .Include(x => x.Item)
             .Where(x => x.TransactionType == "out" && x.Date >= from && x.Date <= to)
             .OrderBy(x => x.Date)
-            .ToListAsync(cancellationToken);
-        var statuses = await db.MealStatusHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
-            .ToListAsync(cancellationToken);
-        var preferences = await db.MealPreferenceHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
-            .ToListAsync(cancellationToken);
-
-        var overrides = await db.GlobalMealOverrides.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && x.EffectiveTo >= from)
             .ToListAsync(cancellationToken);
         var guestMeals = await db.GuestMealRequests.AsNoTracking()
             .Where(x => x.Date >= from && x.Date <= to)
@@ -557,62 +587,31 @@ public sealed class BillingCalculationService(
             .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.SubsidyAmount) })
             .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
 
+        var guestMealsGrouped = guestMeals
+            .GroupBy(x => (x.Date, x.MealPeriod))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         var monthly = students.ToDictionary(x => x.Id, _ => 0m);
         var guestBill = students.ToDictionary(x => x.Id, _ => 0m);
         foreach (var transaction in transactions)
         {
             if (transaction.Item is null || string.IsNullOrWhiteSpace(transaction.MealPeriod)) continue;
-            var transactionWing = transaction.Item.Wing;
-            if (string.IsNullOrWhiteSpace(transactionWing)) continue;
+            if (string.IsNullOrWhiteSpace(transaction.Item.Wing)) continue;
 
-            var participants = students.Where(student =>
-            {
-                if (student.Gender != transactionWing) return false;
-                // Check global override first; fall back to individual status
-                var globalOverride = overrides
-                    .Where(x => x.Wing == student.Gender
-                        && x.MealPeriod == transaction.MealPeriod
-                        && x.EffectiveFrom <= transaction.Date
-                        && x.EffectiveTo >= transaction.Date)
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault();
-
-                bool on;
-                if (globalOverride is not null)
-                {
-                    on = globalOverride.IsOn;
-                }
-                else
-                {
-                    on = statuses
-                        .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
-                        .OrderByDescending(x => x.EffectiveFrom)
-                        .FirstOrDefault()?.IsOn ?? false;
-                }
-
-                var selected = preferences
-                    .Where(x => x.StudentId == student.Id && x.MealPeriod == transaction.MealPeriod && x.EffectiveFrom <= transaction.Date && (x.EffectiveTo == null || x.EffectiveTo >= transaction.Date))
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault()?.OptionItemId;
-                return FinancialMath.IsChargeParticipant(
-                    transaction.Item.Category,
-                    transaction.Item.Id,
-                    transaction.Item.LinkedOptionId,
-                    on,
-                    selected);
-            }).ToList();
+            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date);
 
             if (participants.Count == 0) continue;
             var share = transaction.TotalCost / participants.Count;
             foreach (var participant in participants) monthly[participant.Id] += share;
 
             // Guest meals: add share per guest count for each requesting student
-            var transactionGuests = guestMeals
-                .Where(x => x.Date == transaction.Date && x.MealPeriod == transaction.MealPeriod);
-            foreach (var guest in transactionGuests)
+            if (guestMealsGrouped.TryGetValue((transaction.Date, transaction.MealPeriod), out var transactionGuests))
             {
-                if (!guestBill.ContainsKey(guest.StudentId)) continue;
-                guestBill[guest.StudentId] += share * guest.GuestCount;
+                foreach (var guest in transactionGuests)
+                {
+                    if (!guestBill.ContainsKey(guest.StudentId)) continue;
+                    guestBill[guest.StudentId] += share * guest.GuestCount;
+                }
             }
         }
 
@@ -687,12 +686,63 @@ public sealed class BillingCalculationService(
     {
         var cursor = new DateOnly(year, month, 1);
         var end = DateOnly.FromDateTime(DateTime.Today).AddMonths(1);
+        var rangeEnd = end.AddMonths(1).AddDays(-1);
+
+        // Rebuild each affected non-stored item once for the whole range rather than once per
+        // month — RebuildItemAsync replays the item's full history either way — and reuse the
+        // meal history it loaded for every month instead of re-querying it twelve times.
+        var meals = await RebuildNonStoredItemsAsync(cursor, rangeEnd, cancellationToken);
+
         while (cursor <= end)
         {
             if (await periods.IsLockedAsync(cursor.Month, cursor.Year, cancellationToken)) break;
-            await RecalculateMonthAsync(cursor.Month, cursor.Year, cancellationToken);
+            await RecalculateMonthAsync(cursor.Month, cursor.Year, meals, cancellationToken);
             cursor = cursor.AddMonths(1);
         }
+    }
+
+    /// <summary>
+    /// Recomputes every non-stored item with activity in the range and returns the meal history
+    /// used, loaded wide enough for the caller to reuse across the whole range.
+    /// </summary>
+    private async Task<MealResolutionContext> RebuildNonStoredItemsAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        var nonStoredItemIds = await db.StockTransactions.AsNoTracking()
+            .Where(x => x.Date >= from && x.Date <= to && x.Item != null && !x.Item.IsStored)
+            .Select(x => x.ItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        // A rebuild replays the item's entire ledger, so the shared history has to span every
+        // one of its transactions — a context limited to [from, to] would produce wrong
+        // participant counts for that item's transactions outside the range.
+        var historyFrom = from;
+        var historyTo = to;
+        if (nonStoredItemIds.Count > 0)
+        {
+            var itemTransactions = db.StockTransactions.AsNoTracking()
+                .Where(x => nonStoredItemIds.Contains(x.ItemId));
+            var earliest = await itemTransactions.MinAsync(x => (DateOnly?)x.Date, cancellationToken);
+            var latest = await itemTransactions.MaxAsync(x => (DateOnly?)x.Date, cancellationToken);
+            if (earliest.HasValue && earliest.Value < historyFrom) historyFrom = earliest.Value;
+            if (latest.HasValue && latest.Value > historyTo) historyTo = latest.Value;
+        }
+
+        var meals = await MealResolutionContext.LoadAsync(db, historyFrom, historyTo, cancellationToken);
+
+        foreach (var itemId in nonStoredItemIds)
+        {
+            await inventory.RebuildItemAsync(itemId, meals, cancellationToken);
+        }
+
+        // Persist before the billing pass: it reads transactions with AsNoTracking, which
+        // queries the database and would otherwise miss the recomputed costs.
+        if (nonStoredItemIds.Count > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return meals;
     }
 
     private async Task<Dictionary<Guid, decimal>> LatestOverridesAsync(int month, int year, CancellationToken cancellationToken)

@@ -193,9 +193,16 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.Property(x => x.WacSnapshot).HasPrecision(12, 4);
             entity.Property(x => x.TotalCost).HasPrecision(12, 4);
             entity.Property(x => x.Note).HasMaxLength(500);
+            entity.Property(x => x.RemainingQuantity).HasPrecision(12, 4);
             entity.HasOne(x => x.Item).WithMany(x => x.StockTransactions).HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.UpdatedBy).WithMany().HasForeignKey(x => x.UpdatedById).OnDelete(DeleteBehavior.Restrict);
+            // A stock-out points at the stock-in batch it drew from. Restrict, so a batch that
+            // has been consumed cannot be deleted out from under its stock-outs.
+            entity.HasOne(x => x.SourceBatch).WithMany().HasForeignKey(x => x.SourceBatchId).OnDelete(DeleteBehavior.Restrict);
+            // Serves both the batch picker (open batches for an item) and the replay.
+            entity.HasIndex(x => new { x.ItemId, x.TransactionType, x.RemainingQuantity });
+            entity.HasIndex(x => x.SourceBatchId);
         });
 
         modelBuilder.Entity<MealPreferenceHistory>(entity =>

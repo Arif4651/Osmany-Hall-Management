@@ -79,6 +79,18 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             .Where(x => x.Category == "Options" && !x.IsDeleted)
             .ToListAsync(cancellationToken);
 
+        // Optimize: bucket transactions and subsidies by (Date, MealPeriod) once. The loop below
+        // runs ~90 times per report (days x meal periods) and previously rescanned both full
+        // month lists on every pass. Wing filtering is applied here so it happens once per row.
+        var transactionsGrouped = transactions
+            .Where(x => effectiveGender == "All" || (x.Item != null && x.Item.Wing == effectiveGender))
+            .GroupBy(x => (x.Date, x.MealPeriod))
+            .ToDictionary(g => g.Key, g => g.ToList());
+        var subsidiesGrouped = subsidies
+            .Where(x => effectiveGender == "All" || x.Wing == effectiveGender)
+            .GroupBy(x => (x.Date, x.MealPeriod))
+            .ToDictionary(g => g.Key, g => g.Sum(y => y.SubsidyAmount));
+
         var rows = new List<DailyCostRowDto>();
 
         var today = DateOnly.FromDateTime(DateTime.Today);
@@ -88,18 +100,12 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
         {
             DailyCostMealDto Meal(string period)
             {
-                var periodTxs = transactions
-                    .Where(x => x.Date == date
-                        && x.MealPeriod == period
-                        && (effectiveGender == "All" || x.Item != null && x.Item.Wing == effectiveGender))
-                    .ToList();
+                var periodTxs = transactionsGrouped.TryGetValue((date, period), out var bucket)
+                    ? bucket
+                    : [];
 
                 var transactionCost = periodTxs.Sum(x => x.TotalCost);
-                var subsidyAmount = subsidies
-                    .Where(x => x.Date == date
-                        && x.MealPeriod == period
-                        && (effectiveGender == "All" || x.Wing == effectiveGender))
-                    .Sum(x => x.SubsidyAmount);
+                var subsidyAmount = subsidiesGrouped.GetValueOrDefault((date, period));
                 var netCost = transactionCost - subsidyAmount;
 
                 var participants = students.Where(student =>

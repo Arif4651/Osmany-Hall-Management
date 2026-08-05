@@ -3,6 +3,7 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HallBackend.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    partial class HallDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805181025_AddSearchTrigramIndexes")]
+    partial class AddSearchTrigramIndexes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1189,12 +1192,6 @@ namespace HallBackend.Migrations
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
-                    b.Property<bool>("IsOpeningBatch")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsPreBatchLegacy")
-                        .HasColumnType("boolean");
-
                     b.Property<Guid>("ItemId")
                         .HasColumnType("uuid");
 
@@ -1216,13 +1213,6 @@ namespace HallBackend.Migrations
                     b.Property<decimal>("Rate")
                         .HasPrecision(12, 4)
                         .HasColumnType("numeric(12,4)");
-
-                    b.Property<decimal>("RemainingQuantity")
-                        .HasPrecision(12, 4)
-                        .HasColumnType("numeric(12,4)");
-
-                    b.Property<Guid?>("SourceBatchId")
-                        .HasColumnType("uuid");
 
                     b.Property<decimal>("TotalCost")
                         .HasPrecision(12, 4)
@@ -1249,15 +1239,11 @@ namespace HallBackend.Migrations
 
                     b.HasIndex("Date");
 
-                    b.HasIndex("SourceBatchId");
-
                     b.HasIndex("UpdatedById");
 
                     b.HasIndex("ItemId", "Date");
 
                     b.HasIndex("Date", "TransactionType", "MealPeriod");
-
-                    b.HasIndex("ItemId", "TransactionType", "RemainingQuantity");
 
                     b.ToTable("stock_transactions", null, t =>
                         {
@@ -1644,11 +1630,6 @@ namespace HallBackend.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("HallBackend.Domain.Entities.StockTransaction", "SourceBatch")
-                        .WithMany()
-                        .HasForeignKey("SourceBatchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("HallBackend.Domain.Entities.AppUser", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
@@ -1657,8 +1638,6 @@ namespace HallBackend.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("Item");
-
-                    b.Navigation("SourceBatch");
 
                     b.Navigation("UpdatedBy");
                 });

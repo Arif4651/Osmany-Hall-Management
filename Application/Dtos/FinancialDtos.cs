@@ -7,10 +7,22 @@ public sealed record SaveInventoryItemRequest(string Name, string Category, stri
 public sealed record StockTransactionDto(
     Guid Id, Guid ItemId, string ItemName, string Wing, string Category, string TransactionType,
     DateOnly Date, string? MealPeriod, decimal Quantity, decimal Rate, decimal WacSnapshot,
-    decimal TotalCost, string? Note, bool IsLocked, int? ParticipantCount = null);
+    decimal TotalCost, string? Note, bool IsLocked, int? ParticipantCount = null,
+    Guid? SourceBatchId = null, string? BatchLabel = null, bool IsPreBatchLegacy = false);
 public sealed record SaveStockTransactionRequest(
     Guid ItemId, string TransactionType, DateOnly Date, string? MealPeriod,
-    decimal Quantity, decimal? Rate, string? Note, string? Wing, decimal? TotalPrice = null);
+    decimal Quantity, decimal? Rate, string? Note, string? Wing, decimal? TotalPrice = null,
+    Guid? SourceBatchId = null);
+
+/// <summary>
+/// One stock-in lot of an item, with its own unit rate. <paramref name="Label"/> is a display
+/// position among the item's open batches ("Rice-1", "Rice-2") and renumbers as batches are
+/// exhausted — never store or send it back as an identifier; use <paramref name="Id"/>.
+/// </summary>
+public sealed record InventoryBatchDto(
+    Guid Id, Guid ItemId, string ItemName, string Unit, string Label, int Position,
+    DateOnly ReceivedDate, decimal ReceivedQuantity, decimal RemainingQuantity,
+    decimal Rate, decimal RemainingValue, bool IsOpeningBatch, string? Note);
 
 
 public sealed record MealPreferenceStateDto(string MealPeriod, bool IsOn, Guid? OptionItemId, string? OptionName = null, int GuestCount = 0);

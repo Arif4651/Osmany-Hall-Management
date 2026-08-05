@@ -1,2 +1,14 @@
 **/bin/
 **/obj/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+appsettings.json
+appsettings.development.json
+appsettings.Development.json
+!appsettings.Example.json
+
+# Scratch build-verification output; held a copy of the app config.
+.build-check/

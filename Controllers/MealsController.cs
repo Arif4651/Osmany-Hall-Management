@@ -345,7 +345,7 @@ public sealed class MealsController(
             .ToList();
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = Roles.HallAdministrators)]
     [HttpGet("debug-preferences")]
     public async Task<IActionResult> DebugPreferences([FromQuery] string studentId, CancellationToken cancellationToken)
     {

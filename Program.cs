@@ -184,6 +184,9 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+// Outermost middleware, so it catches exceptions thrown anywhere further down the pipeline.
+app.UseMiddleware<HallBackend.Infrastructure.ExceptionHandlingMiddleware>();
+
 // Middleware order matters: compression before responses are written.
 app.UseResponseCompression();
 app.UseCors("frontend");

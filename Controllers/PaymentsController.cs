@@ -124,12 +124,13 @@ public sealed class PaymentsController(
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var searchNorm = search.Trim().ToLowerInvariant();
+            // ILIKE (not ToLower().Contains) so the gin_trgm_ops indexes can be used.
+            var pattern = SearchPattern.Contains(search);
             query = query.Where(x =>
-                x.Student!.RollNumber.ToLower().Contains(searchNorm) ||
-                x.Student!.HallId.ToLower().Contains(searchNorm) ||
-                x.Student!.StudentName.ToLower().Contains(searchNorm) ||
-                x.TransactionId.ToLower().Contains(searchNorm)
+                EF.Functions.ILike(x.Student!.RollNumber, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.Student!.HallId, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.Student!.StudentName, pattern, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.TransactionId, pattern, SearchPattern.EscapeCharacter)
             );
         }
 
@@ -190,8 +191,12 @@ public sealed class PaymentsController(
             ? request.ApprovedAmount ?? row.SubmittedAmount
             : null;
         await db.SaveChangesAsync(cancellationToken);
-        if (action == "approve") await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
+        // Recalculate after the commit: it can span many months, and holding the review
+        // transaction open for its duration would keep row locks for the whole run.
+        if (action == "approve") await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+
         var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
         return ToDto(saved);
     }
