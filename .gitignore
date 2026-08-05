@@ -13,6 +13,11 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
+# Local configuration
+appsettings.json
+appsettings.development.json
+appsettings.Development.json
+
 # IDE / OS
 .vscode/
 .idea/

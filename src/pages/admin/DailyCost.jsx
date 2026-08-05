@@ -269,25 +269,10 @@ export default function DailyCost() {
         <CalendarDays size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div className="header-title">
           <h1 style={{ margin: 0 }}>{isStudentView ? 'My Daily Cost' : 'Daily Cost'}</h1>
-          <p style={{ margin: '0.25rem 0 0 0' }}>{`${isStudentView ? 'Your meal cost' : 'Daily cost breakdown'} for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
+          <p style={{ margin: '0.25rem 0 0 0' }}>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
         </div>
         <div className="header-actions">
-          {isStudentView ? (
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              background: '#ecfdf5',
-              color: '#047857',
-              border: '1px solid #86efac',
-              borderRadius: '6px',
-              padding: '0.4rem 0.9rem',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-            }}>
-              My Account
-            </span>
-          ) : isLockedToWing ? (
+          {isStudentView ? null : isLockedToWing ? (
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',

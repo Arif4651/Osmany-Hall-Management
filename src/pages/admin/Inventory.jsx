@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package, Loader2 } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
@@ -17,7 +17,7 @@ const tabs = [
   { id: 'items', label: 'Items' },
 ];
 
-const emptyMovement = { date: todayLocal(), mealPeriod: 'breakfast', itemId: '', quantity: '', rate: '', totalPrice: '' };
+const emptyMovement = { date: todayLocal(), mealPeriod: 'breakfast', itemId: '', quantity: '', rate: '', totalPrice: '', sourceBatchId: '' };
 const emptyItem = { id: '', name: '', unit: 'KG', category: 'Common', linkedOptionId: '', isStored: true };
 const formatNumber = (value) => money(value).toFixed(2);
 const formatDisplayDate = (value) => new Intl.DateTimeFormat('en-GB', {
@@ -144,6 +144,142 @@ function ItemPicker({ items, value, onChange, showRemaining, disabled }) {
   );
 }
 
+/**
+ * Picks which stock-in lot a stock-out is drawn from. Each option shows the rate that will be
+ * charged and how much of that lot is left, because those are the two things that decide the
+ * choice — a plain <select> buried them in one line of text.
+ */
+function BatchPicker({ batches, value, onChange, disabled, loading, hasItem }) {
+  const rootRef = useRef(null);
+  const optionRefs = useRef([]);
+  const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  const selected = batches.find((batch) => batch.id === value) || null;
+  const isDisabled = disabled || loading || !hasItem || batches.length === 0;
+  // With a single lot the "rice-1" label says nothing the item name has not already said;
+  // numbering only earns its place once there is a choice to make.
+  const showLabels = batches.length > 1;
+
+  useEffect(() => {
+    const close = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const index = batches.findIndex((batch) => batch.id === value);
+    setHighlightedIndex(index >= 0 ? index : 0);
+  }, [open, batches, value]);
+
+  useEffect(() => {
+    if (open && highlightedIndex >= 0) {
+      optionRefs.current[highlightedIndex]?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [open, highlightedIndex]);
+
+  const select = (batch) => {
+    onChange(batch.id);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (isDisabled) return;
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev < batches.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0) select(batches[highlightedIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const placeholder = !hasItem
+    ? 'Select an item first'
+    : loading
+      ? 'Loading batches...'
+      : 'No stock available';
+
+  return (
+    <div className={`stock-batch-picker ${isDisabled ? 'is-disabled' : ''} ${open ? 'is-open' : ''}`} ref={rootRef}>
+      <button
+        type="button"
+        className="stock-batch-trigger"
+        disabled={isDisabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => !isDisabled && setOpen((prev) => !prev)}
+        onKeyDown={handleKeyDown}
+      >
+        {selected ? (
+          <span className="stock-batch-value">
+            {showLabels && <span className="stock-batch-chip">{selected.label}</span>}
+            <span className="stock-batch-value-meta">
+              <b>{formatNumber(selected.remainingQuantity)} {selected.unit.toUpperCase()}</b>
+              <em>৳{formatNumber(selected.rate)}/{selected.unit.toUpperCase()}</em>
+            </span>
+          </span>
+        ) : (
+          <span className="stock-batch-placeholder">
+            {loading && <Loader2 size={14} className="spin-icon" />}
+            {placeholder}
+          </span>
+        )}
+        <ChevronDown size={16} className="stock-batch-caret" />
+      </button>
+
+      {open && (
+        <div className="stock-batch-menu" role="listbox">
+          {batches.map((batch, index) => {
+            const usedPct = batch.receivedQuantity > 0
+              ? Math.max(0, Math.min(100, (batch.remainingQuantity / batch.receivedQuantity) * 100))
+              : 0;
+            return (
+              <button
+                type="button"
+                key={batch.id}
+                role="option"
+                aria-selected={batch.id === value}
+                ref={(el) => (optionRefs.current[index] = el)}
+                className={`stock-batch-option ${highlightedIndex === index ? 'is-highlighted' : ''} ${batch.id === value ? 'is-selected' : ''}`}
+                style={{ animationDelay: `${index * 35}ms` }}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                onClick={() => select(batch)}
+              >
+                <span className="stock-batch-option-head">
+                  {showLabels && <span className="stock-batch-chip">{batch.label}</span>}
+                  <span className="stock-batch-option-rate">৳{formatNumber(batch.rate)}<small>/{batch.unit.toUpperCase()}</small></span>
+                </span>
+                <span className="stock-batch-bar"><i style={{ width: `${usedPct}%` }} /></span>
+                <span className="stock-batch-option-meta">
+                  <span><b>{formatNumber(batch.remainingQuantity)}</b> of {formatNumber(batch.receivedQuantity)} {batch.unit.toUpperCase()} left</span>
+                  <span>{formatDisplayDate(batch.receivedDate)}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Inventory() {
   useDocumentTitle('Stock');
   const { user, role } = useAuth();
@@ -203,6 +339,11 @@ export default function Inventory() {
 
   const [studentsCount, setStudentsCount] = useState(0);
   const [loadingStudentsCount, setLoadingStudentsCount] = useState(false);
+
+  // Open batches of the item selected in the stock-out form. Each stock-out is priced at one
+  // batch's own rate, so the admin picks which one the quantity comes from.
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
 
   const [editStudentsCount, setEditStudentsCount] = useState(0);
   const [loadingEditStudentsCount, setLoadingEditStudentsCount] = useState(false);
@@ -351,6 +492,62 @@ export default function Inventory() {
     return qty > 0 ? (total / qty) : 0;
   }, [movement.quantity, movement.totalPrice]);
 
+  const selectedBatch = useMemo(
+    () => batches.find((batch) => batch.id === movement.sourceBatchId) || null,
+    [batches, movement.sourceBatchId],
+  );
+
+  // Every open batch in the wing, grouped by item, so the summary can list an item's lots
+  // beneath it without a request per row.
+  const [allBatches, setAllBatches] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    adminDataService
+      .getAllInventoryBatches(gender)
+      .then((rows) => { if (!cancelled) setAllBatches(rows || []); })
+      .catch(() => { if (!cancelled) setAllBatches([]); });
+    return () => { cancelled = true; };
+  }, [gender, items]);
+
+  const batchesByItem = useMemo(() => {
+    const map = new Map();
+    allBatches.forEach((batch) => {
+      const list = map.get(batch.itemId) || [];
+      list.push(batch);
+      map.set(batch.itemId, list);
+    });
+    return map;
+  }, [allBatches]);
+
+  // Load the open batches whenever the stock-out item changes, and preselect the oldest so the
+  // common case (draw from the earliest batch) needs no extra click.
+  useEffect(() => {
+    if (activeTab !== 'out' || !movement.itemId) {
+      setBatches([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setLoadingBatches(true);
+    adminDataService
+      .getInventoryBatches({ itemId: movement.itemId, wing: gender })
+      .then((rows) => {
+        if (cancelled) return;
+        const list = rows || [];
+        setBatches(list);
+        setMovement((prev) => {
+          if (prev.sourceBatchId && list.some((batch) => batch.id === prev.sourceBatchId)) return prev;
+          return { ...prev, sourceBatchId: list[0]?.id || '' };
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setBatches([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBatches(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, movement.itemId, gender]);
+
   // Filter ledger transactions dynamically to avoid cross-item stale displays
   const currentLedgerTransactions = useMemo(() => {
     if (!historyItem) return [];
@@ -444,8 +641,22 @@ export default function Inventory() {
     const item = items.find((row) => row.id === movement.itemId);
     if (!item) return setMessage('Please select an item.');
     if (money(movement.quantity).lessThanOrEqualTo(0)) return setMessage('Quantity must be greater than zero.');
-    if (activeTab === 'out' && money(movement.quantity).greaterThan(money(item.currentStockQty))) {
-      return setMessage(`Only ${formatNumber(item.currentStockQty)} ${item.unit} is available.`);
+    // A stock-out is drawn from one batch and costed at that batch's rate, so it is limited by
+    // that batch rather than by the item total. To take more, record a second stock-out
+    // against another batch.
+    if (activeTab === 'out') {
+      if (!movement.sourceBatchId) {
+        return setMessage('Select which batch this stock-out is taken from.');
+      }
+      if (!selectedBatch) {
+        return setMessage('The selected batch is no longer available. Reselect the item.');
+      }
+      if (money(movement.quantity).greaterThan(money(selectedBatch.remainingQuantity))) {
+        return setMessage(
+          `${selectedBatch.label} only has ${formatNumber(selectedBatch.remainingQuantity)} ${item.unit}. `
+          + 'Record a separate stock-out against another batch for the remainder.',
+        );
+      }
     }
     const isStockInOrNonStock = activeTab === 'in' || activeTab === 'non-stock';
     if (isStockInOrNonStock) {
@@ -464,6 +675,7 @@ export default function Inventory() {
         mealPeriod: activeTab === 'in' ? null : movement.mealPeriod,
         quantity: Number(movement.quantity),
         totalPrice: isStockInOrNonStock ? Number(movement.totalPrice) : null,
+        sourceBatchId: activeTab === 'out' ? movement.sourceBatchId : null,
         note: null,
       });
       setMovement(emptyMovement);
@@ -619,7 +831,44 @@ export default function Inventory() {
               <label><span>Date</span><div className={activeTab === 'non-stock' ? 'is-tinted' : ''}><CalendarDays size={17} /><input type="date" value={movement.date} disabled={saving} onChange={(e) => setMovement({ ...movement, date: e.target.value })} onClick={(e) => { if (typeof e.target.showPicker === 'function') { try { e.target.showPicker(); } catch (err) { console.error(err); } } }} /><b>{formatDisplayDate(movement.date)}</b></div></label>
               {activeTab !== 'in' && <label><span>Meal</span><select value={movement.mealPeriod} disabled={saving} onChange={(e) => setMovement({ ...movement, mealPeriod: e.target.value })}><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option></select></label>}
               <label className="stock-item-field"><span>Item</span><ItemPicker items={pickerItems} value={movement.itemId} onChange={(itemId) => setMovement({ ...movement, itemId })} showRemaining={activeTab === 'out'} disabled={saving} /></label>
+              {activeTab === 'out' && (
+                <label className="stock-batch-field">
+                  <span>Batch</span>
+                  <BatchPicker
+                    batches={batches}
+                    value={movement.sourceBatchId}
+                    onChange={(sourceBatchId) => setMovement({ ...movement, sourceBatchId })}
+                    disabled={saving}
+                    loading={loadingBatches}
+                    hasItem={Boolean(movement.itemId)}
+                  />
+                </label>
+              )}
               <label><span>Quantity</span><input type="number" min="0" step="0.0001" placeholder={activeTab === 'non-stock' ? 'eg: 100' : 'eg: 10'} value={movement.quantity} disabled={saving} onChange={(e) => setMovement({ ...movement, quantity: e.target.value })} /></label>
+              {activeTab === 'out' && selectedBatch && (
+                <div className="stock-calc-preview" style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  gap: '0.2rem',
+                  height: '46px',
+                  padding: '0 1rem',
+                  background: '#f8fafc',
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: '7px',
+                  fontSize: '0.85rem',
+                  color: '#475569',
+                  minWidth: '200px'
+                }}>
+                  <span style={{ fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, color: '#64748b' }}>Cost At Batch Rate</span>
+                  <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                    ৳{formatNumber(Number(movement.quantity || 0) * Number(selectedBatch.rate || 0))}{' '}
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'normal' }}>
+                      ({formatNumber(selectedBatch.rate)}/{selectedBatch.unit})
+                    </span>
+                  </strong>
+                </div>
+              )}
               {(activeTab === 'in' || activeTab === 'non-stock') && (
                 <>
                   <label>
@@ -699,8 +948,33 @@ export default function Inventory() {
                     </>
                   ) : (
                     <>
-                      <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Avg Price</th></tr></thead>
-                      <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => <tr key={item.id} onClick={() => openHistoryModal(item)}><td>{item.name}</td><td>{formatNumber(item.currentStockQty)}</td><td>{item.unit.toUpperCase()}</td><td>{formatNumber(item.currentWac)}</td></tr>)}</tbody>
+                      <thead><tr><th>Name</th><th>Qty</th><th>Unit</th><th>Rate</th></tr></thead>
+                      <tbody style={{ cursor: 'pointer' }}>{summaryItems.map((item) => {
+                        // A single lot would just repeat the item row verbatim, so only break
+                        // an item out into batches once it actually holds more than one.
+                        const allItemBatches = batchesByItem.get(item.id) || [];
+                        const itemBatches = allItemBatches.length > 1 ? allItemBatches : [];
+                        return (
+                          <Fragment key={item.id}>
+                            <tr onClick={() => openHistoryModal(item)}>
+                              <td>{item.name}</td>
+                              <td>{formatNumber(item.currentStockQty)}</td>
+                              <td>{item.unit.toUpperCase()}</td>
+                              {/* Item-level figure is a blended valuation only; each batch below
+                                  carries the rate a stock-out is actually costed at. */}
+                              <td>{itemBatches.length > 1 ? <span style={{ color: '#64748b' }}>{formatNumber(item.currentWac)} avg</span> : formatNumber(item.currentWac)}</td>
+                            </tr>
+                            {itemBatches.map((batch) => (
+                              <tr key={batch.id} className="stock-batch-row" onClick={() => openHistoryModal(item)}>
+                                <td><span className="stock-batch-chip">{batch.label}</span></td>
+                                <td>{formatNumber(batch.remainingQuantity)}</td>
+                                <td>{batch.unit.toUpperCase()}</td>
+                                <td className="stock-batch-rate">{formatNumber(batch.rate)}</td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        );
+                      })}</tbody>
                     </>
                   )}
                 </table>

@@ -1918,6 +1918,243 @@ button {
   background: #94a3b8;
 }
 
+/* ── Batch picker ───────────────────────────────────────────────────────────
+   Which lot a stock-out is drawn from. Each option leads with the rate that
+   will be charged and how much of the lot is left, since those decide the pick. */
+.stock-batch-field>div {
+  width: 268px !important;
+}
+
+.stock-batch-picker {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  padding: 0 !important;
+}
+
+.stock-batch-picker.is-disabled {
+  background: #f8fafc;
+}
+
+.stock-batch-trigger {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  min-width: 0;
+  padding: 0 .8rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.stock-batch-trigger:disabled {
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+.stock-batch-value {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.stock-batch-value-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  text-align: left;
+  min-width: 0;
+}
+
+.stock-batch-value-meta>b {
+  font-size: .84rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.stock-batch-value-meta>em {
+  font-size: .74rem;
+  font-style: normal;
+  color: #64748b;
+}
+
+.stock-batch-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .86rem;
+  color: #94a3b8;
+}
+
+.stock-batch-chip {
+  flex: 0 0 auto;
+  padding: .2rem .5rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #e0f2fe, #ede9fe);
+  color: #3730a3;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.stock-batch-caret {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  transition: transform .25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stock-batch-picker.is-open .stock-batch-caret {
+  transform: rotate(180deg);
+  color: #009b72;
+}
+
+.stock-batch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 60;
+  display: grid;
+  gap: .35rem;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: .4rem;
+  border: 1px solid rgba(225, 229, 235, .8);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .97);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, .16);
+  transform-origin: top center;
+  animation: slideFadeIn .22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.stock-batch-option {
+  display: grid;
+  gap: .38rem;
+  width: 100%;
+  padding: .55rem .6rem;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0;
+  animation: batchOptionIn .26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+@keyframes batchOptionIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stock-batch-option.is-highlighted {
+  background: #f0fdf9;
+  border-color: #99e3cd;
+  transform: translateX(2px);
+}
+
+.stock-batch-option.is-selected .stock-batch-chip {
+  background: linear-gradient(135deg, #009b72, #0ea5e9);
+  color: #fff;
+}
+
+.stock-batch-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+.stock-batch-option-rate {
+  font-size: .92rem;
+  font-weight: 750;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.stock-batch-option-rate>small {
+  font-size: .7rem;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.stock-batch-bar {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: #eef2f6;
+  overflow: hidden;
+}
+
+.stock-batch-bar>i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #009b72, #34d399);
+  transition: width .35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stock-batch-option-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  font-size: .74rem;
+  color: #64748b;
+}
+
+.stock-batch-option-meta b {
+  color: #0f172a;
+  font-weight: 650;
+}
+
+.stock-batch-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stock-batch-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stock-batch-menu::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+/* Batch rows nested under their item in the stock summary. */
+.stock-batch-row>td {
+  padding-top: .3rem !important;
+  padding-bottom: .3rem !important;
+  background: #f8fafc;
+  font-size: .82rem;
+}
+
+.stock-batch-row td:first-child {
+  padding-left: 1.4rem !important;
+  color: #475569;
+}
+
+.stock-batch-row .stock-batch-rate {
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .stock-item-menu button {
   display: flex;
   width: 100%;

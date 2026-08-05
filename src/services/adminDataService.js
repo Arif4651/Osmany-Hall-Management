@@ -7,6 +7,11 @@ export const adminDataService = {
   updateInventoryItem: async (id, payload) => apiRequest(`/inventory/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteInventoryItem: async (id) => apiRequest(`/inventory/items/${id}`, { method: 'DELETE' }),
   forceDeleteInventoryItem: async (id) => apiRequest(`/inventory/items/${id}/force`, { method: 'DELETE' }),
+  // Open stock-in batches for an item, oldest first. Labels are positional and renumber as
+  // batches are used up, so always send `id` back on a stock-out, never the label.
+  getInventoryBatches: async ({ itemId, wing, includeEmpty = false }) => apiRequest(`/inventory/items/${itemId}/batches${toQueryString({ wing, includeEmpty })}`),
+  // Open batches for every stored item in the wing, in one request.
+  getAllInventoryBatches: async (wing) => apiRequest(`/inventory/batches${toQueryString({ wing })}`),
   getInventoryLedger: async ({ itemId, from, to, wing }) => apiRequest(`/inventory/transactions${toQueryString({ itemId, from, to, wing })}`),
   createInventoryMovement: async (payload) => apiRequest('/inventory/transactions', { method: 'POST', body: JSON.stringify(payload) }),
   updateInventoryMovement: async (id, payload) => apiRequest(`/inventory/transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
