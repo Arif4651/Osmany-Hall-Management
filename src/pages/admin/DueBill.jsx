@@ -6,7 +6,7 @@ import { FileSpreadsheet, FileText, Printer } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
-import BillingPeriodPicker from '../../components/financial/BillingPeriodPicker';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
@@ -216,7 +216,16 @@ export default function DueBill() {
       {message && <div className="student-message student-message-success">{message}</div>}
       {error && <div className="student-message student-message-error">{error}</div>}
       
-      <BillingPeriodPicker value={period} onChange={setPeriod} />
+      <div className="period-picker-row">
+        <MonthYearPicker
+          month={period.month}
+          year={period.year}
+          minYear={now.getFullYear() - 3}
+          maxYear={now.getFullYear() + 3}
+          onChange={setPeriod}
+          label="Billing period"
+        />
+      </div>
       <div className="wing-filter-bar">
         <strong>{gender} Wing Dues</strong>
         {user?.role === 'super_admin' ? (

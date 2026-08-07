@@ -5,6 +5,7 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
 
 const now = new Date();
@@ -113,28 +114,17 @@ export default function Payments() {
             ))}
           </select>
         </label>
-        <label>
-          Billing Month
-          <select
-            value={form.billingMonth}
-            onChange={(e) => setForm({ ...form, billingMonth: Number(e.target.value) })}
-          >
-            {months.map((month) => (
-              <option key={month.value} value={month.value}>{month.label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Billing Year
-          <select
-            value={form.billingYear}
-            onChange={(e) => setForm({ ...form, billingYear: Number(e.target.value) })}
-          >
-            {years.map((year) => (
-              <option key={year} value={year}>{year}</option>
-            ))}
-          </select>
-        </label>
+        <div className="payment-period-field">
+          <span>Billing Period</span>
+          <MonthYearPicker
+            month={form.billingMonth}
+            year={form.billingYear}
+            minYear={years[0]}
+            maxYear={years[years.length - 1]}
+            onChange={({ month, year }) => setForm({ ...form, billingMonth: month, billingYear: year })}
+            label="Billing period"
+          />
+        </div>
         <label>
           Amount
           <input

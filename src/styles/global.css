@@ -96,8 +96,10 @@ button {
 .app-main {
   padding: 1.5rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 1.2rem;
+  min-width: 0;
 }
 
 .app-footer {
@@ -652,7 +654,9 @@ button {
 .page-section {
   padding: 1rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.82rem;
+  min-width: 0;
 }
 
 .section-header {
@@ -2798,7 +2802,7 @@ button {
     padding-right: 1rem;
   }
 
-  .header-actions {
+  .top-header>.header-actions {
     display: none;
   }
 
@@ -3472,7 +3476,9 @@ button {
 /* Admin meal management */
 .admin-meal-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
+  min-width: 0;
 }
 
 .admin-meal-header,
@@ -3747,6 +3753,7 @@ button {
   padding: 1.25rem;
   background: #fff;
   box-shadow: var(--shadow-sm);
+  min-width: 0;
 }
 
 .admin-meal-count-grid {
@@ -4247,6 +4254,7 @@ button {
 .admin-meal-table-wrap {
   margin-top: 1rem;
   overflow-x: auto;
+  max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -4854,93 +4862,6 @@ button {
   color: #9f2d2d;
 }
 
-.billing-period-picker {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid var(--border);
-  border-radius: .9rem;
-  padding: 1rem 1.1rem;
-  background: linear-gradient(135deg, #f8fbff, #eef4ff);
-  box-shadow: 0 5px 14px rgba(16, 38, 84, .05);
-}
-
-.billing-period-heading,
-.billing-period-controls,
-.billing-year-control>div {
-  display: flex;
-  align-items: center;
-}
-
-.billing-period-heading {
-  gap: .7rem;
-}
-
-.billing-period-heading>div,
-.billing-period-controls label,
-.billing-year-control {
-  display: grid;
-  gap: .25rem;
-}
-
-.billing-period-heading span,
-.billing-period-controls span,
-.billing-year-control>span {
-  color: var(--muted);
-  font-size: .74rem;
-  font-weight: 650;
-}
-
-.billing-period-icon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  border-radius: .65rem;
-  background: #303090;
-  color: #fff !important;
-}
-
-.billing-period-controls {
-  gap: .7rem;
-  flex-wrap: wrap;
-}
-
-.billing-period-controls select,
-.billing-current-button {
-  min-height: 38px;
-  border: 1px solid var(--border);
-  border-radius: .5rem;
-  padding: .45rem .65rem;
-  background: #fff;
-}
-
-.billing-year-control>div {
-  gap: .55rem;
-  min-height: 38px;
-  border: 1px solid var(--border);
-  border-radius: .5rem;
-  padding: 0 .3rem;
-  background: #fff;
-}
-
-.billing-year-control button {
-  display: grid;
-  border: 0;
-  padding: .2rem;
-  background: transparent;
-  color: #303090;
-  cursor: pointer;
-}
-
-.billing-current-button {
-  align-self: end;
-  color: #303090;
-  font-weight: 650;
-  cursor: pointer;
-}
-
 .payment-review-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -4973,9 +4894,16 @@ button {
 .daily-cost-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: .62rem;
   flex-wrap: wrap;
+}
+
+/* flex-basis 0 keeps the title on the icon's line at every width (an `auto`
+   basis makes the long subtitle wrap the whole block onto its own row) while
+   still pushing the actions hard right. */
+.daily-cost-header .header-title {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .daily-cost-header .header-actions,
@@ -4986,11 +4914,7 @@ button {
 }
 
 .btn-export,
-.select-gender,
-.daily-cost-month-picker,
-.month-picker-core,
-.month-shift-button,
-.month-current-button {
+.select-gender {
   min-height: 42px;
   border: 1px solid var(--border);
   border-radius: .55rem;
@@ -5002,67 +4926,241 @@ button {
   color: #334766;
 }
 
-.daily-cost-month-picker {
+/* ---- Month + year period picker ---------------------------------------- */
+
+.period-picker {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: .45rem;
-  padding: .35rem;
-  box-shadow: 0 8px 22px rgba(16, 38, 84, .05);
+  gap: .2rem;
+  padding: .28rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #f6f9ff);
+  box-shadow: 0 6px 18px rgba(16, 38, 84, .07), inset 0 1px 0 #fff;
 }
 
-.month-picker-core {
-  display: inline-flex;
-  align-items: center;
-  gap: .4rem;
-  padding: 0 .55rem;
-  border-color: #d6e3f5;
-  background: linear-gradient(180deg, #ffffff, #f8fbff);
+/* Match the app-wide focus ring instead of the harsh UA default. */
+.period-picker button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, .5);
+  outline-offset: 2px;
 }
 
-.month-picker-icon {
-  display: grid;
-  place-items: center;
-  color: #5b6b84;
-}
-
-.month-picker-select {
-  min-width: 120px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #173264;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.month-picker-select.year {
-  min-width: 84px;
-}
-
-.month-shift-button,
-.month-current-button {
+.period-picker-step {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
   color: #2459a9;
   cursor: pointer;
-  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
-.month-shift-button {
-  width: 42px;
+.period-picker-step:hover:not(:disabled) {
+  background: #e8f0ff;
+  color: #173264;
 }
 
-.month-current-button {
-  padding: 0 .75rem;
+.period-picker-step:disabled {
+  color: #b7c3d6;
+  cursor: not-allowed;
+}
+
+.period-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  /* Enough room for the longest month + year ("September 2026") so the value
+     never ellipsises when the picker sits inside a narrow form or filter row.
+     Relaxed back to 0 on phones, where the picker spans the whole row. */
+  min-width: 11.5rem;
+  height: 40px;
+  padding: 0 .7rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #173264;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.period-picker-trigger:hover {
+  background: #eff4ff;
+}
+
+.period-picker-trigger.is-open {
+  border-color: #bdd2f5;
+  background: #eaf1ff;
+  box-shadow: 0 0 0 3px rgba(48, 48, 144, .1);
+}
+
+.period-picker-trigger-icon {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.period-picker-value {
+  display: grid;
+  gap: .05rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.period-picker-value small {
+  color: var(--muted);
+  font-size: .6rem;
   font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.month-shift-button:hover,
-.month-current-button:hover {
-  background: #f4f8ff;
-  box-shadow: 0 6px 16px rgba(16, 38, 84, .08);
+.period-picker-value strong {
+  overflow: hidden;
+  color: #173264;
+  font-size: .92rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.period-picker-caret {
+  flex-shrink: 0;
+  color: #7387a5;
+  transition: transform var(--transition-fast);
+}
+
+.period-picker-trigger.is-open .period-picker-caret {
+  transform: rotate(180deg);
+}
+
+.period-picker-today {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+  height: 34px;
+  margin-left: .15rem;
+  padding: 0 .8rem;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3a3ab0;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.period-picker-today:hover:not(:disabled) {
+  background: #dfe4ff;
+}
+
+.period-picker-today:disabled {
+  background: #f1f5f9;
+  color: #a6b3c6;
+  cursor: default;
+}
+
+.period-picker-panel {
+  position: absolute;
+  top: calc(100% + .5rem);
+  right: 0;
+  z-index: 40;
+  width: 268px;
+  padding: .85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow);
+  animation: fadeRise 180ms ease;
+}
+
+.period-picker-year {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .7rem;
+  padding-bottom: .7rem;
+  border-bottom: 1px solid #eef2f8;
+}
+
+.period-picker-year strong {
+  color: #173264;
+  font-size: 1.02rem;
+  font-weight: 750;
+  letter-spacing: .02em;
+}
+
+.period-picker-year button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #fff;
+  color: #2459a9;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.period-picker-year button:hover:not(:disabled) {
+  border-color: #bdd2f5;
+  background: #eff4ff;
+}
+
+.period-picker-year button:disabled {
+  color: #c3ccdb;
+  cursor: not-allowed;
+}
+
+.period-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .35rem;
+}
+
+.period-picker-month {
+  position: relative;
+  padding: .55rem .25rem;
+  border: 1px solid transparent;
+  border-radius: .6rem;
+  background: #f5f8fd;
+  color: #43536b;
+  font-size: .82rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.period-picker-month:hover {
+  background: #e6eeff;
+  color: #173264;
   transform: translateY(-1px);
+}
+
+/* Ring marks the real-world current month; fill marks the selection. */
+.period-picker-month.is-today {
+  border-color: #9dc6b6;
+  color: #08775a;
+}
+
+.period-picker-month.is-selected,
+.period-picker-month.is-selected:hover {
+  border-color: transparent;
+  background: linear-gradient(135deg, #303090, #2459a9);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(36, 89, 169, .3);
 }
 
 .btn-export {
@@ -5195,7 +5293,13 @@ button {
 }
 
 .daily-cost-table-card {
-  overflow: visible;
+  /* Contain the wide report inside its own card so the page (and the
+     fixed sidebar on mobile) never gets pushed sideways. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: .9rem;
   background: #fff;
@@ -5312,11 +5416,6 @@ button {
 }
 
 @media (max-width: 760px) {
-  .billing-period-picker {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .payment-review-summary {
     grid-template-columns: 1fr;
   }
@@ -7449,5 +7548,443 @@ button {
   /* If actions-cell is empty (i.e. has no button children), don't display it */
   .payment-verification-table td.actions-cell:empty {
     display: none !important;
+  }
+}
+
+/* =========================================================================
+   Responsiveness: Student View Menu + Daily Cost
+   Goal: these pages must behave like Meal Snapshot - the document itself
+   never scrolls sideways, so the fixed mobile sidebar is never clipped and
+   no empty gutter appears to the right of the content.
+   ========================================================================= */
+
+/* --- Shared containment guards ------------------------------------------ */
+/* NOTE: deliberately no `overflow-x: hidden` on html/body - that turns the
+   body into a scroll container and kills the sticky top header and sticky
+   table headers. Overflow is contained at the card level instead. */
+.app-main>* {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* --- Daily Cost --------------------------------------------------------- */
+
+/* Default: the card is the scroll container. A horizontally scrolling box
+   also becomes the scrollport for `position: sticky`, so the viewport-offset
+   sticky headers cannot work here - make them static and tell the user the
+   table swipes instead. */
+.daily-cost-table-card thead tr:first-child th,
+.daily-cost-table-card thead tr:nth-child(2) th {
+  position: static;
+  top: auto;
+}
+
+.daily-cost-scroll-hint {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: 0 0 .1rem;
+  color: var(--muted);
+  font-size: .76rem;
+  font-weight: 600;
+}
+
+/* Wide enough for the full 1100px report: hand scrolling back to the page
+   and restore the two sticky header rows exactly as before. */
+@media (min-width: 1500px) {
+  .daily-cost-table-card {
+    overflow: visible;
+  }
+
+  .daily-cost-table-card thead tr:first-child th {
+    position: sticky;
+    top: 4.35rem;
+  }
+
+  .daily-cost-table-card thead tr:nth-child(2) th {
+    position: sticky;
+    top: 7.1rem;
+  }
+
+  .daily-cost-scroll-hint {
+    display: none;
+  }
+}
+
+/* Same deal earlier when the sidebar is collapsed to 92px. */
+@media (min-width: 1280px) {
+  .app-shell.is-sidebar-collapsed .daily-cost-table-card {
+    overflow: visible;
+  }
+
+  .app-shell.is-sidebar-collapsed .daily-cost-table-card thead tr:first-child th {
+    position: sticky;
+    top: 4.35rem;
+  }
+
+  .app-shell.is-sidebar-collapsed .daily-cost-table-card thead tr:nth-child(2) th {
+    position: sticky;
+    top: 7.1rem;
+  }
+
+  .app-shell.is-sidebar-collapsed .daily-cost-scroll-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Icon + title stay on one line; the controls wrap to a full-width row. */
+  .daily-cost-header>.header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: .5rem;
+  }
+
+  .period-picker {
+    min-width: 0;
+  }
+}
+
+/* Only on phones does the picker claim the whole row - at tablet widths it
+   keeps its natural size instead of stretching into a near-empty bar. */
+@media (max-width: 600px) {
+  .period-picker {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .period-picker-trigger {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Wrappers that host the picker give it the full row on phones. */
+  .payment-period-field .period-picker,
+  .period-picker-row .period-picker,
+  .filter-row .period-picker {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .daily-cost-table-card table {
+    /* Tighter type + padding shrinks the report so far less swiping is
+       needed, while every column stays readable. */
+    min-width: 780px;
+  }
+
+  .daily-cost-table-card th,
+  .daily-cost-table-card td {
+    padding: .5rem .45rem;
+    font-size: .8rem;
+  }
+
+  .daily-cost-table-card th {
+    font-size: .66rem;
+  }
+
+  .daily-cost-table-card .cell-student strong {
+    font-size: .88rem !important;
+  }
+
+  .daily-cost-option-badge {
+    font-size: .62rem;
+    padding: .1rem .3rem;
+  }
+
+  .table-date-cell .date-label {
+    font-size: .7rem;
+  }
+
+  .daily-cost-card {
+    min-height: 0;
+  }
+
+  .daily-cost-card .card-value {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .period-picker {
+    gap: .1rem;
+    padding: .25rem;
+  }
+
+  .period-picker-step {
+    width: 30px;
+    height: 30px;
+  }
+
+  .period-picker-trigger {
+    padding: 0 .45rem;
+    gap: .38rem;
+  }
+
+  .period-picker-today {
+    margin-left: 0;
+    padding: 0 .6rem;
+  }
+
+  .period-picker-today span {
+    display: none;
+  }
+
+  /* Anchor the panel to the whole picker once it spans the full row. */
+  .period-picker-panel {
+    left: 0;
+    right: 0;
+    width: auto;
+  }
+
+  .btn-export {
+    width: 38px;
+  }
+
+  .daily-cost-table-card table {
+    min-width: 720px;
+  }
+}
+
+/* --- Student View Menu -------------------------------------------------- */
+
+.student-view-menu-page .admin-meal-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.student-view-menu-page .admin-meal-table {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Tier 1 (<=900px, i.e. as soon as the sidebar becomes an overlay):
+   drop every inner minimum width so the Day + meal columns simply wrap to
+   fit the viewport - exactly how Meal Snapshot behaves. */
+@media (max-width: 900px) {
+  .student-view-menu-page .admin-meal-header>div {
+    flex-wrap: wrap;
+  }
+
+  .student-view-menu-page .admin-meal-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .75rem;
+  }
+
+  .student-view-menu-page .admin-meal-section-head .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .student-view-menu-page .admin-meal-table {
+    table-layout: fixed;
+  }
+
+  .student-view-menu-page .admin-meal-table th,
+  .student-view-menu-page .admin-meal-table td {
+    padding: .7rem .55rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .student-view-menu-page .admin-meal-table th:first-child,
+  .student-view-menu-page .admin-meal-table td:first-child {
+    width: 6rem;
+  }
+
+  .student-view-menu-page .meal-menu-cell {
+    min-width: 0;
+    gap: .3rem;
+  }
+}
+
+/* Tier 2 (<=600px): compact the typography so three meal columns stay
+   comfortably readable on a phone. */
+@media (max-width: 600px) {
+  .student-view-menu-page .admin-meal-menu-section {
+    padding: .9rem;
+  }
+
+  .student-view-menu-page .admin-meal-table th,
+  .student-view-menu-page .admin-meal-table td {
+    padding: .55rem .45rem;
+  }
+
+  .student-view-menu-page .admin-meal-table th {
+    font-size: .66rem;
+    letter-spacing: .02em;
+  }
+
+  .student-view-menu-page .admin-meal-table th:first-child,
+  .student-view-menu-page .admin-meal-table td:first-child {
+    width: 4.4rem;
+  }
+
+  .student-view-menu-page .admin-meal-table td:first-child strong {
+    font-size: .78rem;
+  }
+
+  .student-view-menu-page .meal-menu-cell {
+    gap: .25rem;
+  }
+
+  .student-view-menu-page .meal-menu-cell strong {
+    font-size: .76rem;
+    line-height: 1.3;
+  }
+
+  .student-view-menu-page .meal-menu-cell span {
+    font-size: .68rem;
+    line-height: 1.3;
+  }
+
+  .student-view-menu-page .meal-empty {
+    font-size: .7rem;
+  }
+
+  .student-view-menu-page .admin-meal-header h1 {
+    font-size: 1.3rem;
+  }
+}
+
+/* Tier 3 (<=400px): last squeeze for the smallest phones. */
+@media (max-width: 400px) {
+  .student-view-menu-page .admin-meal-menu-section {
+    padding: .7rem;
+  }
+
+  .student-view-menu-page .admin-meal-table th,
+  .student-view-menu-page .admin-meal-table td {
+    padding: .45rem .3rem;
+  }
+
+  .student-view-menu-page .admin-meal-table th:first-child,
+  .student-view-menu-page .admin-meal-table td:first-child {
+    width: 3.6rem;
+  }
+}
+
+/* Period picker used on Billing / Payments alongside the Daily Cost report. */
+.period-picker-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.payment-period-field {
+  display: grid;
+  align-content: start;
+  gap: .35rem;
+  min-width: 0;
+}
+
+.payment-period-field>span {
+  color: var(--muted);
+  font-size: .82rem;
+  font-weight: 600;
+}
+
+.payment-period-field .period-picker {
+  justify-self: start;
+  max-width: 100%;
+}
+
+/* Inside the admin filter bar the picker sits among labelled fields, which
+   otherwise flex-shrink it until the month name truncates. */
+.filter-row .period-picker,
+.payment-period-field .period-picker {
+  flex-shrink: 0;
+  align-self: end;
+}
+
+
+/* =========================================================================
+   Student Management + DSW Subsidy containment
+   Both host a min-width table inside an `overflow-x: auto` wrapper, but their
+   grid ancestors defaulted to an auto (min-content) track, so the table
+   stretched the page instead of scrolling in place.
+   ========================================================================= */
+
+/* --- Student Management table ------------------------------------------- */
+
+.table-wrapper {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* `.sticky-page-table` forces `overflow: visible` so its headers can stick to
+   the page. Below the width where the 720px table fits, containment wins. */
+.table-wrapper.sticky-page-table {
+  overflow-x: auto !important;
+}
+
+.table-wrapper.sticky-page-table .data-table thead th {
+  position: static;
+  top: auto;
+}
+
+@media (min-width: 1150px) {
+  .table-wrapper.sticky-page-table {
+    overflow: visible !important;
+  }
+
+  .table-wrapper.sticky-page-table .data-table thead th {
+    position: sticky;
+    top: 4.35rem;
+  }
+}
+
+@media (min-width: 950px) {
+  .app-shell.is-sidebar-collapsed .table-wrapper.sticky-page-table {
+    overflow: visible !important;
+  }
+
+  .app-shell.is-sidebar-collapsed .table-wrapper.sticky-page-table .data-table thead th {
+    position: sticky;
+    top: 4.35rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .student-pagination-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: .7rem;
+  }
+
+  .student-pagination-row .inline-actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* --- DSW Subsidy panel --------------------------------------------------- */
+
+.billing-tab-content {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.applied-subsidies-section {
+  min-width: 0;
+}
+
+.applied-subsidies-section .table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 600px) {
+  .billing-control-footer,
+  .billing-control-footer.is-right {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+  }
+
+  .billing-control-footer .primary-action,
+  .billing-control-footer .danger-action {
+    flex: 1 1 100%;
   }
 }

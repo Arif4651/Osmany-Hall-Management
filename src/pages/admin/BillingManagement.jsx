@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
@@ -377,8 +378,14 @@ export default function BillingManagement() {
       {error && <div className="student-message student-message-error">{error}</div>}
 
       <section className="financial-card filter-row">
-        <label>Month<select value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en', { month: 'long' })}</option>)}</select></label>
-        <label>Year<input type="number" value={filters.year} onChange={(e) => setFilters({ ...filters, year: e.target.value })} /></label>
+        <MonthYearPicker
+          month={Number(filters.month)}
+          year={Number(filters.year)}
+          minYear={now.getFullYear() - 3}
+          maxYear={now.getFullYear() + 3}
+          onChange={({ month, year }) => setFilters({ ...filters, month, year })}
+          label="Billing period"
+        />
         <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option></select></label>
         <label>Wing<select value={user?.wing || filters.gender} disabled={Boolean(user?.wing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!user?.wing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
         <button className="primary-action" onClick={load} disabled={loading}>Generate</button>
@@ -387,7 +394,7 @@ export default function BillingManagement() {
         {user?.role === 'super_admin' && <button onClick={unlockPeriod}>Emergency Unlock</button>}
       </section>
 
-      <div className="billing-management-layout is-tabbed-card" style={{ gridTemplateColumns: '1fr', width: '100%', maxWidth: '800px', margin: '0 auto 1.5rem' }}>
+      <div className="billing-management-layout is-tabbed-card" style={{ gridTemplateColumns: 'minmax(0, 1fr)', width: '100%', maxWidth: '800px', margin: '0 auto 1.5rem' }}>
         <div className="financial-card billing-control-card" style={{ width: '100%', boxSizing: 'border-box' }}>
           <nav className="billing-tabs">
             <button

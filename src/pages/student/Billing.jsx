@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Receipt } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
-import BillingPeriodPicker from '../../components/financial/BillingPeriodPicker';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 import { formatCurrency } from '../../utils/formatters';
@@ -41,7 +41,16 @@ export default function Billing() {
 
       {error && <div className="student-message student-message-error">{error}</div>}
 
-      <BillingPeriodPicker value={period} onChange={setPeriod} />
+      <div className="period-picker-row">
+        <MonthYearPicker
+          month={period.month}
+          year={period.year}
+          minYear={now.getFullYear() - 3}
+          maxYear={now.getFullYear() + 3}
+          onChange={setPeriod}
+          label="Billing period"
+        />
+      </div>
 
       {isLoading && !bill ? (
         /* First-load skeleton */

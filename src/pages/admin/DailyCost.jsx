@@ -2,7 +2,8 @@ import { useMemo, useState, useEffect } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FileSpreadsheet, FileText, CalendarDays, ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
+import { FileSpreadsheet, FileText, CalendarDays, ChevronRight, LoaderCircle } from 'lucide-react';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import TableSkeleton from '../../components/ui/TableSkeleton';
@@ -11,7 +12,6 @@ import { formatCurrency } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 
 const now = new Date();
-const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function DailyCost() {
   useDocumentTitle('Daily Cost');
@@ -69,25 +69,6 @@ export default function DailyCost() {
 
   const getMealDisplayCost = (meal) => isStudentView ? meal.myCost : meal.perHead;
   const getRowDisplayTotal = (row) => isStudentView ? row.totalMyCost : row.totalPerHead;
-
-  const moveMonth = (direction) => {
-    setFilters((prev) => {
-      const nextDate = new Date(prev.year, prev.month - 1 + direction, 1);
-      return {
-        ...prev,
-        year: nextDate.getFullYear(),
-        month: nextDate.getMonth() + 1,
-      };
-    });
-  };
-
-  const jumpToCurrentMonth = () => {
-    setFilters((prev) => ({
-      ...prev,
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-    }));
-  };
 
   const flatRows = () => {
     const fmt = (amount) => `Tk ${Number(amount || 0).toFixed(2)}`;
@@ -265,7 +246,7 @@ export default function DailyCost() {
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
 
-      <div className="daily-cost-header" style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
+      <div className="daily-cost-header">
         <CalendarDays size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div className="header-title">
           <h1 style={{ margin: 0 }}>{isStudentView ? 'My Daily Cost' : 'Daily Cost'}</h1>
@@ -299,44 +280,13 @@ export default function DailyCost() {
             </select>
           )}
 
-          <div className="daily-cost-month-picker">
-            <button type="button" className="month-shift-button" onClick={() => moveMonth(-1)} aria-label="Previous month">
-              <ChevronLeft size={16} />
-            </button>
-            <div className="month-picker-core">
-              <div className="month-picker-icon">
-                <CalendarDays size={16} />
-              </div>
-              <select
-                className="month-picker-select"
-                value={filters.month}
-                onChange={(e) => setFilters((prev) => ({ ...prev, month: Number(e.target.value) }))}
-              >
-                {monthNames.map((name, index) => (
-                  <option key={name} value={index + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="month-picker-select year"
-                value={filters.year}
-                onChange={(e) => setFilters((prev) => ({ ...prev, year: Number(e.target.value) }))}
-              >
-                {availableYears.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button type="button" className="month-shift-button" onClick={() => moveMonth(1)} aria-label="Next month">
-              <ChevronRight size={16} />
-            </button>
-            <button type="button" className="month-current-button" onClick={jumpToCurrentMonth}>
-              Current
-            </button>
-          </div>
+          <MonthYearPicker
+            month={filters.month}
+            year={filters.year}
+            minYear={availableYears[0]}
+            maxYear={availableYears[availableYears.length - 1]}
+            onChange={(period) => setFilters((prev) => ({ ...prev, ...period }))}
+          />
 
           {isRefreshing ? (
             <div className="daily-cost-live-indicator">
@@ -413,7 +363,11 @@ export default function DailyCost() {
           </section>
 
           {report.rows.length > 0 && (
-            <section className="daily-cost-table-card">
+            <>
+              <p className="daily-cost-scroll-hint">
+                <ChevronRight size={13} /> Swipe the table sideways to see every column.
+              </p>
+              <section className="daily-cost-table-card">
               <table>
                 <thead>
                   <tr>
@@ -477,6 +431,7 @@ export default function DailyCost() {
                 </tfoot>
               </table>
             </section>
+            </>
           )}
         </>
       )}
