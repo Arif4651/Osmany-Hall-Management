@@ -5826,6 +5826,78 @@ button {
   text-align: center;
 }
 
+@media (max-width: 760px) {
+  .student-snapshot-table {
+    table-layout: fixed;
+  }
+
+  .student-snapshot-table th,
+  .student-snapshot-table td {
+    padding: .6rem .4rem;
+    vertical-align: middle;
+  }
+
+  .student-snapshot-table th {
+    font-size: .62rem;
+    letter-spacing: .02em;
+  }
+
+  .student-snapshot-table th:first-child,
+  .student-snapshot-table td:first-child {
+    width: 27%;
+    white-space: nowrap;
+    font-size: .74rem;
+  }
+
+  .student-snapshot-table th:not(:first-child),
+  .student-snapshot-table td:not(:first-child) {
+    width: 24.33%;
+  }
+
+  .snapshot-meal-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+  }
+
+  .snapshot-status-badge,
+  .snapshot-guest-badge {
+    max-width: 100%;
+    padding: .18rem .35rem;
+    font-size: .68rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 420px) {
+  .student-snapshot-table th,
+  .student-snapshot-table td {
+    padding: .55rem .28rem;
+  }
+
+  .student-snapshot-table th {
+    font-size: .56rem;
+  }
+
+  .student-snapshot-table th:first-child,
+  .student-snapshot-table td:first-child {
+    width: 29%;
+    font-size: .68rem;
+  }
+
+  .student-snapshot-table th:not(:first-child),
+  .student-snapshot-table td:not(:first-child) {
+    width: 23.66%;
+  }
+
+  .snapshot-status-badge,
+  .snapshot-guest-badge {
+    padding: .16rem .3rem;
+    font-size: .62rem;
+  }
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
