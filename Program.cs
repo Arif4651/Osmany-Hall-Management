@@ -175,13 +175,17 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+}
 
+// Migrating and seeding on every startup — not just in Development — so a freshly provisioned
+// production database gets its schema and its role/menu/permission tree without a manual step.
+// Both seeders are idempotent: DataSeeder short-circuits once users exist, and AccessControlSeeder
+// only backfills menus/grants that are missing, so re-running this on every deploy is safe.
+{
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<HallDbContext>();
     await db.Database.MigrateAsync();
     await scope.ServiceProvider.GetRequiredService<DataSeeder>().SeedAsync();
-    // Unconditional and idempotent: DataSeeder short-circuits once users exist, but the menu tree
-    // still has to pick up pages added by later deploys.
     await scope.ServiceProvider.GetRequiredService<AccessControlSeeder>().SeedAsync();
 }
 
