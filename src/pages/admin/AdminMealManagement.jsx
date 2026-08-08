@@ -12,6 +12,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import AdditionalItemsPanel from '../../components/admin/AdditionalItemsPanel';
+import { MENU_KEYS } from '../../services/permissionService';
 
 const tomorrowLocal = () => {
   const date = new Date();
@@ -60,7 +62,7 @@ function MealCell({ meal, onEdit }) {
 
 export default function AdminMealManagement() {
   useDocumentTitle('Meal Management');
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [selectedWing, setSelectedWing] = useState(() => user?.wing || 'Male');
 
   const {
@@ -821,6 +823,11 @@ export default function AdminMealManagement() {
           <label>Note<textarea rows="3" value={overrideForm.note} onChange={(event) => setOverrideForm({ ...overrideForm, note: event.target.value })} placeholder="Reason for this hall-wide override" disabled={saving} /></label>
         </form>
       </Modal>
+
+      {/* Optional consumables (tea and similar) — catalogue plus the counts that feed Others Bill.
+          Hidden entirely for a role that has not been granted this menu — currently that means
+          the male wing admin, until a super admin turns it on from Role Permissions. */}
+      {can(MENU_KEYS.adminAdditionalItems, 'view') ? <AdditionalItemsPanel /> : null}
     </div>
   );
 }

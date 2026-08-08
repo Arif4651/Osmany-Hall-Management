@@ -7,6 +7,7 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import useStudentMealModule from '../../hooks/useStudentMealModule';
+import AdditionalPreferencesPanel from '../../components/student/AdditionalPreferencesPanel';
 import { financialService } from '../../services/financialService';
 import { formatCutoffTimeLabel } from '../../constants/mealConfig';
 import { formatDate } from '../../utils/formatters';
@@ -626,6 +627,10 @@ export default function MealManagement() {
           onDelete={deleteGuestMeal}
         />
       </section>
+
+      {/* Per-date extras (tea and similar). Shows a full month so a student can mark many dates
+          at once; the cutoff that gates each row comes from the server with the month. */}
+      <AdditionalPreferencesPanel />
 
     </div>
   );

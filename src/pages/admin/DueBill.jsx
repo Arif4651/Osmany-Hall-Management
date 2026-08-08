@@ -20,6 +20,9 @@ export default function DueBill() {
   useDocumentTitle('Due Bill');
   const { user } = useAuth();
   const { invalidate } = useQueryCache();
+  // Due Bill is always wing-locked for a wing admin, regardless of cross-wing finance access
+  // (that access still applies on Payment Verification). Only a wing-less admin/super_admin picks.
+  const isWingLocked = Boolean(user?.wing);
   const [gender, setGender] = useState(() => user?.wing || 'Male');
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [editing, setEditing] = useState(null);
@@ -228,7 +231,7 @@ export default function DueBill() {
       </div>
       <div className="wing-filter-bar">
         <strong>{gender} Wing Dues</strong>
-        {user?.role === 'super_admin' ? (
+        {!isWingLocked ? (
           <div className="wing-switcher">
             {['Male', 'Female'].map((wing) => (
               <button

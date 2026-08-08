@@ -80,14 +80,11 @@ export default function DailyCost() {
       };
       return {
         Date: row.date,
-        'Breakfast Cost': formatCost(row.breakfast),
-        'B. Students': row.breakfast.students,
+        ...(isStudentView ? {} : { 'Breakfast Cost': formatCost(row.breakfast), 'B. Students': row.breakfast.students }),
         [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.breakfast)),
-        'Lunch Cost': formatCost(row.lunch),
-        'L. Students': row.lunch.students,
+        ...(isStudentView ? {} : { 'Lunch Cost': formatCost(row.lunch), 'L. Students': row.lunch.students }),
         [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.lunch)),
-        'Dinner Cost': formatCost(row.dinner),
-        'D. Students': row.dinner.students,
+        ...(isStudentView ? {} : { 'Dinner Cost': formatCost(row.dinner), 'D. Students': row.dinner.students }),
         [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.dinner)),
         [totalCostColumnLabel]: fmt(getRowDisplayTotal(row)),
       };
@@ -96,14 +93,11 @@ export default function DailyCost() {
     if (report && rowsData.length > 0) {
       rowsData.push({
         Date: 'TOTAL',
-        'Breakfast Cost': fmt(report.breakfast.cost),
-        'B. Students': report.breakfast.students,
+        ...(isStudentView ? {} : { 'Breakfast Cost': fmt(report.breakfast.cost), 'B. Students': report.breakfast.students }),
         [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.breakfast)),
-        'Lunch Cost': fmt(report.lunch.cost),
-        'L. Students': report.lunch.students,
+        ...(isStudentView ? {} : { 'Lunch Cost': fmt(report.lunch.cost), 'L. Students': report.lunch.students }),
         [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.lunch)),
-        'Dinner Cost': fmt(report.dinner.cost),
-        'D. Students': report.dinner.students,
+        ...(isStudentView ? {} : { 'Dinner Cost': fmt(report.dinner.cost), 'D. Students': report.dinner.students }),
         [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.dinner)),
         [totalCostColumnLabel]: fmt(getMealDisplayCost(report.grandTotal)),
       });
@@ -372,20 +366,20 @@ export default function DailyCost() {
                 <thead>
                   <tr>
                     <th rowSpan={2}>DATE</th>
-                    <th colSpan={3} className="th-breakfast">BREAKFAST</th>
-                    <th colSpan={3} className="th-lunch">LUNCH</th>
-                    <th colSpan={3} className="th-dinner">DINNER</th>
+                    <th colSpan={isStudentView ? 1 : 3} className="th-breakfast">BREAKFAST</th>
+                    <th colSpan={isStudentView ? 1 : 3} className="th-lunch">LUNCH</th>
+                    <th colSpan={isStudentView ? 1 : 3} className="th-dinner">DINNER</th>
                     <th rowSpan={2} className="th-total">TOTAL<br /><small style={{ fontWeight: 400, fontSize: '0.75em' }}>{costColumnLabel}</small></th>
                   </tr>
                   <tr>
-                    <th className="th-breakfast">Cost</th>
-                    <th className="th-breakfast">Students</th>
+                    {!isStudentView && <th className="th-breakfast">Cost</th>}
+                    {!isStudentView && <th className="th-breakfast">Students</th>}
                     <th className="th-breakfast">{costColumnLabel}</th>
-                    <th className="th-lunch">Cost</th>
-                    <th className="th-lunch">Students</th>
+                    {!isStudentView && <th className="th-lunch">Cost</th>}
+                    {!isStudentView && <th className="th-lunch">Students</th>}
                     <th className="th-lunch">{costColumnLabel}</th>
-                    <th className="th-dinner">Cost</th>
-                    <th className="th-dinner">Students</th>
+                    {!isStudentView && <th className="th-dinner">Cost</th>}
+                    {!isStudentView && <th className="th-dinner">Students</th>}
                     <th className="th-dinner">{costColumnLabel}</th>
                   </tr>
                 </thead>
@@ -400,14 +394,14 @@ export default function DailyCost() {
                             <span className="date-label">{dateLabel}</span>
                           </div>
                         </td>
-                        {renderCostCell(row.breakfast, 'cell-breakfast')}
-                        {renderStudentsCell(row.breakfast)}
+                        {!isStudentView && renderCostCell(row.breakfast, 'cell-breakfast')}
+                        {!isStudentView && renderStudentsCell(row.breakfast)}
                         {renderPerHeadCell(row.breakfast, 'cell-breakfast')}
-                        {renderCostCell(row.lunch, 'cell-lunch')}
-                        {renderStudentsCell(row.lunch)}
+                        {!isStudentView && renderCostCell(row.lunch, 'cell-lunch')}
+                        {!isStudentView && renderStudentsCell(row.lunch)}
                         {renderPerHeadCell(row.lunch, 'cell-lunch')}
-                        {renderCostCell(row.dinner, 'cell-dinner')}
-                        {renderStudentsCell(row.dinner)}
+                        {!isStudentView && renderCostCell(row.dinner, 'cell-dinner')}
+                        {!isStudentView && renderStudentsCell(row.dinner)}
                         {renderPerHeadCell(row.dinner, 'cell-dinner')}
                         {renderRowTotalPerHeadCell(row)}
                       </tr>
@@ -417,14 +411,14 @@ export default function DailyCost() {
                 <tfoot>
                   <tr className="table-total-row">
                     <td style={{ fontWeight: '700', color: '#1e293b' }}>TOTAL</td>
-                    <td className="cell-student">-</td>
-                    <td className="cell-student">-</td>
+                    {!isStudentView && <td className="cell-student">-</td>}
+                    {!isStudentView && <td className="cell-student">-</td>}
                     {renderFooterPerHeadCell(report.breakfast, 'cell-breakfast')}
-                    <td className="cell-student">-</td>
-                    <td className="cell-student">-</td>
+                    {!isStudentView && <td className="cell-student">-</td>}
+                    {!isStudentView && <td className="cell-student">-</td>}
                     {renderFooterPerHeadCell(report.lunch, 'cell-lunch')}
-                    <td className="cell-student">-</td>
-                    <td className="cell-student">-</td>
+                    {!isStudentView && <td className="cell-student">-</td>}
+                    {!isStudentView && <td className="cell-student">-</td>}
                     {renderFooterPerHeadCell(report.dinner, 'cell-dinner')}
                     {renderFooterGrandTotalCell(report.grandTotal)}
                   </tr>

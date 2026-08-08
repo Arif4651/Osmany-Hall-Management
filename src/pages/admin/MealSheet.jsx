@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Calendar, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Sparkles, Download } from 'lucide-react';
+import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,8 @@ import { todayLocal } from '../../utils/formatters';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { queryCache } from '../../services/queryCache';
 import TableSkeleton from '../../components/ui/TableSkeleton';
+import AdditionalItemsSheet from '../../components/admin/AdditionalItemsSheet';
+import { MENU_KEYS } from '../../services/permissionService';
 
 
 const defaultMealSheetDate = todayLocal();
@@ -39,10 +41,15 @@ const MealIndicator = ({ label, isOn }) => (
 
 export default function MealSheet() {
   useDocumentTitle('Meal Sheet');
-  const { user, role } = useAuth();
+  const { user, role, can } = useAuth();
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+  // Hidden for a role without this grant, same as the panels on Meal Management and Bill
+  // Management — currently the male wing admin by default.
+  const canSeeAdditional = can(MENU_KEYS.adminAdditionalItems, 'view');
 
   const [date, setDate] = useState(defaultMealSheetDate);
+  // 'sheet' = the regular per-student meal roster; 'additional' = who took tea/etc that date.
+  const [view, setView] = useState('sheet');
 
   // For wing admins the filter is permanently locked to their wing gender.
   // For super_admin/admin it starts as 'All' and can be changed via dropdown.
@@ -105,7 +112,6 @@ export default function MealSheet() {
     data,
     isLoading: loading,
     error: fetchError,
-    refresh: reload,
   } = useCachedFetch(cacheKey, fetcher, { ttl: 30_000 });
 
   const error = fetchError || '';
@@ -113,17 +119,6 @@ export default function MealSheet() {
   useEffect(() => {
     setPage(1);
   }, [date, genderFilter]);
-
-  const handleGenerate = () => {
-    if (isWingAdmin) {
-      queryCache.remove(`mealsheet-${date}-${user?.wing || 'Male'}`);
-    } else {
-      queryCache.remove(`mealsheet-${date}-All`);
-      queryCache.remove(`mealsheet-${date}-Male`);
-      queryCache.remove(`mealsheet-${date}-Female`);
-    }
-    reload();
-  };
 
   const formatGuestMeal = (row) => {
     const parts = [];
@@ -392,94 +387,63 @@ export default function MealSheet() {
 
   return (
     <div className="financial-page">
-      {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.2rem' }}>
-        <header style={{ margin: 0 }}>
-          <h1 style={{ margin: 0, fontSize: '1.6rem', color: '#152f62' }}>Meal Sheet</h1>
-          <p style={{ margin: '0.25rem 0 0 0', color: 'var(--muted)' }}>
-            {data?.date || date}
-          </p>
-        </header>
+      {/* Direct child of .financial-page, not wrapped in an extra flex row — that's what picks
+          up the shared title styling and the page's automatic section spacing. */}
+      <header>
+        <h1 style={{ fontSize: '1.6rem', color: '#152f62' }}>Meal Sheet</h1>
+        <p style={{ color: 'var(--muted)' }}>{data?.date || date}</p>
+      </header>
 
-        {/* Date generation controls */}
-        <div style={{ display: 'flex', gap: '0.62rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Calendar size={16} style={{ position: 'absolute', left: '0.75rem', color: 'var(--muted)' }} />
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              style={{
-                padding: '0.5rem 0.75rem 0.5rem 2.2rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border)',
-                background: '#ffffff',
-                color: 'var(--text)',
-                fontSize: '0.9rem',
-                outline: 'none',
-              }}
-            />
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleGenerate}
-            disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-          >
-            <Sparkles size={16} /> Generate
-          </button>
-
-          {/* Export dropdown / actions */}
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={exportExcel}
-              disabled={filteredRows.length === 0}
-              style={{ padding: '0.5rem 0.75rem' }}
-              title="Export to Excel"
-            >
-              <FileSpreadsheet size={16} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={exportCsv}
-              disabled={filteredRows.length === 0}
-              style={{ padding: '0.5rem 0.75rem' }}
-              title="Export to CSV"
-            >
-              <Download size={16} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={exportPdf}
-              disabled={filteredRows.length === 0}
-              style={{ padding: '0.5rem 0.75rem' }}
-              title="Export as PDF"
-            >
-              <FileText size={16} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handlePrint}
-              disabled={filteredRows.length === 0}
-              style={{ padding: '0.5rem 0.75rem' }}
-              title="Print"
-            >
-              <Printer size={16} />
-            </button>
-          </div>
+      {/* Same .wing-filter-bar row Due Bill / Payment Verification already use for their
+          controls — it stacks cleanly to one control per line under 700px, which the ad-hoc
+          flex row this replaced did not do reliably. */}
+      <div className="wing-filter-bar" style={{ flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <Calendar size={16} style={{ position: 'absolute', left: '0.75rem', color: 'var(--muted)' }} />
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={{
+              padding: '0.5rem 0.75rem 0.5rem 2.2rem',
+              borderRadius: '6px',
+              border: '1px solid var(--border)',
+              background: '#ffffff',
+              color: 'var(--text)',
+              fontSize: '0.9rem',
+              outline: 'none',
+              maxWidth: '100%',
+            }}
+          />
         </div>
+
+        {/* Switches which sheet the date above is applied to. Hidden for a role without
+            access to Additional Items, so the toggle itself never implies the feature. */}
+        {canSeeAdditional ? (
+          <div className="wing-switcher">
+            <button
+              type="button"
+              className={view === 'sheet' ? 'is-active' : ''}
+              onClick={() => setView('sheet')}
+            >
+              Meal Sheet
+            </button>
+            <button
+              type="button"
+              className={view === 'additional' ? 'is-active' : ''}
+              onClick={() => setView('additional')}
+            >
+              <Coffee size={14} style={{ marginRight: '0.3rem', verticalAlign: '-2px' }} />
+              Additional Items
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      {error && <div className="student-message student-message-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+      {error && <div className="student-message student-message-error">{error}</div>}
 
-      {/* Stats and filters container */}
+      {/* Stats and filters container — stays put across both views; only the roster beneath it,
+          and the export/print buttons that act on it, swap with the view. */}
       <section
         className="financial-card"
         style={{
@@ -496,7 +460,7 @@ export default function MealSheet() {
         }}
       >
         {/* Aggregated totals */}
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ background: '#eef2ff', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#3730a3', fontSize: '0.85rem', fontWeight: 'bold' }}>
             B <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{data?.breakfastCount ?? 0}</span>
           </span>
@@ -570,15 +534,70 @@ export default function MealSheet() {
                 color: 'var(--text)',
                 fontSize: '0.9rem',
                 outline: 'none',
-                width: '200px'
+                width: '200px',
+                maxWidth: '100%',
               }}
             />
           </div>
         </div>
       </section>
 
+      {/* The roster beneath the stats bar swaps between the two views. Keyed on `view` so React
+          remounts this subtree on toggle, which is what drives the fade/slide-in animation below
+          — no animation library needed for a two-state crossfade like this. */}
+      <div key={view} className="meal-sheet-view-fade">
+      {view === 'additional' && canSeeAdditional ? (
+        <AdditionalItemsSheet date={date} wing={activeWing} />
+      ) : (
+      <>
       {/* Main Table section */}
       <section className="financial-card meal-sheet-table-card">
+        {/* Scoped to this view's own filteredRows — switching to Additional Items swaps in that
+            view's own export/print row instead, so these buttons never act on the wrong data. */}
+        <div className="admin-meal-section-head" style={{ justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={exportExcel}
+              disabled={filteredRows.length === 0}
+              style={{ padding: '0.5rem 0.75rem' }}
+              title="Export to Excel"
+            >
+              <FileSpreadsheet size={16} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={exportCsv}
+              disabled={filteredRows.length === 0}
+              style={{ padding: '0.5rem 0.75rem' }}
+              title="Export to CSV"
+            >
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={exportPdf}
+              disabled={filteredRows.length === 0}
+              style={{ padding: '0.5rem 0.75rem' }}
+              title="Export as PDF"
+            >
+              <FileText size={16} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handlePrint}
+              disabled={filteredRows.length === 0}
+              style={{ padding: '0.5rem 0.75rem' }}
+              title="Print"
+            >
+              <Printer size={16} />
+            </button>
+          </div>
+        </div>
         {loading ? (
           <TableSkeleton rows={rowsPerPage} cols={6} />
         ) : (
@@ -677,7 +696,7 @@ export default function MealSheet() {
           gap: '1rem'
         }}>
           {/* Row selection dropdown */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)', flexWrap: 'wrap' }}>
             <span>Rows per page:</span>
             <select
               value={rowsPerPage}
@@ -756,6 +775,9 @@ export default function MealSheet() {
           </div>
         </div>
       )}
+      </>
+      )}
+      </div>
     </div>
   );
 }

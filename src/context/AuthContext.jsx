@@ -5,6 +5,7 @@ import {
   isSessionExpired,
 } from '../services/apiClient';
 import { queryCache } from '../services/queryCache';
+import { permissionService } from '../services/permissionService';
 
 // Stores only non-sensitive session metadata (user info + expiry).
 // The JWT itself lives in an HttpOnly cookie and is never accessible to JavaScript.
@@ -34,6 +35,11 @@ export function AuthProvider({ children }) {
     const storedSession = readStoredSession();
     return !hasUsableStoredSession(storedSession);
   });
+
+  // Grants are always fetched from the server, never persisted alongside the session — a super
+  // admin revoking access must take effect on the next load, not whenever localStorage expires.
+  const [permissions, setPermissions] = useState(null);
+  const [isPermissionsLoading, setIsPermissionsLoading] = useState(true);
 
   // Persist non-sensitive session metadata to localStorage so the user
   // appears logged-in across page refreshes without an immediate /auth/me round-trip.
@@ -92,6 +98,44 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // Reload grants whenever the signed-in identity changes.
+  const userId = session?.user?.id ?? null;
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!userId) {
+      setPermissions(null);
+      setIsPermissionsLoading(false);
+      return undefined;
+    }
+
+    setIsPermissionsLoading(true);
+    permissionService
+      .getMyPermissions()
+      .then((result) => {
+        if (isMounted) setPermissions(result);
+      })
+      .catch(() => {
+        // A failed load must not silently widen access — fall back to "nothing granted".
+        if (isMounted) setPermissions({ role: '', isSuperAdmin: false, permissions: [] });
+      })
+      .finally(() => {
+        if (isMounted) setIsPermissionsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
+
+  const refreshPermissions = useCallback(async () => {
+    try {
+      setPermissions(await permissionService.getMyPermissions());
+    } catch {
+      // Keep the previous grants rather than dropping the user to no-access on a transient error.
+    }
+  }, []);
+
   const authenticate = useCallback(async ({ email, password, allowedRole }) => {
     try {
       const response = await apiRequest('/auth/login', {
@@ -148,6 +192,36 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // menuKey -> { canView, canCreate, canEdit, canDelete }
+  const grantsByMenu = useMemo(() => {
+    const map = new Map();
+    for (const row of permissions?.permissions ?? []) {
+      map.set(row.menuKey, row);
+    }
+    return map;
+  }, [permissions]);
+
+  const isSuperAdmin = Boolean(permissions?.isSuperAdmin);
+
+  /**
+   * Whether the signed-in role may perform `action` on `menuKey`.
+   * Client-side gating only — every guarded endpoint re-checks server-side.
+   */
+  const can = useCallback(
+    (menuKey, action = 'view') => {
+      if (isSuperAdmin) return true;
+      const grant = grantsByMenu.get(menuKey);
+      if (!grant) return false;
+      switch (action) {
+        case 'create': return Boolean(grant.canCreate);
+        case 'edit': return Boolean(grant.canEdit);
+        case 'delete': return Boolean(grant.canDelete);
+        default: return Boolean(grant.canView);
+      }
+    },
+    [grantsByMenu, isSuperAdmin],
+  );
+
   const value = useMemo(
     () => ({
       isSessionLoading,
@@ -155,12 +229,22 @@ export function AuthProvider({ children }) {
       user: session?.user ?? null,
       role: session?.user?.role ?? null,
       mustChangePassword: Boolean(session?.user?.mustChangePassword),
+      isPermissionsLoading,
+      isSuperAdmin,
+      can,
+      // When true the financial screens offer a wing selector instead of locking to user.wing.
+      canChooseFinanceWing: Boolean(permissions?.canChooseFinanceWing),
+      permissions: permissions?.permissions ?? [],
+      refreshPermissions,
       loginStudent: ({ email, password }) => authenticate({ email, password, allowedRole: 'student' }),
       loginAdmin: ({ email, password }) => authenticate({ email, password, allowedRole: 'admin' }),
       changePassword,
       logout,
     }),
-    [session, isSessionLoading, authenticate, changePassword, logout],
+    [
+      session, isSessionLoading, authenticate, changePassword, logout,
+      isPermissionsLoading, isSuperAdmin, can, permissions, refreshPermissions,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

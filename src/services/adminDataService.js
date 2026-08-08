@@ -22,12 +22,24 @@ export const adminDataService = {
   getDswSubsidies: async ({ month, year, wing }) => apiRequest(`/billing/subsidies${toQueryString({ month, year, wing })}`),
   updateDswSubsidy: async (id, payload) => apiRequest(`/billing/subsidies/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteDswSubsidy: async (id) => apiRequest(`/billing/subsidies/${id}`, { method: 'DELETE' }),
-  getServiceBill: async ({ month, year }) => apiRequest(`/billing/service-bills${toQueryString({ month, year })}`),
-  deleteServiceBill: async ({ month, year }) => apiRequest(`/billing/service-bills${toQueryString({ month, year })}`, { method: 'DELETE' }),
+
+  // ── Additional meal items (Tea, Milk, …) ──────────────────────────────────
+  getAdditionalItems: async () => apiRequest('/meals/additional/items'),
+  createAdditionalItem: async (payload) => apiRequest('/meals/additional/items', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAdditionalItem: async (id, payload) => apiRequest(`/meals/additional/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteAdditionalItem: async (id) => apiRequest(`/meals/additional/items/${id}`, { method: 'DELETE' }),
+  // Roster of who took what on a given date — meant to sit beside getMealSheet.
+  getAdditionalSheet: async ({ date, wing }) => apiRequest(`/meals/additional/sheet${toQueryString({ date, wing })}`),
+
+  // ── Others Bill ───────────────────────────────────────────────────────────
+  getOthersBills: async ({ month, year, wing }) => apiRequest(`/billing/others-bills${toQueryString({ month, year, wing })}`),
+  previewOthersBill: async (payload) => apiRequest('/billing/others-bills/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  generateOthersBill: async (payload) => apiRequest('/billing/others-bills', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteOthersBill: async (id) => apiRequest(`/billing/others-bills/${id}`, { method: 'DELETE' }),
+  getServiceBill: async ({ month, year, wing }) => apiRequest(`/billing/service-bills${toQueryString({ month, year, wing })}`),
+  deleteServiceBill: async ({ month, year, wing }) => apiRequest(`/billing/service-bills${toQueryString({ month, year, wing })}`, { method: 'DELETE' }),
   recalculateBillingMonth: async ({ month, year }) => apiRequest(`/billing/subsidies/recalculate${toQueryString({ month, year })}`, { method: 'POST' }),
   saveServiceBill: async (payload) => apiRequest('/billing/service-bills', { method: 'PUT', body: JSON.stringify(payload) }),
-  closeBillingPeriod: async (payload) => apiRequest('/billing/periods/close', { method: 'POST', body: JSON.stringify(payload) }),
-  unlockBillingPeriod: async (payload) => apiRequest('/billing/periods/unlock', { method: 'POST', body: JSON.stringify(payload) }),
   getPayments: async ({ gender, status, search, page, pageSize }) => apiRequest(`/payments/admin${toQueryString({ gender, status, search, page, pageSize })}`),
   reviewPayment: async (id, action, approvedAmount = null) => apiRequest(`/payments/${id}/review`, {
     method: 'POST',

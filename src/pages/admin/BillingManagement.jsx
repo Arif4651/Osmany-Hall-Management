@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Calculator, HandCoins, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { Calculator, Coffee, HandCoins, RefreshCcw, ShieldAlert } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
@@ -10,26 +10,36 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
+import OthersBillPanel from '../../components/financial/OthersBillPanel';
+import { MENU_KEYS } from '../../services/permissionService';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 
 const now = new Date();
 const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All' };
-const headers = ['Student Name', 'Roll', 'Hall ID', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Due Bill', 'Total Bill', 'Status'];
+const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
+const tailHeaders = ['Due Bill', 'Total Bill', 'Status'];
 const emptySubsidyForm = { wing: 'Male', subsidyAmount: '', date: todayLocal(), mealPeriod: 'breakfast', notes: '' };
 
 const getAlign = (header) => {
-  if (['Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Due Bill', 'Total Bill'].includes(header)) return 'right';
+  if (['Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Others Bill', 'Due Bill', 'Total Bill'].includes(header)) return 'right';
   if (header === 'Status') return 'center';
   return 'left';
 };
 
 export default function BillingManagement() {
   useDocumentTitle('Bill Management');
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canSeeOthersBill = can(MENU_KEYS.adminOthersBill, 'view');
+  const headers = canSeeOthersBill ? [...baseHeaders, 'Others Bill', ...tailHeaders] : [...baseHeaders, ...tailHeaders];
   const { invalidate } = useQueryCache();
+  // Bill Management is wing-locked for every wing admin, regardless of cross-wing finance access
+  // (that access still applies on Payment Verification). Only a genuinely wing-less role
+  // (admin/super_admin, no user.wing) gets to choose a wing here.
+  const lockedWing = user?.wing || null;
   const [filters, setFilters] = useState(initialFilters);
+  const [serviceWing, setServiceWing] = useState(() => lockedWing || 'Male');
   const [serviceAmount, setServiceAmount] = useState('');
   const [hasServiceBill, setHasServiceBill] = useState(false);
   const [editingSubsidy, setEditingSubsidy] = useState(null);
@@ -44,7 +54,7 @@ export default function BillingManagement() {
   const [savingEditSubsidy, setSavingEditSubsidy] = useState(false);
   const [subsidyForm, setSubsidyForm] = useState(() => ({
     ...emptySubsidyForm,
-    wing: user?.wing || 'Male',
+    wing: lockedWing || 'Male',
   }));
   const [confirmSubsidyOpen, setConfirmSubsidyOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('service');
@@ -54,16 +64,18 @@ export default function BillingManagement() {
   const [savingSubsidy, setSavingSubsidy] = useState(false);
 
   useEffect(() => {
-    if (user?.wing) {
-      setSubsidyForm((current) => ({ ...current, wing: user.wing }));
+    if (lockedWing) {
+      setSubsidyForm((current) => ({ ...current, wing: lockedWing }));
+      setServiceWing(lockedWing);
       return;
     }
     if (filters.gender === 'Male' || filters.gender === 'Female') {
       setSubsidyForm((current) => ({ ...current, wing: filters.gender }));
+      setServiceWing(filters.gender);
     }
-  }, [filters.gender, user?.wing]);
+  }, [filters.gender, lockedWing]);
 
-  const combinedKey = `admin-billing-combined-${filters.month}-${filters.year}-${filters.status}-${user?.wing || filters.gender}`;
+  const combinedKey = `admin-billing-combined-${filters.month}-${filters.year}-${filters.status}-${lockedWing || filters.gender}-${serviceWing}`;
 
   const {
     data: combinedData = null,
@@ -79,7 +91,8 @@ export default function BillingManagement() {
     try {
       const sBill = await adminDataService.getServiceBill({
         month: parseInt(filters.month, 10),
-        year: parseInt(filters.year, 10)
+        year: parseInt(filters.year, 10),
+        wing: serviceWing,
       });
       if (sBill > 0) {
         sBillAmount = String(sBill);
@@ -91,7 +104,7 @@ export default function BillingManagement() {
 
     let subsidies = [];
     try {
-      const currentWing = user?.wing || filters.gender;
+      const currentWing = lockedWing || filters.gender;
       if (currentWing === 'All') {
         const [maleSubs, femaleSubs] = await Promise.all([
           adminDataService.getDswSubsidies({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), wing: 'Male' }),
@@ -138,14 +151,15 @@ export default function BillingManagement() {
   }, [refresh]);
 
   const deleteServiceBill = async () => {
-    if (!window.confirm(`Are you sure you want to delete the service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
+    if (!window.confirm(`Are you sure you want to delete the ${serviceWing} wing service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
     setSavingService(true);
     setMessage("Deleting service bill, please wait...");
     setError("");
     try {
       await adminDataService.deleteServiceBill({
         month: parseInt(filters.month, 10),
-        year: parseInt(filters.year, 10)
+        year: parseInt(filters.year, 10),
+        wing: serviceWing,
       });
       setMessage('Service bill deleted successfully and bills recalculated.');
       setError('');
@@ -228,6 +242,7 @@ export default function BillingManagement() {
     'Monthly Bill': row.monthlyBill,
     'DSW Subsidy': row.dswSubsidy || 0,
     'Guest Meal Bill': row.guestMealBill || 0,
+    ...(canSeeOthersBill ? { 'Others Bill': row.othersBill || 0 } : {}),
     'Due Bill': row.dueBill,
     'Total Bill': row.totalBill,
     Status: row.status,
@@ -259,6 +274,7 @@ export default function BillingManagement() {
         row.monthlyBill,
         row.dswSubsidy || 0,
         row.guestMealBill || 0,
+        ...(canSeeOthersBill ? [row.othersBill || 0] : []),
         row.dueBill,
         row.totalBill,
         row.status,
@@ -275,6 +291,7 @@ export default function BillingManagement() {
         month: parseInt(filters.month, 10),
         year: parseInt(filters.year, 10),
         amountPerStudent: moneyInput(serviceAmount),
+        wing: serviceWing,
       });
       setMessage('Service bill saved and bills recalculated.');
       setError('');
@@ -284,33 +301,6 @@ export default function BillingManagement() {
       setError(saveError.message);
     } finally {
       setSavingService(false);
-    }
-  };
-
-  const closePeriod = async () => {
-    if (!window.confirm(`Once closed, inventory transactions for ${filters.month}/${filters.year} cannot be modified. Proceed?`)) return;
-    try {
-      await adminDataService.closeBillingPeriod({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10) });
-      setMessage('Billing period closed and frozen.');
-      setError('');
-      invalidate('admin-billing-combined');
-      await load();
-    } catch (closeError) {
-      setError(closeError.message);
-    }
-  };
-
-  const unlockPeriod = async () => {
-    const note = window.prompt('Emergency unlock note (required):');
-    if (!note?.trim()) return;
-    try {
-      await adminDataService.unlockBillingPeriod({ month: parseInt(filters.month, 10), year: parseInt(filters.year, 10), note });
-      setMessage('Billing period unlocked and recalculated.');
-      setError('');
-      invalidate('admin-billing-combined');
-      await load();
-    } catch (unlockError) {
-      setError(unlockError.message);
     }
   };
 
@@ -342,7 +332,7 @@ export default function BillingManagement() {
       setConfirmSubsidyOpen(false);
       setSubsidyForm({
         ...emptySubsidyForm,
-        wing: user?.wing || subsidyForm.wing,
+        wing: lockedWing || subsidyForm.wing,
       });
       setMessage('DSW subsidy applied successfully and affected bills were recalculated.');
       setError('');
@@ -387,11 +377,9 @@ export default function BillingManagement() {
           label="Billing period"
         />
         <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option></select></label>
-        <label>Wing<select value={user?.wing || filters.gender} disabled={Boolean(user?.wing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!user?.wing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
+        <label>Wing<select value={lockedWing || filters.gender} disabled={Boolean(lockedWing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!lockedWing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
         <button className="primary-action" onClick={load} disabled={loading}>Generate</button>
         <button type="button" className="btn btn-secondary" onClick={recalculateMonth} disabled={loading}><RefreshCcw size={15} /> Recalculate</button>
-        <button className="danger-action" onClick={closePeriod}>Close Period</button>
-        {user?.role === 'super_admin' && <button onClick={unlockPeriod}>Emergency Unlock</button>}
       </section>
 
       <div className="billing-management-layout is-tabbed-card" style={{ gridTemplateColumns: 'minmax(0, 1fr)', width: '100%', maxWidth: '800px', margin: '0 auto 1.5rem' }}>
@@ -413,11 +401,46 @@ export default function BillingManagement() {
               <HandCoins size={16} />
               <span>DSW Subsidy Distribution</span>
             </button>
+            {/* Hidden for a role without this grant — currently the male wing admin, until a
+                super admin turns it on from Role Permissions. */}
+            {canSeeOthersBill ? (
+              <button
+                type="button"
+                className={`billing-tab-btn ${activeTab === 'others' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('others')}
+              >
+                <Coffee size={16} />
+                <span>Others Bill</span>
+              </button>
+            ) : null}
           </nav>
 
-          {activeTab === 'service' ? (
+          {activeTab === 'others' && canSeeOthersBill ? (
+            <OthersBillPanel
+              month={filters.month}
+              year={filters.year}
+              wing={lockedWing || filters.gender}
+              lockedWing={lockedWing}
+              onGenerated={() => { invalidate('admin-billing-combined'); load(); }}
+            />
+          ) : null}
+
+          {/* Others Bill has already been handled above — this branch only ever needs to
+              distinguish Service Bill from DSW Subsidy, not act as a catch-all "else". */}
+          {activeTab === 'others' ? null : activeTab === 'service' ? (
             <form onSubmit={saveService} className="billing-tab-content">
-              <div className="billing-control-grid is-single">
+              <div className="billing-control-grid">
+                <label className="billing-control-field">
+                  <strong>Wing</strong>
+                  {!lockedWing ? (
+                    <select value={serviceWing} onChange={(e) => setServiceWing(e.target.value)}>
+                      <option>Male</option>
+                      <option>Female</option>
+                    </select>
+                  ) : (
+                    <input value={`${lockedWing} Wing`} disabled readOnly />
+                  )}
+                </label>
                 <label className="billing-control-field">
                   <strong>Monthly Service Bill</strong>
                   <input
@@ -456,7 +479,7 @@ export default function BillingManagement() {
           ) : (
             <div className="billing-tab-content">
               <div className="billing-control-grid">
-                {!user?.wing ? (
+                {!lockedWing ? (
                   <label className="billing-control-field">
                     <strong>Wing</strong>
                     <select value={subsidyForm.wing} onChange={(e) => setSubsidyForm({ ...subsidyForm, wing: e.target.value })}>
@@ -594,7 +617,7 @@ export default function BillingManagement() {
 
       <section className="financial-card billing-table-card">
         {loading && !rows.length ? (
-          <TableSkeleton rows={8} cols={10} />
+          <TableSkeleton rows={8} cols={headers.length} />
         ) : (
           <div className="table-wrap sticky-page-table billing-table-scroll">
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -630,6 +653,9 @@ export default function BillingManagement() {
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.monthlyBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right', color: '#047857', fontWeight: '700' }}>{formatCurrency(row.dswSubsidy || 0)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.guestMealBill || 0)}</td>
+                      {canSeeOthersBill && (
+                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.othersBill || 0)}</td>
+                      )}
                       <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500' }}>
                         {formatCurrency(row.dueBill)}
                         {row.isOverridden && (
@@ -692,7 +718,7 @@ export default function BillingManagement() {
         <div style={{ display: 'grid', gap: '0.85rem' }}>
           <label className="billing-control-field">
             <strong>Wing</strong>
-            {!user?.wing ? (
+            {!lockedWing ? (
               <select
                 value={editSubsidyForm.wing}
                 onChange={(e) => setEditSubsidyForm({ ...editSubsidyForm, wing: e.target.value })}

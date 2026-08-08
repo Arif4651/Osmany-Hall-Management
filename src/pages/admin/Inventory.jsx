@@ -1133,26 +1133,24 @@ export default function Inventory() {
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                      {!t.isLocked && (
-                        <div className="stock-timeline-actions" style={{ display: 'flex', gap: '0.45rem' }}>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); openEditTransactionModal(t); }}
-                            style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#1e40af', display: 'inline-flex', alignItems: 'center' }}
-                            title="Edit transaction"
-                          >
-                            <Pencil size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setModalError(''); setDeleteTransaction(t); }}
-                            style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#b91c1c', display: 'inline-flex', alignItems: 'center' }}
-                            title="Delete transaction"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      )}
+                      <div className="stock-timeline-actions" style={{ display: 'flex', gap: '0.45rem' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openEditTransactionModal(t); }}
+                          style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#1e40af', display: 'inline-flex', alignItems: 'center' }}
+                          title="Edit transaction"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setModalError(''); setDeleteTransaction(t); }}
+                          style={{ background: 'transparent', border: 0, padding: 2, cursor: 'pointer', color: '#b91c1c', display: 'inline-flex', alignItems: 'center' }}
+                          title="Delete transaction"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                       {historyItem?.isStored && (
                         <span className="stock-timeline-balance">
                           Balance: {formatNumber(t.runningBalance)} {historyItem?.unit?.toUpperCase()}

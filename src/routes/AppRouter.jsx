@@ -4,7 +4,11 @@ import AppLayout from '../components/layout/AppLayout';
 import PageSkeleton from '../components/ui/PageSkeleton';
 import { ADMIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '../constants/navigation';
 import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
+import { MENU_KEYS } from '../services/permissionService';
 import { ProtectedRoute, PublicOnlyRoute } from './RouteGuards';
+
+/** Wraps a page in the permission guard for its menu. */
+const guard = (menuKey, element) => <ProtectedRoute menuKey={menuKey}>{element}</ProtectedRoute>;
 
 // ── Eagerly-loaded (tiny, always needed) ─────────────────────────────────────
 import LandingPage from '../pages/LandingPage';
@@ -76,13 +80,13 @@ export default function AppRouter() {
           }
         >
           <Route index element={<Navigate to={DEFAULT_REDIRECTS.student} replace />} />
-          <Route path="meals"           element={<MealManagement />} />
-          <Route path="meal-snapshot"   element={<MealSnapshot />} />
-          <Route path="view-menu"       element={<ViewMenu />} />
-          <Route path="billing"         element={<Billing />} />
-          <Route path="payments"        element={<Payments />} />
-          <Route path="daily-cost"      element={<DailyCost />} />
-          <Route path="notice-board"    element={<StudentNoticeBoard />} />
+          <Route path="meals"           element={guard(MENU_KEYS.studentMeals, <MealManagement />)} />
+          <Route path="meal-snapshot"   element={guard(MENU_KEYS.studentMealSnapshot, <MealSnapshot />)} />
+          <Route path="view-menu"       element={guard(MENU_KEYS.studentViewMenu, <ViewMenu />)} />
+          <Route path="billing"         element={guard(MENU_KEYS.studentBilling, <Billing />)} />
+          <Route path="payments"        element={guard(MENU_KEYS.studentPayments, <Payments />)} />
+          <Route path="daily-cost"      element={guard(MENU_KEYS.studentDailyCost, <DailyCost />)} />
+          <Route path="notice-board"    element={guard(MENU_KEYS.studentNoticeBoard, <StudentNoticeBoard />)} />
           <Route path="developer-profile" element={<DeveloperProfile />} />
         </Route>
 
@@ -95,19 +99,16 @@ export default function AppRouter() {
           }
         >
           <Route index element={<Navigate to={DEFAULT_REDIRECTS.admin} replace />} />
-          <Route path="students"    element={<StudentManagement />} />
-          <Route path="meals"       element={<AdminMealManagement />} />
-          <Route path="meal-sheet"  element={<MealSheet />} />
-          <Route path="billing"     element={<BillingManagement />} />
-          <Route path="payments"    element={<PaymentVerification />} />
-          <Route path="inventory"   element={<Inventory />} />
-          <Route path="due"         element={<DueBill />} />
-          <Route path="daily-cost"  element={<DailyCost />} />
-          <Route path="notice-board" element={<AdminNoticeBoard />} />
-          <Route
-            path="settings"
-            element={<ProtectedRoute role="super_admin"><AdminSettings /></ProtectedRoute>}
-          />
+          <Route path="students"    element={guard(MENU_KEYS.adminStudents, <StudentManagement />)} />
+          <Route path="meals"       element={guard(MENU_KEYS.adminMeals, <AdminMealManagement />)} />
+          <Route path="meal-sheet"  element={guard(MENU_KEYS.adminMealSheet, <MealSheet />)} />
+          <Route path="billing"     element={guard(MENU_KEYS.adminBilling, <BillingManagement />)} />
+          <Route path="payments"    element={guard(MENU_KEYS.adminPayments, <PaymentVerification />)} />
+          <Route path="inventory"   element={guard(MENU_KEYS.adminInventory, <Inventory />)} />
+          <Route path="due"         element={guard(MENU_KEYS.adminDue, <DueBill />)} />
+          <Route path="daily-cost"  element={guard(MENU_KEYS.adminDailyCost, <DailyCost />)} />
+          <Route path="notice-board" element={guard(MENU_KEYS.adminNoticeBoard, <AdminNoticeBoard />)} />
+          <Route path="settings"    element={guard(MENU_KEYS.adminSettings, <AdminSettings />)} />
           <Route path="developer-profile" element={<DeveloperProfile />} />
         </Route>
 

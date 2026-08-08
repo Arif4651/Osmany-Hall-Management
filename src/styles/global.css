@@ -78,6 +78,12 @@ button {
 
 .app-shell {
   min-height: 100vh;
+  /* Mobile browsers resize their address bar as you scroll, so 100vh is measured against the
+     LARGEST possible viewport (bar hidden) even while the bar is showing — the shell ends up
+     taller than what's actually visible, and the sticky footer lands below the fold with a gap
+     of true blank space under it. 100dvh tracks the real, currently-visible viewport instead.
+     Unsupported browsers simply ignore this line and keep the 100vh above. */
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: 290px 1fr;
   transition: grid-template-columns var(--transition-base);
@@ -203,6 +209,9 @@ button {
   position: sticky;
   top: 0;
   height: 100vh;
+  /* Same mobile address-bar issue as .app-shell above — keeps the sidebar matched to the shell's
+     real height instead of occasionally running taller than the visible screen. */
+  height: 100dvh;
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -3593,6 +3602,7 @@ button {
   color: #5f6f86;
   cursor: pointer;
   font-weight: 650;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .wing-switcher button.is-active {
@@ -8189,4 +8199,377 @@ button {
   .billing-control-footer .danger-action {
     flex: 1 1 100%;
   }
+}
+
+/* ── Role permission matrix (super admin) ───────────────────────────────── */
+.role-permissions {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  padding: 1.4rem;
+  display: grid;
+  gap: 1.1rem;
+}
+
+.role-permissions-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.role-permissions-head h2 { margin: 0; font-size: 1.15rem; }
+.role-permissions-head p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.88rem; }
+.role-permissions-head-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.role-select-field { display: grid; gap: 0.4rem; max-width: 520px; }
+.role-select-field > span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.role-select-field select {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 2px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.role-permissions-locked {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+.role-permissions-locked strong { display: block; font-size: 0.92rem; }
+.role-permissions-locked span { color: var(--muted); font-size: 0.85rem; }
+
+.role-matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.role-matrix { width: 100%; border-collapse: collapse; min-width: 620px; }
+
+.role-matrix thead th {
+  background: var(--surface-soft);
+  text-align: center;
+  padding: 0.75rem 0.6rem;
+  font-size: 0.86rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.role-matrix thead th.role-matrix-menu-col { text-align: left; width: 45%; }
+
+.role-matrix-col-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.role-matrix tbody td {
+  padding: 0.55rem 0.6rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.role-matrix tbody td:first-child { text-align: left; }
+.role-matrix tbody tr:last-child td { border-bottom: 0; }
+.role-matrix tbody tr.is-section { background: var(--surface-soft); }
+
+.role-matrix-label { display: inline-flex; align-items: center; gap: 0.35rem; }
+.role-matrix-section-name { font-weight: 700; color: var(--brand-blue-900); }
+
+.role-matrix-twisty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--primary);
+}
+.role-matrix-leaf-dash { color: var(--muted); width: 15px; display: inline-block; text-align: center; }
+
+.role-matrix-check { width: 17px; height: 17px; cursor: pointer; accent-color: var(--accent); }
+.role-matrix-check:disabled { cursor: not-allowed; opacity: 0.65; }
+
+.role-matrix-empty { text-align: center !important; padding: 1.4rem !important; color: var(--muted); }
+
+.role-permissions-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.role-permissions-count { color: var(--muted); font-size: 0.87rem; }
+
+.role-form-hint { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.78rem; }
+.role-form-note {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.2rem;
+}
+.settings-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.settings-tab.is-active { color: var(--primary); border-bottom-color: var(--primary); }
+
+@media (max-width: 640px) {
+  .role-matrix thead th.role-matrix-menu-col { width: auto; }
+  .role-permissions { padding: 1rem; }
+}
+
+/* ── Additional meal preferences (student) ──────────────────────────────── */
+.additional-preferences { margin-top: 1.5rem; }
+
+.additional-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.additional-totals { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.additional-total-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.additional-total-pill strong { color: var(--primary); font-size: 0.92rem; }
+
+.additional-month-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+  max-height: 30rem;
+}
+
+.additional-month-table { width: 100%; border-collapse: collapse; }
+
+.additional-month-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 0.6rem 0.7rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.additional-month-table thead th:first-child { text-align: left; }
+
+.additional-month-table tbody th {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.additional-day-num { font-size: 0.95rem; color: var(--text); min-width: 1.4rem; }
+.additional-day-weekday { font-size: 0.76rem; color: var(--muted); }
+
+.additional-month-table tbody td {
+  padding: 0.3rem 0.7rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.additional-month-table tbody th { border-bottom: 1px solid var(--border); }
+.additional-month-table tbody tr:last-child td,
+.additional-month-table tbody tr:last-child th { border-bottom: 0; }
+
+.additional-month-table tbody tr:hover:not(.is-locked) { background: var(--surface-soft); }
+.additional-month-table tbody tr.is-weekend .additional-day-weekday { color: var(--danger); }
+.additional-month-table tbody tr.is-locked { opacity: 0.45; }
+
+.additional-cell {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.additional-cell-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.additional-cell-item input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.additional-cell-item input:disabled { cursor: not-allowed; }
+
+.additional-empty { color: var(--muted); font-size: 0.9rem; padding: 0.6rem 0; }
+.additional-foot { margin-top: 0.8rem; color: var(--muted); font-size: 0.82rem; }
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 640px) {
+  .additional-toolbar { align-items: stretch; }
+  .additional-month-table thead th,
+  .additional-month-table tbody td { padding-left: 0.4rem; padding-right: 0.4rem; }
+}
+
+/* ── Others Bill (admin) ────────────────────────────────────────────────── */
+.others-bill-intro {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  margin-bottom: 1rem;
+}
+.others-bill-intro p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.55; }
+.others-bill-empty { color: var(--muted); font-size: 0.9rem; }
+
+.others-bill-drift {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #f5c98a;
+  border-left: 4px solid var(--warning);
+  background: #fffaf0;
+  margin: 1rem 0;
+  color: #7c4a03;
+}
+.others-bill-drift strong { display: block; margin-bottom: 0.2rem; }
+.others-bill-drift span { font-size: 0.86rem; line-height: 1.5; }
+
+.others-bill-result { margin-top: 1.2rem; }
+.others-bill-result header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.7rem;
+}
+.others-bill-result h4 { margin: 0; font-size: 1rem; }
+.others-bill-result header p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.88rem; }
+
+.others-bill-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.65rem;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.others-bill-existing { margin-top: 1.4rem; }
+.others-bill-existing h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.others-bill-existing ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.others-bill-existing li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+}
+.others-bill-stale {
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+/* ── Additional item catalogue (admin) ──────────────────────────────────── */
+.additional-items-panel { margin-top: 1.5rem; }
+.additional-items-panel h2 { display: inline-flex; align-items: center; gap: 0.45rem; }
+.wing-pill.is-all { background: #f0fdf4; color: #15803d; }
+
+/* ── Additional items sheet (Meal Sheet page) ───────────────────────────── */
+.additional-sheet { margin-top: 0; }
+
+/* Crossfade + slight slide when Meal Sheet swaps between its two views. Keyed on `view` in
+   MealSheet.jsx so React remounts this subtree on every toggle, which is what re-triggers the
+   animation each time — a plain CSS animation is enough for a two-state swap like this. */
+.meal-sheet-view-fade {
+  animation: mealSheetViewFade 0.26s ease both;
+}
+@keyframes mealSheetViewFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meal-sheet-view-fade { animation: none; }
+}
+.additional-sheet-empty {
+  color: var(--muted);
+  font-size: 0.88rem;
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  text-align: center;
 }

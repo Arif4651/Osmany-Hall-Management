@@ -10,13 +10,15 @@ import { ROUTE_PATHS } from '../../constants/routePaths';
 import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices, setHasNewNotices }) {
-  const { user, logout } = useAuth();
+  const { user, logout, can } = useAuth();
   const navigate = useNavigate();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const devProfileItem = navItems.find((item) => item.key === 'dev-profile');
+  // Nav is now a projection of the permission matrix: an entry appears only where the role has
+  // view access to its menu. Entries with no menuKey are unrestricted.
   const filteredNavItems = navItems.filter(
-    (item) => item.key !== 'dev-profile' && (!item.superAdminOnly || user?.role === 'super_admin')
+    (item) => item.key !== 'dev-profile' && (!item.menuKey || can(item.menuKey, 'view'))
   );
   const DevIcon = devProfileItem?.icon;
 

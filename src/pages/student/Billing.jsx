@@ -15,6 +15,7 @@ export default function Billing() {
 
   const billKey      = `billing-me-${period.month}-${period.year}`;
   const subsidiesKey = `billing-subsidies-me-${period.month}-${period.year}`;
+  const othersKey    = `billing-others-me-${period.month}-${period.year}`;
 
   const { data: bill, isLoading: billLoading, isRefreshing: billRefreshing, error: billError } =
     useCachedFetch(billKey, () => financialService.getMyBill(period.month, period.year), { ttl: 2 * 60_000 });
@@ -22,9 +23,25 @@ export default function Billing() {
   const { data: subsidies = [], isLoading: subsidiesLoading, isRefreshing: subsidiesRefreshing } =
     useCachedFetch(subsidiesKey, () => financialService.getMyBillSubsidies(period.month, period.year), { ttl: 2 * 60_000 });
 
-  const isLoading = billLoading || subsidiesLoading;
-  const isRefreshing = billRefreshing || subsidiesRefreshing;
+  const { data: othersLines = [], isLoading: othersLoading, isRefreshing: othersRefreshing } =
+    useCachedFetch(othersKey, () => financialService.getMyOthersBills(period.month, period.year), { ttl: 2 * 60_000 });
+
+  // Whether this student's wing has any optional item assigned at all — Tea is Female-only
+  // today, so a male student's item list is naturally empty. Used only to decide whether the
+  // Others Bill card belongs on the page; the amounts themselves always come from `bill`.
+  const eligibleKey = `additional-eligible-me-${period.month}-${period.year}`;
+  const { data: eligibleMonth, isLoading: eligibleLoading, isRefreshing: eligibleRefreshing } =
+    useCachedFetch(eligibleKey, () => financialService.getAdditionalMonth(period.month, period.year), { ttl: 2 * 60_000 });
+
+  const isLoading = billLoading || subsidiesLoading || othersLoading || eligibleLoading;
+  const isRefreshing = billRefreshing || subsidiesRefreshing || othersRefreshing || eligibleRefreshing;
   const error = billError;
+  const othersTotal = othersLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  // Show the card if the student's wing currently has an item assigned, or if it already has
+  // history (an item can be deactivated later without erasing what was billed while it was live).
+  const hasAdditionalAccess = (eligibleMonth?.items?.length ?? 0) > 0
+    || othersLines.length > 0
+    || (bill?.othersBill ?? 0) > 0;
 
   return (
     <div className="financial-page">
@@ -73,7 +90,7 @@ export default function Billing() {
           <div className="financial-card">
             <h3>Monthly Bill</h3>
             <strong>{formatCurrency(bill.monthlyBill)}</strong>
-            <p>Regular meal charges after subsidy</p>
+            <p>Regular meal charges before subsidy</p>
           </div>
           {(bill.dswSubsidy ?? 0) > 0 && (
             <div className="financial-card financial-card-highlight">
@@ -89,6 +106,21 @@ export default function Billing() {
               <p>Extra guest meal charges</p>
             </div>
           )}
+          {/* Shown whenever the student's wing has an optional item — even at zero this month, so
+              they can see it's accounted for rather than wondering if the charge is missing.
+              Hidden entirely for a wing with nothing assigned (e.g. male, before Tea is opened
+              up there), so the card doesn't sit around showing a permanent, meaningless zero. */}
+          {hasAdditionalAccess && (
+            <div className="financial-card">
+              <h3>Others Bill</h3>
+              <strong>{formatCurrency(bill.othersBill ?? 0)}</strong>
+              <p>
+                {othersLines.length
+                  ? `${othersLines.map((line) => `${line.itemName} × ${line.consumptionCount}`).join(', ')} — see breakdown below`
+                  : 'Tea and other optional items you selected'}
+              </p>
+            </div>
+          )}
           <div className="financial-card">
             <h3>Service Bill</h3>
             <strong>{formatCurrency(bill.serviceBill)}</strong>
@@ -101,12 +133,50 @@ export default function Billing() {
           <div className="financial-card">
             <h3>Total Bill</h3>
             <strong>{formatCurrency(bill.totalBill)}</strong>
-            <p>Monthly + Guest + Service + Carried</p>
+            <p>Monthly − Subsidy + Guest + Others + Service + Carried</p>
           </div>
           <div className="financial-card">
             <h3>Due Bill</h3>
             <strong>{formatCurrency(bill.dueBill)}</strong>
             <p>{bill.status}</p>
+          </div>
+        </section>
+      )}
+
+      {bill && othersLines.length > 0 && (
+        <section className="financial-card" style={{ display: 'grid', gap: '0.85rem' }}>
+          <div>
+            <h3 style={{ marginBottom: '0.25rem' }}>Others Bill</h3>
+            <p style={{ margin: 0, color: 'var(--muted)' }}>
+              Each item&apos;s total was shared out across everyone who took it, in proportion to how
+              much each person took.
+            </p>
+          </div>
+          <div className="admin-meal-table-wrap">
+            <table className="admin-meal-table">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Item</th>
+                  <th style={{ textAlign: 'right' }}>Monthly Count</th>
+                  <th style={{ textAlign: 'right' }}>Unit Rate</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {othersLines.map((line) => (
+                  <tr key={line.itemId}>
+                    <td style={{ textAlign: 'left' }}>{line.itemName}</td>
+                    <td style={{ textAlign: 'right' }}>{line.consumptionCount}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(line.unitRate)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(line.amount)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td colSpan="3" style={{ textAlign: 'right', fontWeight: 700 }}>Total Others Bill</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(othersTotal)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
       )}

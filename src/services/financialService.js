@@ -17,4 +17,16 @@ export const financialService = {
   getGuestMeals: (month, year) => apiRequest(`/meals/guest-meals/me${toQueryString({ month, year })}`),
   saveGuestMeal: (payload) => apiRequest('/meals/guest-meals/me', { method: 'POST', body: JSON.stringify(payload) }),
   deleteGuestMeal: (id) => apiRequest(`/meals/guest-meals/me/${id}`, { method: 'DELETE' }),
+
+  // Additional (per-date, per-meal) preferences — Tea and similar optional items.
+  // Unlike getPreferences above, these are NOT standing preferences: each call addresses
+  // exactly one date and meal slot.
+  getAdditionalDay: (date) => apiRequest(`/meals/additional/me${toQueryString({ date })}`),
+  getAdditionalMonth: (month, year) => apiRequest(`/meals/additional/me/month${toQueryString({ month, year })}`),
+  getAdditionalRange: (from, to) => apiRequest(`/meals/additional/me/range${toQueryString({ from, to })}`),
+  saveAdditionalSelection: (payload) =>
+    apiRequest('/meals/additional/me', { method: 'PUT', body: JSON.stringify(payload) }),
+
+  // The student's own Others Bill breakdown for a month.
+  getMyOthersBills: (month, year) => apiRequest(`/billing/me/others-bills${toQueryString({ month, year })}`),
 };

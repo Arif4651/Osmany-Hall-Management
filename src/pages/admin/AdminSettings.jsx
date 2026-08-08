@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Edit2, Plus, ShieldCheck, UserCheck, UserX } from 'lucide-react';
+import { Edit2, KeyRound, Plus, ShieldCheck, UserCheck, Users, UserX } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
+import RolePermissionMatrix from '../../components/permissions/RolePermissionMatrix';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
+import { useAuth } from '../../context/AuthContext';
 
 const emptyForm = {
   fullName: '', email: '', userName: '', role: 'male_wing_admin', wing: 'Male',
@@ -12,6 +14,8 @@ const emptyForm = {
 
 export default function AdminSettings() {
   useDocumentTitle('Admin Settings');
+  const { isSuperAdmin } = useAuth();
+  const [tab, setTab] = useState('accounts');
   const [admins, setAdmins] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -49,8 +53,38 @@ export default function AdminSettings() {
     <div className="admin-settings-page">
       <header className="admin-meal-header">
         <div><h1>System Settings</h1><p>Manage wing administrators and hall-wide access settings.</p></div>
-        <Button onClick={openCreate}><Plus size={16} /> Add Wing Admin</Button>
+        {tab === 'accounts' ? <Button onClick={openCreate}><Plus size={16} /> Add Wing Admin</Button> : null}
       </header>
+
+      {/* Role permissions are the super admin's own lever — never expose it to a role that
+          could then grant itself more than it was given. */}
+      {isSuperAdmin ? (
+        <div className="settings-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'accounts'}
+            className={`settings-tab${tab === 'accounts' ? ' is-active' : ''}`}
+            onClick={() => setTab('accounts')}
+          >
+            <Users size={16} /> Administrator Accounts
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'permissions'}
+            className={`settings-tab${tab === 'permissions' ? ' is-active' : ''}`}
+            onClick={() => setTab('permissions')}
+          >
+            <KeyRound size={16} /> Role Permissions
+          </button>
+        </div>
+      ) : null}
+
+      {isSuperAdmin && tab === 'permissions' ? <RolePermissionMatrix /> : null}
+
+      {tab === 'permissions' && isSuperAdmin ? null : (
+      <>
       {message ? <div className="student-message student-message-success">{message}</div> : null}
       {error && !editing ? <div className="student-message student-message-error">{error}</div> : null}
 
@@ -99,6 +133,8 @@ export default function AdminSettings() {
           <div className="payment-review-actions"><Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save Administrator'}</Button></div>
         </form>
       </Modal>
+      </>
+      )}
     </div>
   );
 }

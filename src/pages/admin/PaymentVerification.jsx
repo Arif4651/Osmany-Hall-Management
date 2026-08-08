@@ -15,12 +15,22 @@ const monthNames = Array.from({ length: 12 }, (_, index) =>
 
 export default function PaymentVerification() {
   useDocumentTitle('Payment Verification');
-  const { user, role } = useAuth();
+  const { user, role, canChooseFinanceWing, isPermissionsLoading } = useAuth();
   const { invalidate } = useQueryCache();
-  const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
+  // Wing-locked unless the server says this role may switch wings on financial screens.
+  const isWingAdmin = (role === 'male_wing_admin' || role === 'female_wing_admin') && !canChooseFinanceWing;
 
-  // Wing admins default to their own wing; admin/super_admin start on Male
-  const [gender, setGender] = useState(() => user?.wing || 'Male');
+  // Wing-locked admins start on their own wing; anyone who may choose starts on every wing.
+  const [gender, setGender] = useState(() => user?.wing || 'All');
+  const [hasAppliedWingDefault, setHasAppliedWingDefault] = useState(false);
+
+  // canChooseFinanceWing arrives with the permissions fetch, after first render — apply the
+  // default once it lands, and only once, so a manual switch afterwards is never overridden.
+  useEffect(() => {
+    if (isPermissionsLoading || hasAppliedWingDefault) return;
+    setGender(canChooseFinanceWing ? 'All' : (user?.wing || 'All'));
+    setHasAppliedWingDefault(true);
+  }, [isPermissionsLoading, canChooseFinanceWing, hasAppliedWingDefault, user?.wing]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState('All');
@@ -109,7 +119,7 @@ export default function PaymentVerification() {
       {error && <div className="student-message student-message-error">{error}</div>}
 
       <div className="wing-filter-bar">
-        <strong>{gender} Wing Payments</strong>
+        <strong>{gender === 'All' ? 'All Wings — Payments' : `${gender} Wing Payments`}</strong>
         {isWingAdmin ? (
           <span style={{
             display: 'inline-flex',
@@ -126,14 +136,14 @@ export default function PaymentVerification() {
           </span>
         ) : (
           <div className="wing-switcher">
-            {['Male', 'Female'].map((wing) => (
+            {['All', 'Male', 'Female'].map((wing) => (
               <button
                 type="button"
                 key={wing}
                 className={gender === wing ? 'is-active' : ''}
                 onClick={() => setGender(wing)}
               >
-                {wing} Wing
+                {wing === 'All' ? 'All Wings' : `${wing} Wing`}
               </button>
             ))}
           </div>
@@ -212,6 +222,12 @@ export default function PaymentVerification() {
                             <span style={{ fontWeight: '500' }}>{row.rollNumber}</span>
                             {row.hallId && <span> / {row.hallId}</span>}
                           </div>
+                          {/* Only in the combined view, where rows from both wings are interleaved. */}
+                          {gender === 'All' && row.gender ? (
+                            <span className={`wing-pill is-${row.gender.toLowerCase()}`} style={{ marginTop: '0.3rem' }}>
+                              {row.gender} Wing
+                            </span>
+                          ) : null}
                         </td>
                         <td className="billing-cell" data-label="Billing Period" style={{ padding: '0.75rem', textAlign: 'left' }}>
                           {monthNames[row.billingMonth - 1]} {row.billingYear}
