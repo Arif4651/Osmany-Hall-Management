@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,8 @@ using Microsoft.EntityFrameworkCore;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.SuperAdmin)]
+[Authorize]
+[RequirePermission(MenuKeys.AdminSettings, PermissionActions.View)]
 [Route("api/admin-settings")]
 public sealed class AdminSettingsController(HallDbContext db, PasswordService passwords) : ControllerBase
 {
@@ -25,6 +27,7 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
             .ToListAsync(cancellationToken);
 
     [HttpPost("admins")]
+    [RequirePermission(MenuKeys.AdminSettings, PermissionActions.Create)]
     public async Task<ActionResult<AdminAccountDto>> CreateAdmin(SaveAdminAccountRequest request, CancellationToken cancellationToken)
     {
         var validation = Validate(request, true);
@@ -54,6 +57,7 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
     }
 
     [HttpPut("admins/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminSettings, PermissionActions.Edit)]
     public async Task<ActionResult<AdminAccountDto>> UpdateAdmin(Guid id, SaveAdminAccountRequest request, CancellationToken cancellationToken)
     {
         var validation = Validate(request, false);

@@ -2,6 +2,7 @@ using HallBackend.Application.Dtos;
 using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.HallAdministrators + "," + Roles.Student)]
+[Authorize]
+[RequirePermission(MenuKeys.AdminDailyCost, PermissionActions.View, AltMenuKey = MenuKeys.StudentDailyCost)]
 [Route("api/daily-cost")]
 public sealed class DailyCostController(HallDbContext db, CurrentUserService currentUser) : ControllerBase
 {

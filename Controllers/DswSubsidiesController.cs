@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,15 +12,15 @@ using Npgsql;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.HallAdministrators)]
+[Authorize]
 [Route("api/billing/subsidies")]
 public sealed class DswSubsidiesController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing,
-    BillingPeriodService periods) : ControllerBase
+    BillingCalculationService billing) : ControllerBase
 {
     [HttpPost]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Create)]
     public async Task<IActionResult> Create(
         CreateDswSubsidyRequest request,
         CancellationToken cancellationToken)
@@ -29,7 +30,6 @@ public sealed class DswSubsidiesController(
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
             return BadRequest(new { message = "Invalid meal period." });
 
-        await periods.EnsureOpenAsync(request.Date, cancellationToken);
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
 
         var students = await db.Students.AsNoTracking()
@@ -125,6 +125,7 @@ public sealed class DswSubsidiesController(
     }
 
     [HttpPut("{id:guid}")]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Edit)]
     public async Task<IActionResult> Update(Guid id, CreateDswSubsidyRequest request, CancellationToken cancellationToken)
     {
         var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -134,9 +135,6 @@ public sealed class DswSubsidiesController(
             return BadRequest(new { message = "Subsidy amount must be greater than zero." });
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
             return BadRequest(new { message = "Invalid meal period." });
-
-        await periods.EnsureOpenAsync(subsidy.Date, cancellationToken);
-        await periods.EnsureOpenAsync(request.Date, cancellationToken);
 
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
         
@@ -222,13 +220,12 @@ public sealed class DswSubsidiesController(
     }
 
     [HttpDelete("{id:guid}")]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Delete)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (subsidy is null) return NotFound();
-        
-        await periods.EnsureOpenAsync(subsidy.Date, cancellationToken);
-        
+
         var distributions = await db.DswSubsidyDistributions.Where(x => x.SubsidyId == id).ToListAsync(cancellationToken);
         db.DswSubsidyDistributions.RemoveRange(distributions);
         db.DswSubsidies.Remove(subsidy);

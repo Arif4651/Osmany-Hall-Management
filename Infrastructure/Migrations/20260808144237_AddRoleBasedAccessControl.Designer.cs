@@ -3,6 +3,7 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HallBackend.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    partial class HallDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260808144237_AddRoleBasedAccessControl")]
+    partial class AddRoleBasedAccessControl
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,97 +24,6 @@ namespace HallBackend.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.AdditionalMealItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("DefaultQuantity")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("EligibleWing")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.ToTable("additional_meal_items", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_additional_meal_items_wing", "\"EligibleWing\" IN ('Male','Female','All')");
-                        });
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.AdditionalMealSelection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateOnly>("Date")
-                        .HasColumnType("date");
-
-                    b.Property<Guid>("ItemId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("MealPeriod")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("StudentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ItemId");
-
-                    b.HasIndex("Date", "ItemId");
-
-                    b.HasIndex("StudentId", "ItemId", "Date", "MealPeriod")
-                        .IsUnique();
-
-                    b.ToTable("additional_meal_selections", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_additional_meal_selections_quantity", "\"Quantity\" > 0");
-                        });
-                });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.AppMenu", b =>
                 {
@@ -1099,9 +1011,6 @@ namespace HallBackend.Migrations
                         .HasPrecision(12, 4)
                         .HasColumnType("numeric(12,4)");
 
-                    b.Property<decimal>("OthersBill")
-                        .HasColumnType("numeric");
-
                     b.Property<decimal>("ServiceBill")
                         .HasPrecision(12, 4)
                         .HasColumnType("numeric(12,4)");
@@ -1214,102 +1123,6 @@ namespace HallBackend.Migrations
                     b.HasIndex("StudentId");
 
                     b.ToTable("notifications", (string)null);
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.OthersBill", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("GeneratedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("GeneratedById")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ItemId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Month")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)");
-
-                    b.Property<decimal>("TotalAmount")
-                        .HasColumnType("numeric");
-
-                    b.Property<int>("TotalConsumptionCount")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("UnitRate")
-                        .HasColumnType("numeric");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Wing")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GeneratedById");
-
-                    b.HasIndex("ItemId");
-
-                    b.HasIndex("Year", "Month");
-
-                    b.HasIndex("Month", "Year", "ItemId", "Wing")
-                        .IsUnique();
-
-                    b.ToTable("others_bills", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_others_bills_month", "\"Month\" BETWEEN 1 AND 12");
-                        });
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.OthersBillAllocation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("AllocatedAmount")
-                        .HasColumnType("numeric");
-
-                    b.Property<int>("ConsumptionCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("OthersBillId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("StudentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StudentId");
-
-                    b.HasIndex("OthersBillId", "StudentId")
-                        .IsUnique();
-
-                    b.ToTable("others_bill_allocations", (string)null);
                 });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.PaymentCategory", b =>
@@ -1491,11 +1304,6 @@ namespace HallBackend.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
-                    b.Property<string>("Wing")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
                     b.Property<int>("Year")
                         .HasColumnType("integer");
 
@@ -1503,7 +1311,7 @@ namespace HallBackend.Migrations
 
                     b.HasIndex("AddedById");
 
-                    b.HasIndex("Month", "Year", "Wing", "Version")
+                    b.HasIndex("Month", "Year", "Version")
                         .IsUnique();
 
                     b.ToTable("service_bills", null, t =>
@@ -1707,25 +1515,6 @@ namespace HallBackend.Migrations
                         {
                             t.HasCheckConstraint("ck_students_gender", "\"Gender\" IN ('Male','Female')");
                         });
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.AdditionalMealSelection", b =>
-                {
-                    b.HasOne("HallBackend.Domain.Entities.AdditionalMealItem", "Item")
-                        .WithMany()
-                        .HasForeignKey("ItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("HallBackend.Domain.Entities.Student", "Student")
-                        .WithMany()
-                        .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Item");
-
-                    b.Navigation("Student");
                 });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.AppMenu", b =>
@@ -1962,44 +1751,6 @@ namespace HallBackend.Migrations
                     b.Navigation("Student");
                 });
 
-            modelBuilder.Entity("HallBackend.Domain.Entities.OthersBill", b =>
-                {
-                    b.HasOne("HallBackend.Domain.Entities.AppUser", "GeneratedBy")
-                        .WithMany()
-                        .HasForeignKey("GeneratedById")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("HallBackend.Domain.Entities.AdditionalMealItem", "Item")
-                        .WithMany()
-                        .HasForeignKey("ItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("GeneratedBy");
-
-                    b.Navigation("Item");
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.OthersBillAllocation", b =>
-                {
-                    b.HasOne("HallBackend.Domain.Entities.OthersBill", "OthersBill")
-                        .WithMany("Allocations")
-                        .HasForeignKey("OthersBillId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("HallBackend.Domain.Entities.Student", "Student")
-                        .WithMany()
-                        .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("OthersBill");
-
-                    b.Navigation("Student");
-                });
-
             modelBuilder.Entity("HallBackend.Domain.Entities.PaymentSubmission", b =>
                 {
                     b.HasOne("HallBackend.Domain.Entities.PaymentCategory", "Category")
@@ -2113,11 +1864,6 @@ namespace HallBackend.Migrations
             modelBuilder.Entity("HallBackend.Domain.Entities.MealType", b =>
                 {
                     b.Navigation("Configurations");
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.OthersBill", b =>
-                {
-                    b.Navigation("Allocations");
                 });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.PaymentCategory", b =>

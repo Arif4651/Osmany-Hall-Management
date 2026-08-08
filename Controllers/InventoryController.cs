@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,12 +11,11 @@ using Microsoft.EntityFrameworkCore;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.HallAdministrators)]
+[Authorize]
 [Route("api/inventory")]
 public sealed class InventoryController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingPeriodService periods,
     InventoryTransactionService inventory,
     ItemCatalogService catalog,
     BillingCalculationService billing) : ControllerBase
@@ -25,6 +25,7 @@ public sealed class InventoryController(
 
     [HttpGet("items")]
     [HttpGet]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
     public async Task<IReadOnlyList<InventoryItemFinancialDto>> GetItems([FromQuery] bool includeDeleted = false, [FromQuery] string? wing = null, CancellationToken cancellationToken = default)
     {
         var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
@@ -38,6 +39,7 @@ public sealed class InventoryController(
     }
 
     [HttpPost("items")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Create)]
     public async Task<ActionResult<InventoryItemFinancialDto>> CreateItem(SaveInventoryItemRequest request, CancellationToken cancellationToken)
     {
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
@@ -83,6 +85,7 @@ public sealed class InventoryController(
     }
 
     [HttpPut("items/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Edit)]
     public async Task<ActionResult<InventoryItemFinancialDto>> UpdateItem(Guid id, SaveInventoryItemRequest request, CancellationToken cancellationToken)
     {
         var item = await db.InventoryItems.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -101,6 +104,7 @@ public sealed class InventoryController(
     }
 
     [HttpDelete("items/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Delete)]
     public async Task<IActionResult> DeleteItem(Guid id, CancellationToken cancellationToken)
     {
         var item = await db.InventoryItems.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -130,6 +134,7 @@ public sealed class InventoryController(
     }
 
     [HttpDelete("items/{id:guid}/force")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Delete)]
     public async Task<IActionResult> ForceDeleteItem(Guid id, CancellationToken cancellationToken)
     {
         var item = await db.InventoryItems.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -157,28 +162,6 @@ public sealed class InventoryController(
             .Where(x => x.TransactionType == "out")
             .Select(x => (DateOnly?)x.Date)
             .Min();
-
-        if (earliestBilledDate.HasValue)
-        {
-            var startKey = earliestBilledDate.Value.Year * 100 + earliestBilledDate.Value.Month;
-            var billingEnd = DateOnly.FromDateTime(DateTime.Today).AddMonths(1);
-            var endKey = billingEnd.Year * 100 + billingEnd.Month;
-            var firstLockedPeriod = await db.BillingPeriods.AsNoTracking()
-                .Where(x => x.IsLocked
-                    && x.Year * 100 + x.Month >= startKey
-                    && x.Year * 100 + x.Month <= endKey)
-                .OrderBy(x => x.Year)
-                .ThenBy(x => x.Month)
-                .Select(x => new { x.Month, x.Year })
-                .FirstOrDefaultAsync(cancellationToken);
-            if (firstLockedPeriod is not null)
-            {
-                return StatusCode(403, new
-                {
-                    message = $"Billing period {firstLockedPeriod.Month:00}/{firstLockedPeriod.Year} is closed. Unlock it before force deleting this item.",
-                });
-            }
-        }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -219,6 +202,7 @@ public sealed class InventoryController(
     }
 
     [HttpGet("participant-count")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
     public async Task<ActionResult<int>> GetParticipantCount(
         [FromQuery] DateOnly date,
         [FromQuery] string mealPeriod,
@@ -239,6 +223,7 @@ public sealed class InventoryController(
 
     [HttpGet("transactions")]
     [HttpGet("ledger")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
     public async Task<IReadOnlyList<StockTransactionDto>> GetTransactions(
         [FromQuery] Guid? itemId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? wing,
         CancellationToken cancellationToken)
@@ -252,15 +237,13 @@ public sealed class InventoryController(
         if (itemId.HasValue) query = query.Where(x => x.ItemId == itemId);
         if (from.HasValue) query = query.Where(x => x.Date >= from);
         if (to.HasValue) query = query.Where(x => x.Date <= to);
-        var locked = await db.BillingPeriods.AsNoTracking().Where(x => x.IsLocked)
-            .Select(x => new { x.Month, x.Year }).ToListAsync(cancellationToken);
-        var lockedKeys = locked.Select(x => x.Year * 100 + x.Month).ToHashSet();
         var rows = await query.OrderByDescending(x => x.Date).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken);
-        return rows.Select(x => ToDto(x, lockedKeys.Contains(x.Date.Year * 100 + x.Date.Month))).ToList();
+        return rows.Select(x => ToDto(x, false)).ToList();
     }
 
     [HttpPost("transactions")]
     [HttpPost("movements")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Create)]
     public async Task<ActionResult<StockTransactionDto>> CreateTransaction(SaveStockTransactionRequest request, CancellationToken cancellationToken)
     {
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
@@ -292,7 +275,6 @@ public sealed class InventoryController(
         if (validation is not null) return BadRequest(new { message = validation });
         try
         {
-            await periods.EnsureOpenAsync(updatedRequest.Date, cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var row = new StockTransaction
             {
@@ -319,12 +301,12 @@ public sealed class InventoryController(
             await db.Entry(row).Reference(x => x.Item).LoadAsync(cancellationToken);
             return CreatedAtAction(nameof(GetTransactions), ToDto(row, false));
         }
-        catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpPut("transactions/{id:guid}")]
     [HttpPut("movements/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Edit)]
     public async Task<ActionResult<StockTransactionDto>> UpdateTransaction(Guid id, SaveStockTransactionRequest request, CancellationToken cancellationToken)
     {
         var row = await db.StockTransactions.Include(x => x.Item).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -367,8 +349,6 @@ public sealed class InventoryController(
         if (validation is not null) return BadRequest(new { message = validation });
         try
         {
-            await periods.EnsureOpenAsync(row.Date, cancellationToken);
-            await periods.EnsureOpenAsync(updatedRequest.Date, cancellationToken);
             var oldItemId = row.ItemId;
             var oldDate = row.Date;
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -393,12 +373,12 @@ public sealed class InventoryController(
             await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
             return ToDto(row, false);
         }
-        catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpDelete("transactions/{id:guid}")]
     [HttpDelete("movements/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Delete)]
     public async Task<IActionResult> DeleteTransaction(Guid id, CancellationToken cancellationToken)
     {
         var row = await db.StockTransactions.Include(x => x.Item).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -426,7 +406,6 @@ public sealed class InventoryController(
         }
         try
         {
-            await periods.EnsureOpenAsync(row.Date, cancellationToken);
             var itemId = row.ItemId;
             var date = row.Date;
             db.StockTransactions.Remove(row);
@@ -436,7 +415,6 @@ public sealed class InventoryController(
             await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
             return NoContent();
         }
-        catch (BillingPeriodClosedException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
@@ -505,6 +483,7 @@ public sealed class InventoryController(
     /// item's lots without a request per item. Labels are positional within their own item.
     /// </summary>
     [HttpGet("batches")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
     public async Task<IReadOnlyList<InventoryBatchDto>> GetAllBatches(
         [FromQuery] string? wing = null,
         CancellationToken cancellationToken = default)
@@ -549,6 +528,7 @@ public sealed class InventoryController(
     /// the batch id, never the label.
     /// </summary>
     [HttpGet("items/{id:guid}/batches")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<InventoryBatchDto>>> GetBatches(
         Guid id,
         [FromQuery] bool includeEmpty = false,

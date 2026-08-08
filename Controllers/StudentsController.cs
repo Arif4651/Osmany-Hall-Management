@@ -5,6 +5,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.HallAdministrators)]
+[Authorize]
 [Route("api/students")]
 public sealed class StudentsController(HallDbContext db, PasswordService passwords, CurrentUserService currentUser) : ControllerBase
 {
@@ -23,6 +24,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     private static readonly Regex EmailRegex = new("^\\S+@\\S+\\.\\S+$", RegexOptions.Compiled);
 
     [HttpGet]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
     public async Task<ActionResult<StudentListResponse>> GetStudents([FromQuery] string? search, [FromQuery] string? department, [FromQuery] string? level, [FromQuery] string? hallName, [FromQuery] string? status, [FromQuery] string? gender, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
@@ -38,6 +40,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpGet("export")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<StudentDto>>> Export([FromQuery] string? search, [FromQuery] string? department, [FromQuery] string? level, [FromQuery] string? hallName, [FromQuery] string? status, [FromQuery] string? gender, CancellationToken cancellationToken)
     {
         return await ApplyFilters(await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken), search, department, level, hallName, status, gender)
@@ -47,6 +50,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpGet("{id:guid}")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
     public async Task<ActionResult<StudentDto>> GetStudent(Guid id, CancellationToken cancellationToken)
     {
         var student = await (await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -55,6 +59,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
 
     [HttpGet("filter-options")]
     [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "filter-options-cache")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
     public async Task<StudentFilterOptionsResponse> GetFilterOptions(CancellationToken cancellationToken)
     {
         var students = await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken);
@@ -68,6 +73,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Create)]
     public async Task<ActionResult<StudentDto>> CreateStudent(StudentUpsertRequest request, CancellationToken cancellationToken)
     {
         var wing = await currentUser.GetAdminWingAsync(cancellationToken);
@@ -102,6 +108,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPut("{id:guid}")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Edit)]
     public async Task<ActionResult<StudentDto>> UpdateStudent(Guid id, StudentUpsertRequest request, CancellationToken cancellationToken)
     {
         var student = await (await ScopedStudentsAsync(db.Students, cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -127,6 +134,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpDelete("{id:guid}")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Delete)]
     public async Task<ActionResult<StudentDto>> MarkInactive(Guid id, CancellationToken cancellationToken)
     {
         var student = await (await ScopedStudentsAsync(db.Students, cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -137,6 +145,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpDelete("{id:guid}/permanent")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Delete)]
     public async Task<ActionResult<BulkStudentResponse>> PermanentDelete(Guid id, [FromQuery] bool force = false, CancellationToken cancellationToken = default)
     {
         var student = await (await ScopedStudentsAsync(db.Students, cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -150,6 +159,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost("bulk")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Edit)]
     public async Task<ActionResult<BulkStudentResponse>> BulkUpdate(BulkStudentRequest request, CancellationToken cancellationToken)
     {
         if (request.SelectedStudentIds.Count == 0) return BadRequest(new { message = "Select at least one student first." });
@@ -169,6 +179,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost("bulk/archive")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Edit)]
     public Task<ActionResult<BulkStudentResponse>> BulkArchive(BulkStudentRequest request, CancellationToken cancellationToken)
     {
         request.UpdateFields["status"] = "archived";
@@ -176,6 +187,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost("bulk/reactivate")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Edit)]
     public Task<ActionResult<BulkStudentResponse>> BulkReactivate(BulkStudentRequest request, CancellationToken cancellationToken)
     {
         request.UpdateFields["status"] = "active";
@@ -183,6 +195,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost("bulk/permanent-delete")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Delete)]
     public async Task<ActionResult<BulkStudentResponse>> BulkPermanentDelete(BulkStudentRequest request, CancellationToken cancellationToken)
     {
         if (request.SelectedStudentIds.Count == 0) return BadRequest(new { message = "Select at least one student first." });
@@ -202,6 +215,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     }
 
     [HttpPost("{id:guid}/reset-password")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Edit)]
     public async Task<ActionResult<object>> ResetPassword(Guid id, CancellationToken cancellationToken)
     {
         var student = await (await ScopedStudentsAsync(db.Students, cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);

@@ -2,6 +2,7 @@ using HallBackend.Application.Dtos;
 using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace HallBackend.Controllers;
 
 [ApiController]
-[Authorize(Roles = Roles.HallAdministrators)]
+[Authorize]
+[RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
 [Route("api/admin/students")]
 public sealed class AdminStudentSearchController(HallDbContext db, CurrentUserService currentUser) : ControllerBase
 {

@@ -77,6 +77,7 @@ public sealed class ServiceBill : Entity
 {
     public int Month { get; set; }
     public int Year { get; set; }
+    public string Wing { get; set; } = string.Empty;
     public decimal AmountPerStudent { get; set; }
     public bool IsLocked { get; set; }
     public int Version { get; set; } = 1;
@@ -132,6 +133,8 @@ public sealed class MonthlyBillCache : Entity
     public decimal MonthlyBill { get; set; }
     public decimal DswSubsidy { get; set; }
     public decimal GuestMealBill { get; set; }
+    /// <summary>Sum of this student's OthersBillAllocation rows for the month (tea, milk, …).</summary>
+    public decimal OthersBill { get; set; }
     public decimal ServiceBill { get; set; }
     public decimal CarriedDue { get; set; }
     public decimal TotalApprovedPaid { get; set; }

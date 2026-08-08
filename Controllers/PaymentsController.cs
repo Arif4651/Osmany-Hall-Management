@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,7 @@ namespace HallBackend.Controllers;
 public sealed class PaymentsController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing,
-    BillingPeriodService periods) : ControllerBase
+    BillingCalculationService billing) : ControllerBase
 {
     [HttpGet("categories")]
     public async Task<IReadOnlyList<PaymentCategoryDto>> GetCategories([FromQuery] bool includeInactive = false, CancellationToken cancellationToken = default)
@@ -63,8 +63,6 @@ public sealed class PaymentsController(
         if (request.Amount <= 0m || request.Charges < 0m || string.IsNullOrWhiteSpace(request.TransactionId)
             || request.BillingMonth is < 1 or > 12)
             return BadRequest(new { message = "Enter valid payment details." });
-        if (await periods.IsLockedAsync(request.BillingMonth, request.BillingYear, cancellationToken))
-            return StatusCode(403, new { message = "Billing period is closed." });
         if (!await db.PaymentCategories.AnyAsync(x => x.Id == request.CategoryId && x.IsActive, cancellationToken))
             return BadRequest(new { message = "Payment category is not active." });
         var row = new PaymentSubmission
@@ -92,7 +90,7 @@ public sealed class PaymentsController(
 
     [HttpGet("admin")]
     [HttpGet]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminPayments, PermissionActions.View)]
     public async Task<ActionResult<PaymentListResponse>> GetAll(
         [FromQuery] string? gender,
         [FromQuery] string? status,
@@ -105,9 +103,8 @@ public sealed class PaymentsController(
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var query = db.PaymentSubmissions.AsNoTracking();
-        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
-        if (!string.IsNullOrWhiteSpace(adminWing)) query = query.Where(x => x.Student!.Gender == adminWing);
-        else if (gender is "Male" or "Female") query = query.Where(x => x.Student!.Gender == gender);
+        var wingFilter = await currentUser.GetFinanceWingFilterAsync(gender, cancellationToken);
+        if (wingFilter is not null) query = query.Where(x => x.Student!.Gender == wingFilter);
 
         if (!string.IsNullOrWhiteSpace(status) && status.Trim().ToLowerInvariant() != "all")
         {
@@ -167,7 +164,7 @@ public sealed class PaymentsController(
     }
 
     [HttpPost("{id:guid}/review")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminPayments, PermissionActions.Edit)]
     public async Task<ActionResult<PaymentSubmissionDto>> Review(Guid id, ReviewPaymentRequest request, CancellationToken cancellationToken)
     {
         var action = request.Action.Trim().ToLowerInvariant();
@@ -176,13 +173,12 @@ public sealed class PaymentsController(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var row = await db.PaymentSubmissions.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (row is null) return NotFound();
-        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
-        if (!string.IsNullOrWhiteSpace(adminWing)
-            && !await db.Students.AnyAsync(x => x.Id == row.StudentId && x.Gender == adminWing, cancellationToken))
-            return Forbid();
+        var studentWing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == row.StudentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!await currentUser.CanManageFinanceForWingAsync(studentWing, cancellationToken)) return Forbid();
         if (row.Status != "under_review") return Conflict(new { message = "This payment has already been reviewed." });
-        if (await periods.IsLockedAsync(row.BillingMonth, row.BillingYear, cancellationToken))
-            return StatusCode(403, new { message = "Billing period is closed." });
 
         row.Status = action == "approve" ? "approved" : "rejected";
         row.ReviewedById = currentUser.UserId;

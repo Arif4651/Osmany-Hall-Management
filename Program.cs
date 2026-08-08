@@ -32,12 +32,15 @@ builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUserService>();
-builder.Services.AddScoped<BillingPeriodService>();
 builder.Services.AddScoped<InventoryTransactionService>();
 builder.Services.AddScoped<ItemCatalogService>();
 builder.Services.AddScoped<MealHistoryService>();
 builder.Services.AddScoped<BillingCalculationService>();
+builder.Services.AddScoped<AdditionalMealService>();
+builder.Services.AddScoped<OthersBillService>();
+builder.Services.AddScoped<PermissionService>();
 builder.Services.AddScoped<DataSeeder>();
+builder.Services.AddScoped<AccessControlSeeder>();
 
 // ── Response Compression (Brotli preferred, Gzip fallback) ──────────────────
 // Reduces API payload sizes by ~60-80% for JSON responses.
@@ -177,6 +180,9 @@ if (app.Environment.IsDevelopment())
     var db = scope.ServiceProvider.GetRequiredService<HallDbContext>();
     await db.Database.MigrateAsync();
     await scope.ServiceProvider.GetRequiredService<DataSeeder>().SeedAsync();
+    // Unconditional and idempotent: DataSeeder short-circuits once users exist, but the menu tree
+    // still has to pick up pages added by later deploys.
+    await scope.ServiceProvider.GetRequiredService<AccessControlSeeder>().SeedAsync();
 }
 
 if (!app.Environment.IsDevelopment())

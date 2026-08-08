@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -63,7 +64,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
     }
 
     [HttpPost]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminNoticeBoard, PermissionActions.Create)]
     public async Task<ActionResult<NoticeDto>> Create(CreateNoticeRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 200)
@@ -115,7 +116,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminNoticeBoard, PermissionActions.Edit)]
     public async Task<IActionResult> Update(Guid id, UpdateNoticeRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 200)
@@ -160,7 +161,7 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminNoticeBoard, PermissionActions.Delete)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         var notice = await db.Notices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);

@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,11 +16,10 @@ namespace HallBackend.Controllers;
 public sealed class BillingController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing,
-    BillingPeriodService periods) : ControllerBase
+    BillingCalculationService billing) : ControllerBase
 {
     [HttpGet("monthly")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<MonthlyBillDto>>> GetMonthly(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender,
         [FromQuery] string? status, CancellationToken cancellationToken)
@@ -27,22 +27,22 @@ public sealed class BillingController(
         // ── Performance: read from cache first ───────────────────────────────
         // Calculates only on a cache miss, and at most once even when several admins open
         // the same month together. Explicit recalculation is available via POST
-        // /billing/recalculate. Write operations (save service bill, close/unlock period,
-        // payment approval, subsidy changes) trigger RecalculateForwardAsync automatically.
+        // /billing/recalculate. Write operations (save service bill, payment approval,
+        // subsidy changes) trigger RecalculateForwardAsync automatically.
         await billing.EnsureMonthCalculatedAsync(month, year, cancellationToken);
 
-        var locked = await periods.IsLockedAsync(month, year, cancellationToken);
         var overrides = await db.DueAdjustments.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year)
             .Select(x => x.StudentId).Distinct().ToListAsync(cancellationToken);
         var overrideIds = overrides.ToHashSet();
         var query = db.MonthlyBillCache.AsNoTracking().Include(x => x.Student)
             .Where(x => x.Month == month && x.Year == year);
-        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
-        if (!string.IsNullOrWhiteSpace(adminWing)) query = query.Where(x => x.Student!.Gender == adminWing);
-        if (!string.IsNullOrWhiteSpace(gender) && gender != "All") query = query.Where(x => x.Student!.Gender == gender);
+        // Null means "all wings" — a genuinely wing-less admin/super_admin. Wing admins are
+        // always locked to their own wing here, even if they have cross-wing Payment Verification access.
+        var wingFilter = await currentUser.GetOwnWingFilterAsync(gender, cancellationToken);
+        if (wingFilter is not null) query = query.Where(x => x.Student!.Gender == wingFilter);
         var rows = await query.OrderBy(x => x.Student!.StudentName).ToListAsync(cancellationToken);
-        var result = rows.Select(x => ToDto(x, overrideIds.Contains(x.StudentId), locked)).ToList();
+        var result = rows.Select(x => ToDto(x, overrideIds.Contains(x.StudentId))).ToList();
         if (!string.IsNullOrWhiteSpace(status) && status != "All")
             result = result.Where(x => x.Status.Equals(status, StringComparison.OrdinalIgnoreCase)).ToList();
         return result;
@@ -54,7 +54,7 @@ public sealed class BillingController(
     /// write-triggered path.
     /// </summary>
     [HttpPost("recalculate")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Edit)]
     public async Task<IActionResult> Recalculate(
         [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
     {
@@ -79,7 +79,7 @@ public sealed class BillingController(
         if (row is null) return NotFound();
 
         var overridden = await db.DueAdjustments.AnyAsync(x => x.StudentId == studentId && x.BillingMonth == month && x.BillingYear == year, cancellationToken);
-        return ToDto(row, overridden, await periods.IsLockedAsync(month, year, cancellationToken));
+        return ToDto(row, overridden);
     }
 
     [HttpGet("me/subsidies")]
@@ -109,18 +109,18 @@ public sealed class BillingController(
     }
 
     [HttpPut("service-bills")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Edit)]
     public async Task<IActionResult> SaveServiceBill(SaveServiceBillRequest request, CancellationToken cancellationToken)
     {
         if (request.Month is < 1 or > 12 || request.AmountPerStudent < 0m) return BadRequest(new { message = "Invalid service bill." });
-        if (await periods.IsLockedAsync(request.Month, request.Year, cancellationToken))
-            return StatusCode(403, new { message = "Billing period is closed." });
-        var version = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year)
+        var wing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
+        var version = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year && x.Wing == wing)
             .Select(x => (int?)x.Version).MaxAsync(cancellationToken) ?? 0;
         db.ServiceBills.Add(new ServiceBill
         {
             Month = request.Month,
             Year = request.Year,
+            Wing = wing,
             AmountPerStudent = request.AmountPerStudent,
             Version = version + 1,
             AddedById = currentUser.UserId,
@@ -131,95 +131,37 @@ public sealed class BillingController(
     }
 
     [HttpDelete("service-bills")]
-    [Authorize(Roles = Roles.HallAdministrators)]
-    public async Task<IActionResult> DeleteServiceBill([FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Delete)]
+    public async Task<IActionResult> DeleteServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
-        if (await periods.IsLockedAsync(month, year, cancellationToken))
-            return StatusCode(403, new { message = "Billing period is closed." });
-        var rows = await db.ServiceBills.Where(x => x.Month == month && x.Year == year).ToListAsync(cancellationToken);
+        var resolvedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+        var rows = await db.ServiceBills.Where(x => x.Month == month && x.Year == year && x.Wing == resolvedWing).ToListAsync(cancellationToken);
         db.ServiceBills.RemoveRange(rows);
         await db.SaveChangesAsync(cancellationToken);
         await billing.RecalculateForwardAsync(month, year, cancellationToken);
         return NoContent();
     }
 
-    [HttpPost("periods/close")]
-    [Authorize(Roles = Roles.HallAdministrators)]
-    public async Task<IActionResult> ClosePeriod(CloseBillingPeriodRequest request, CancellationToken cancellationToken)
-    {
-        if (request.Month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await billing.RecalculateMonthAsync(request.Month, request.Year, cancellationToken);
-        var period = await db.BillingPeriods.FirstOrDefaultAsync(x => x.Month == request.Month && x.Year == request.Year, cancellationToken);
-        if (period is null)
-        {
-            period = new BillingPeriod { Month = request.Month, Year = request.Year };
-            db.BillingPeriods.Add(period);
-        }
-        period.IsLocked = true;
-        period.LockedAtUtc = DateTime.UtcNow;
-        period.LockedById = currentUser.UserId;
-        var caches = await db.MonthlyBillCache.Where(x => x.Month == request.Month && x.Year == request.Year).ToListAsync(cancellationToken);
-        foreach (var cache in caches) cache.IsFinal = true;
-        var services = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year).ToListAsync(cancellationToken);
-        foreach (var service in services) service.IsLocked = true;
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return NoContent();
-    }
-
-    [HttpPost("periods/unlock")]
-    [Authorize(Roles = Roles.SuperAdmin)]
-    public async Task<IActionResult> UnlockPeriod(UnlockBillingPeriodRequest request, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.Note)) return BadRequest(new { message = "An unlock note is required." });
-        var period = await db.BillingPeriods.FirstOrDefaultAsync(x => x.Month == request.Month && x.Year == request.Year, cancellationToken);
-        if (period is null || !period.IsLocked) return NotFound(new { message = "Locked billing period was not found." });
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        period.IsLocked = false;
-        period.UnlockNote = request.Note.Trim();
-        db.BillingPeriodUnlockAudits.Add(new BillingPeriodUnlockAudit
-        {
-            Month = request.Month,
-            Year = request.Year,
-            Note = request.Note.Trim(),
-            UnlockedById = currentUser.UserId,
-        });
-        var caches = await db.MonthlyBillCache.Where(x => x.Month == request.Month && x.Year == request.Year).ToListAsync(cancellationToken);
-        foreach (var cache in caches) cache.IsFinal = false;
-        var services = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year).ToListAsync(cancellationToken);
-        foreach (var service in services) service.IsLocked = false;
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await billing.RecalculateForwardAsync(request.Month, request.Year, cancellationToken);
-        return NoContent();
-    }
-
-    [HttpGet("periods")]
-    [Authorize(Roles = Roles.HallAdministrators)]
-    public async Task<IReadOnlyList<BillingPeriodDto>> GetPeriods(CancellationToken cancellationToken)
-        => await db.BillingPeriods.AsNoTracking().OrderByDescending(x => x.Year).ThenByDescending(x => x.Month)
-            .Select(x => new BillingPeriodDto(x.Month, x.Year, x.IsLocked, x.LockedAtUtc)).ToListAsync(cancellationToken);
-
     [HttpGet("service-bills")]
-    [Authorize(Roles = Roles.HallAdministrators)]
-    public async Task<ActionResult<decimal>> GetServiceBill([FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
+    public async Task<ActionResult<decimal>> GetServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
+        var resolvedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
         var service = await db.ServiceBills.AsNoTracking()
-            .Where(x => x.Month == month && x.Year == year)
+            .Where(x => x.Month == month && x.Year == year && x.Wing == resolvedWing)
             .OrderByDescending(x => x.Version)
             .Select(x => x.AmountPerStudent)
             .FirstOrDefaultAsync(cancellationToken);
         return Ok(service);
     }
 
-    private static MonthlyBillDto ToDto(MonthlyBillCache x, bool overridden, bool locked)
+    private static MonthlyBillDto ToDto(MonthlyBillCache x, bool overridden)
     {
         var status = x.DueBill == 0m ? "Paid" : x.DueBill == x.TotalBill ? "Unpaid" : "Partial Paid";
         return new MonthlyBillDto(
             x.StudentId, x.Student?.StudentName ?? string.Empty, x.Student?.RollNumber ?? string.Empty,
             x.Student?.HallId ?? string.Empty, x.Student?.Gender ?? string.Empty,
             x.Month, x.Year, x.ServiceBill, x.MonthlyBill, x.DswSubsidy, x.GuestMealBill, x.CarriedDue, x.DueBill,
-            x.TotalBill, status, overridden, locked);
+            x.TotalBill, status, overridden, false, x.OthersBill);
     }
 }

@@ -3,6 +3,7 @@ using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
+using HallBackend.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +57,7 @@ public sealed class MealsController(
     }
 
     [HttpPut("settings/cutoff")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<MealModuleDto>> UpdateCutoff(UpdateCutoffRequest request, CancellationToken cancellationToken)
     {
         var setting = await db.MealSettings.FirstOrDefaultAsync(cancellationToken);
@@ -71,7 +72,7 @@ public sealed class MealsController(
     }
 
     [HttpPut("configuration")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<MealModuleDto>> UpsertConfiguration(UpsertMealConfigurationRequest request, CancellationToken cancellationToken)
     {
         var day = await db.MealDays.FirstOrDefaultAsync(x => x.Code == request.DayId, cancellationToken);
@@ -152,7 +153,7 @@ public sealed class MealsController(
     }
 
     [HttpGet("counts")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.View)]
     public async Task<ActionResult<MealCountsForDateDto>> GetMealCounts(
         [FromQuery] DateOnly? date, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
@@ -270,7 +271,7 @@ public sealed class MealsController(
     }
 
     [HttpGet("student-controls/{studentRecordId:guid}")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.View)]
     public async Task<ActionResult<AdminStudentMealControlDto>> GetStudentMealControl(
         Guid studentRecordId,
         [FromQuery] DateOnly? date,
@@ -291,7 +292,7 @@ public sealed class MealsController(
     }
 
     [HttpPut("student-controls/status")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<AdminStudentMealControlDto>> SaveStudentMealControlStatus(
         SaveAdminStudentMealStatusRequest request,
         CancellationToken cancellationToken)
@@ -345,8 +346,8 @@ public sealed class MealsController(
             .ToList();
     }
 
-    [Authorize(Roles = Roles.HallAdministrators)]
     [HttpGet("debug-preferences")]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.View)]
     public async Task<IActionResult> DebugPreferences([FromQuery] string studentId, CancellationToken cancellationToken)
     {
         var student = await db.Students.FirstOrDefaultAsync(x => x.StudentId == studentId, cancellationToken);
@@ -568,7 +569,7 @@ public sealed class MealsController(
     }
 
     [HttpPut("menu")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<IReadOnlyList<MenuMealDto>>> SaveMenu(SaveMenuMealRequest request, CancellationToken cancellationToken)
     {
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod)) return BadRequest(new { message = "Invalid meal period." });
@@ -607,7 +608,7 @@ public sealed class MealsController(
     // ── Global Meal Overrides (Admin) ─────────────────────────────────────────
 
     [HttpGet("overrides")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.View)]
     public async Task<IReadOnlyList<GlobalMealOverrideDto>> GetOverrides(
         [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
@@ -622,7 +623,7 @@ public sealed class MealsController(
     }
 
     [HttpPost("overrides")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Create)]
     public async Task<ActionResult<GlobalMealOverrideDto>> CreateOverride(
         SetGlobalMealOverrideRequest request, CancellationToken cancellationToken)
     {
@@ -662,7 +663,7 @@ public sealed class MealsController(
     }
 
     [HttpDelete("overrides/{id:guid}")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Delete)]
     public async Task<IActionResult> DeleteOverride(Guid id, CancellationToken cancellationToken)
     {
         var entity = await db.GlobalMealOverrides.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -746,7 +747,7 @@ public sealed class MealsController(
     }
 
     [HttpGet("sheet")]
-    [Authorize(Roles = Roles.HallAdministrators)]
+    [RequirePermission(MenuKeys.AdminMealSheet, PermissionActions.View)]
     public async Task<ActionResult<MealSheetDto>> GetMealSheet(
         [FromQuery] DateOnly? date, [FromQuery] string? wing, CancellationToken cancellationToken)
     {

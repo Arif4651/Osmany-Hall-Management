@@ -3,6 +3,7 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HallBackend.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    partial class HallDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260808160725_AddAdditionalMealPreferencesAndOthersBill")]
+    partial class AddAdditionalMealPreferencesAndOthersBill
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1491,11 +1494,6 @@ namespace HallBackend.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
-                    b.Property<string>("Wing")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
                     b.Property<int>("Year")
                         .HasColumnType("integer");
 
@@ -1503,7 +1501,7 @@ namespace HallBackend.Migrations
 
                     b.HasIndex("AddedById");
 
-                    b.HasIndex("Month", "Year", "Wing", "Version")
+                    b.HasIndex("Month", "Year", "Version")
                         .IsUnique();
 
                     b.ToTable("service_bills", null, t =>

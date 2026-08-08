@@ -31,10 +31,99 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
     public DbSet<GlobalMealOverride> GlobalMealOverrides => Set<GlobalMealOverride>();
     public DbSet<GuestMealRequest> GuestMealRequests => Set<GuestMealRequest>();
     public DbSet<Notice> Notices => Set<Notice>();
+    public DbSet<AppRole> AppRoles => Set<AppRole>();
+    public DbSet<AppMenu> AppMenus => Set<AppMenu>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<AdditionalMealItem> AdditionalMealItems => Set<AdditionalMealItem>();
+    public DbSet<AdditionalMealSelection> AdditionalMealSelections => Set<AdditionalMealSelection>();
+    public DbSet<OthersBill> OthersBills => Set<OthersBill>();
+    public DbSet<OthersBillAllocation> OthersBillAllocations => Set<OthersBillAllocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<AppRole>(entity =>
+        {
+            entity.ToTable("app_roles");
+            entity.HasIndex(x => x.Key).IsUnique();
+            entity.Property(x => x.Key).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Label).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Area).HasMaxLength(20).IsRequired();
+        });
+
+        modelBuilder.Entity<AppMenu>(entity =>
+        {
+            entity.ToTable("app_menus");
+            entity.HasIndex(x => x.Key).IsUnique();
+            entity.HasIndex(x => new { x.Area, x.ParentId, x.SortOrder });
+            entity.Property(x => x.Key).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Label).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.RoutePath).HasMaxLength(160);
+            entity.Property(x => x.Area).HasMaxLength(20).IsRequired();
+            // A section cannot be removed while pages still hang off it.
+            entity.HasOne(x => x.Parent).WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AdditionalMealItem>(entity =>
+        {
+            entity.ToTable("additional_meal_items", table => table.HasCheckConstraint(
+                "ck_additional_meal_items_wing", "\"EligibleWing\" IN ('Male','Female','All')"));
+            entity.HasIndex(x => x.Code).IsUnique();
+            entity.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.EligibleWing).HasMaxLength(10).IsRequired();
+        });
+
+        modelBuilder.Entity<AdditionalMealSelection>(entity =>
+        {
+            entity.ToTable("additional_meal_selections", table => table.HasCheckConstraint(
+                "ck_additional_meal_selections_quantity", "\"Quantity\" > 0"));
+            // The §9 duplicate rule, enforced by the database rather than only by the API.
+            entity.HasIndex(x => new { x.StudentId, x.ItemId, x.Date, x.MealPeriod }).IsUnique();
+            // Covers the monthly count roll-up, which scans a whole month at a time.
+            entity.HasIndex(x => new { x.Date, x.ItemId });
+            entity.Property(x => x.MealPeriod).HasMaxLength(20).IsRequired();
+            entity.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict: an item that has been selected (and possibly billed) cannot vanish.
+            entity.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OthersBill>(entity =>
+        {
+            entity.ToTable("others_bills", table => table.HasCheckConstraint(
+                "ck_others_bills_month", "\"Month\" BETWEEN 1 AND 12"));
+            // One generated bill per month/item/wing — the regenerate path relies on this.
+            entity.HasIndex(x => new { x.Month, x.Year, x.ItemId, x.Wing }).IsUnique();
+            entity.HasIndex(x => new { x.Year, x.Month });
+            entity.Property(x => x.Wing).HasMaxLength(10).IsRequired();
+            entity.Property(x => x.Notes).HasMaxLength(400);
+            entity.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.GeneratedBy).WithMany().HasForeignKey(x => x.GeneratedById).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OthersBillAllocation>(entity =>
+        {
+            entity.ToTable("others_bill_allocations");
+            entity.HasIndex(x => new { x.OthersBillId, x.StudentId }).IsUnique();
+            // The bill recalculation loads a month's allocations by student.
+            entity.HasIndex(x => x.StudentId);
+            entity.HasOne(x => x.OthersBill).WithMany(x => x.Allocations)
+                .HasForeignKey(x => x.OthersBillId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.ToTable("role_permissions");
+            // One grant row per role/menu pair — the save path relies on this to upsert.
+            entity.HasIndex(x => new { x.Role, x.MenuId }).IsUnique();
+            // Covers the per-request permission load, which runs on every guarded endpoint.
+            entity.HasIndex(x => x.Role);
+            entity.Property(x => x.Role).HasMaxLength(40).IsRequired();
+            entity.HasOne(x => x.Menu).WithMany().HasForeignKey(x => x.MenuId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.UpdatedBy).WithMany().HasForeignKey(x => x.UpdatedById).OnDelete(DeleteBehavior.SetNull);
+        });
 
         modelBuilder.Entity<AppUser>(entity =>
         {
@@ -241,7 +330,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
                 table.HasCheckConstraint("ck_service_bills_month", "\"Month\" BETWEEN 1 AND 12");
                 table.HasCheckConstraint("ck_service_bills_amount", "\"AmountPerStudent\" >= 0");
             });
-            entity.HasIndex(x => new { x.Month, x.Year, x.Version }).IsUnique();
+            entity.HasIndex(x => new { x.Month, x.Year, x.Wing, x.Version }).IsUnique();
+            entity.Property(x => x.Wing).HasMaxLength(10).IsRequired();
             entity.Property(x => x.AmountPerStudent).HasPrecision(12, 4);
             entity.HasOne(x => x.AddedBy).WithMany().HasForeignKey(x => x.AddedById).OnDelete(DeleteBehavior.Restrict);
         });
@@ -374,7 +464,8 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
         {
             entity.ToTable("billing_periods", table => table.HasCheckConstraint("ck_billing_periods_month", "\"Month\" BETWEEN 1 AND 12"));
             entity.HasIndex(x => new { x.Month, x.Year }).IsUnique();
-            // Performance index: IsLockedAsync checks — called on every billing read and write
+            // Retained from the removed period close/unlock feature. Nothing reads these tables
+            // any more; the mapping stays so the historical rows remain queryable.
             entity.HasIndex(x => new { x.Month, x.Year, x.IsLocked });
             entity.HasOne(x => x.LockedBy).WithMany().HasForeignKey(x => x.LockedById).OnDelete(DeleteBehavior.Restrict);
         });

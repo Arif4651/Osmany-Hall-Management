@@ -5,26 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HallBackend.Application.Services;
 
-public sealed class BillingPeriodService(HallDbContext db)
-{
-    public async Task<bool> IsLockedAsync(int month, int year, CancellationToken cancellationToken)
-        => await db.BillingPeriods.AsNoTracking()
-            .AnyAsync(x => x.Month == month && x.Year == year && x.IsLocked, cancellationToken);
-
-    public async Task EnsureOpenAsync(DateOnly date, CancellationToken cancellationToken)
-    {
-        if (await IsLockedAsync(date.Month, date.Year, cancellationToken))
-        {
-            throw new BillingPeriodClosedException();
-        }
-    }
-}
-
-public sealed class BillingPeriodClosedException : InvalidOperationException
-{
-    public BillingPeriodClosedException() : base("Billing period is closed.") { }
-}
-
 /// <summary>
 /// A request supplied values the domain rejects. Carries a message written for the user, so
 /// the exception middleware may safely return it with HTTP 400 — unlike a bare
@@ -33,9 +13,7 @@ public sealed class BillingPeriodClosedException : InvalidOperationException
 /// </summary>
 public sealed class DomainValidationException(string message) : InvalidOperationException(message);
 
-public sealed class InventoryTransactionService(
-    HallDbContext db,
-    BillingPeriodService periods)
+public sealed class InventoryTransactionService(HallDbContext db)
 {
     public async Task RebuildItemAsync(Guid itemId, CancellationToken cancellationToken)
         => await RebuildItemAsync(itemId, null, cancellationToken);
@@ -155,14 +133,6 @@ public sealed class InventoryTransactionService(
         }
         item.LastMovementDate = transactions.LastOrDefault()?.Date;
         item.Status = item.IsDeleted ? "archived" : item.Stock <= item.Threshold ? "low-stock" : "active";
-    }
-
-    public async Task EnsureDatesOpenAsync(params DateOnly[] dates)
-    {
-        foreach (var date in dates.Distinct())
-        {
-            await periods.EnsureOpenAsync(date, CancellationToken.None);
-        }
     }
 }
 
@@ -477,6 +447,7 @@ public sealed record MonthlyBillResult(
     decimal MonthlyBill,
     decimal DswSubsidy,
     decimal GuestMealBill,
+    decimal OthersBill,
     decimal ServiceBill,
     decimal CarriedDue,
     decimal ApprovedPaid,
@@ -485,7 +456,6 @@ public sealed record MonthlyBillResult(
 
 public sealed class BillingCalculationService(
     HallDbContext db,
-    BillingPeriodService periods,
     InventoryTransactionService inventory)
 {
     /// <summary>Earliest billing year accepted from a request. Guards against absurd inputs.</summary>
@@ -556,10 +526,6 @@ public sealed class BillingCalculationService(
         CancellationToken cancellationToken)
     {
         ValidatePeriod(month, year);
-        if (await periods.IsLockedAsync(month, year, cancellationToken))
-        {
-            return await ReadCacheAsync(month, year, cancellationToken);
-        }
 
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
@@ -585,6 +551,15 @@ public sealed class BillingCalculationService(
                 && !x.Subsidy.IsReversed)
             .GroupBy(x => x.StudentId)
             .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.SubsidyAmount) })
+            .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
+
+        // Read from the generated snapshot rather than recomputing from current selections. That
+        // is what stops a routine recalculation from silently moving an already-generated Others
+        // Bill when a student changes their marks afterwards.
+        var othersBillTotals = await db.OthersBillAllocations.AsNoTracking()
+            .Where(x => x.OthersBill != null && x.OthersBill.Month == month && x.OthersBill.Year == year)
+            .GroupBy(x => x.StudentId)
+            .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.AllocatedAmount) })
             .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
 
         var guestMealsGrouped = guestMeals
@@ -615,11 +590,13 @@ public sealed class BillingCalculationService(
             }
         }
 
-        var service = await db.ServiceBills.AsNoTracking()
+        // Service bill is set independently per wing — a Male wing admin's entry never charges
+        // Female wing students, and vice versa.
+        var serviceByWing = await db.ServiceBills.AsNoTracking()
             .Where(x => x.Month == month && x.Year == year)
-            .OrderByDescending(x => x.Version)
-            .Select(x => x.AmountPerStudent)
-            .FirstOrDefaultAsync(cancellationToken);
+            .GroupBy(x => x.Wing)
+            .Select(g => new { Wing = g.Key, Amount = g.OrderByDescending(x => x.Version).Select(x => x.AmountPerStudent).First() })
+            .ToDictionaryAsync(x => x.Wing, x => x.Amount, cancellationToken);
         var previous = from.AddMonths(-1);
         var hasPreviousCache = await db.MonthlyBillCache.AsNoTracking()
             .AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken);
@@ -631,7 +608,8 @@ public sealed class BillingCalculationService(
                 await db.StockTransactions.AnyAsync(x => x.TransactionType == "out" && x.Date >= previousFrom && x.Date <= previousTo, cancellationToken)
                 || await db.ServiceBills.AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken)
                 || await db.PaymentSubmissions.AnyAsync(x => x.BillingMonth == previous.Month && x.BillingYear == previous.Year, cancellationToken)
-                || await db.DueAdjustments.AnyAsync(x => x.BillingMonth == previous.Month && x.BillingYear == previous.Year, cancellationToken);
+                || await db.DueAdjustments.AnyAsync(x => x.BillingMonth == previous.Month && x.BillingYear == previous.Year, cancellationToken)
+                || await db.OthersBills.AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken);
             if (hasPreviousSources) await RecalculateMonthAsync(previous.Month, previous.Year, cancellationToken);
         }
         var previousDue = await db.MonthlyBillCache.AsNoTracking()
@@ -651,14 +629,17 @@ public sealed class BillingCalculationService(
         {
             var carried = previousOverrides.GetValueOrDefault(student.Id, previousDue.GetValueOrDefault(student.Id));
             var subsidy = subsidyTotals.GetValueOrDefault(student.Id);
-            var monthlyAfterSubsidy = monthly[student.Id] - subsidy;
-            var total = monthlyAfterSubsidy + guestBill[student.Id] + service + carried;
+            var othersBill = othersBillTotals.GetValueOrDefault(student.Id);
+            var service = serviceByWing.GetValueOrDefault(student.Gender);
+            // MonthlyBill is reported at its raw, pre-subsidy value — the subsidy is shown as its
+            // own line item — but the subsidy still comes out of the total exactly as before.
+            var total = monthly[student.Id] - subsidy + guestBill[student.Id] + othersBill + service + carried;
             var approved = payments.GetValueOrDefault(student.Id);
             var adjustedDue = currentOverrides.TryGetValue(student.Id, out var overrideDue)
                 ? overrideDue
                 : (decimal?)null;
             var due = FinancialMath.CalculateDue(total, approved, adjustedDue);
-            var result = new MonthlyBillResult(student.Id, monthlyAfterSubsidy, subsidy, guestBill[student.Id], service, carried, approved, due, total);
+            var result = new MonthlyBillResult(student.Id, monthly[student.Id], subsidy, guestBill[student.Id], othersBill, service, carried, approved, due, total);
             results.Add(result);
 
             if (!existing.TryGetValue(student.Id, out var cache))
@@ -669,6 +650,7 @@ public sealed class BillingCalculationService(
             cache.MonthlyBill = result.MonthlyBill;
             cache.DswSubsidy = result.DswSubsidy;
             cache.GuestMealBill = result.GuestMealBill;
+            cache.OthersBill = result.OthersBill;
             cache.ServiceBill = result.ServiceBill;
             cache.CarriedDue = result.CarriedDue;
             cache.TotalApprovedPaid = result.ApprovedPaid;
@@ -695,7 +677,6 @@ public sealed class BillingCalculationService(
 
         while (cursor <= end)
         {
-            if (await periods.IsLockedAsync(cursor.Month, cursor.Year, cancellationToken)) break;
             await RecalculateMonthAsync(cursor.Month, cursor.Year, meals, cancellationToken);
             cursor = cursor.AddMonths(1);
         }
@@ -753,10 +734,4 @@ public sealed class BillingCalculationService(
             .ToListAsync(cancellationToken);
         return rows.GroupBy(x => x.StudentId).ToDictionary(x => x.Key, x => x.First().AdjustedAmount);
     }
-
-    private async Task<IReadOnlyList<MonthlyBillResult>> ReadCacheAsync(int month, int year, CancellationToken cancellationToken)
-        => await db.MonthlyBillCache.AsNoTracking()
-            .Where(x => x.Month == month && x.Year == year)
-            .Select(x => new MonthlyBillResult(x.StudentId, x.MonthlyBill, x.DswSubsidy, x.GuestMealBill, x.ServiceBill, x.CarriedDue, x.TotalApprovedPaid, x.DueBill, x.TotalBill))
-            .ToListAsync(cancellationToken);
 }

@@ -67,8 +67,6 @@ public sealed class ExceptionHandlingMiddleware(
             StatusCodes.Status401Unauthorized,
             "You are not signed in with an account that can access this resource."),
 
-        BillingPeriodClosedException ex => (StatusCodes.Status403Forbidden, ex.Message),
-
         // Only exceptions whose messages we author are echoed back. A bare
         // InvalidOperationException may come from the framework ("Sequence contains no
         // elements"), so it falls through to the generic 500 below.
