@@ -100,6 +100,7 @@ export function AuthProvider({ children }) {
 
   // Reload grants whenever the signed-in identity changes.
   const userId = session?.user?.id ?? null;
+  const userRole = session?.user?.role ?? null;
   useEffect(() => {
     let isMounted = true;
 
@@ -116,8 +117,14 @@ export function AuthProvider({ children }) {
         if (isMounted) setPermissions(result);
       })
       .catch(() => {
-        // A failed load must not silently widen access — fall back to "nothing granted".
-        if (isMounted) setPermissions({ role: '', isSuperAdmin: false, permissions: [] });
+        // A failed load must not silently widen access for anyone else — fall back to "nothing
+        // granted". Super admin is the one exception: the role itself (already verified at login,
+        // independent of this call) is enough to grant full access, so a broken/unseeded
+        // permissions endpoint can never lock a super admin out of their own hall.
+        if (isMounted) {
+          const isSuper = userRole === 'super_admin';
+          setPermissions({ role: isSuper ? userRole : '', isSuperAdmin: isSuper, permissions: [] });
+        }
       })
       .finally(() => {
         if (isMounted) setIsPermissionsLoading(false);
@@ -126,7 +133,7 @@ export function AuthProvider({ children }) {
     return () => {
       isMounted = false;
     };
-  }, [userId]);
+  }, [userId, userRole]);
 
   const refreshPermissions = useCallback(async () => {
     try {
