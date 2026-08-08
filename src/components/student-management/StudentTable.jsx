@@ -1,6 +1,23 @@
 import StudentStatusBadge from './StatusBadge';
 import StudentActionMenu from './StudentActionMenu';
 
+// One entry per data column, so the header and the cell it labels stay in
+// step. Selection, status and actions are laid out by hand around these.
+const COLUMNS = [
+  { key: 'studentName', label: 'Student Name', cellClass: 'cell-name' },
+  { key: 'studentId', label: 'Student ID', cellClass: 'cell-mono' },
+  { key: 'rollNumber', label: 'Roll', cellClass: 'cell-strong' },
+  { key: 'gender', label: 'Gender' },
+  { key: 'department', label: 'Department', cellClass: 'cell-muted' },
+  { key: 'hallId', label: 'Hall ID', cellClass: 'cell-muted cell-small' },
+  { key: 'mobileNumber', label: 'Mobile Number', cellClass: 'cell-muted' },
+  { key: 'level', label: 'Level / Year' },
+  { key: 'hallName', label: 'Hall Name', cellClass: 'cell-muted' },
+  { key: 'roomNo', label: 'Room No', render: (student) => student.roomNo || '-' },
+];
+
+const COLUMN_COUNT = COLUMNS.length + 3;
+
 export default function StudentTable({
   students,
   isLoading,
@@ -13,87 +30,62 @@ export default function StudentTable({
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedSet.has(id));
 
   return (
-    <div className="table-wrapper sticky-page-table" role="region" aria-label="Student management table">
-      <table className="data-table student-data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <div
+      className="table-wrapper sticky-page-table student-table-scroll"
+      role="region"
+      aria-label="Student management table"
+      tabIndex={0}
+    >
+      <table className="data-table student-data-table">
         <thead>
           <tr>
-            <th style={{ padding: '0.75rem', width: '30px', textAlign: 'center' }}>
-              <input type="checkbox" checked={allPageSelected} onChange={() => onTogglePage(pageIds)} />
+            <th className="cell-select">
+              <input
+                type="checkbox"
+                checked={allPageSelected}
+                onChange={() => onTogglePage(pageIds)}
+                aria-label="Select every student on this page"
+              />
             </th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Name</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student ID</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Roll</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Gender</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Department</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Hall ID</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Mobile Number</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Level / Year</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Hall Name</th>
-            <th style={{ textAlign: 'left', padding: '0.75rem' }}>Room No</th>
-            <th style={{ textAlign: 'center', padding: '0.75rem' }}>Status</th>
-            <th style={{ textAlign: 'center', padding: '0.75rem' }}>Actions</th>
+            {COLUMNS.map((column) => (
+              <th key={column.key}>{column.label}</th>
+            ))}
+            <th className="cell-center">Status</th>
+            <th className="cell-center">Actions</th>
           </tr>
         </thead>
         <tbody>
           {isLoading ? (
-            <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                Loading students...
-              </td>
+            <tr className="student-row-message">
+              <td colSpan={COLUMN_COUNT}>Loading students...</td>
             </tr>
           ) : students.length ? (
             students.map((student) => (
-              <tr key={student.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <tr key={student.id}>
+                <td className="cell-select">
                   <input
                     type="checkbox"
                     checked={selectedSet.has(student.id)}
                     onChange={() => onToggleStudent(student.id)}
+                    aria-label={`Select ${student.studentName}`}
                   />
                 </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
-                  {student.studentName}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.9rem', color: '#334155' }}>
-                  {student.studentId}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>
-                  {student.rollNumber}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left' }}>
-                  {student.gender}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
-                  {student.department}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>
-                  {student.hallId}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
-                  {student.mobileNumber}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left' }}>
-                  {student.level}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)' }}>
-                  {student.hallName}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'left' }}>
-                  {student.roomNo || '-'}
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                {COLUMNS.map((column) => (
+                  <td key={column.key} className={column.cellClass}>
+                    {column.render ? column.render(student) : student[column.key]}
+                  </td>
+                ))}
+                <td className="cell-center">
                   <StudentStatusBadge status={student.status} />
                 </td>
-                <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                <td className="cell-center">
                   <StudentActionMenu student={student} onAction={onAction} />
                 </td>
               </tr>
             ))
           ) : (
-            <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                No students match the current search and filters.
-              </td>
+            <tr className="student-row-message">
+              <td colSpan={COLUMN_COUNT}>No students match the current search and filters.</td>
             </tr>
           )}
         </tbody>
