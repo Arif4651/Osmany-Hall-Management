@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { RefreshCcw, Venus, Mars } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
@@ -39,12 +39,7 @@ export default function AdminStudentsPage() {
     updateFilter,
     resetFilters,
 
-    page,
-    pageSize,
-    setPage,
-    setPageSize,
     total,
-    totalPages,
     filterOptions,
 
     selectedIds,
@@ -99,13 +94,6 @@ export default function AdminStudentsPage() {
   }, [searchParams]);
 
   const hasSelection = selectedIds.length > 0;
-
-  const pageStart = useMemo(() => {
-    if (!total) return 0;
-    return (page - 1) * pageSize + 1;
-  }, [page, pageSize, total]);
-
-  const pageEnd = useMemo(() => Math.min(page * pageSize, total), [page, pageSize, total]);
 
   const handleRowAction = async (action, student) => {
     if (action === 'view') {
@@ -270,7 +258,7 @@ export default function AdminStudentsPage() {
 
       <PageSection
         title="Student List"
-        subtitle={`Showing ${pageStart}-${pageEnd} of ${total} students`}
+        subtitle={`Showing all ${total} students`}
       >
         <div className="inline-actions" style={{ marginBottom: '0.75rem' }}>
           <Button variant="secondary" onClick={() => handleExportStudents('excel')} disabled={isExporting || isLoading}>
@@ -299,28 +287,13 @@ export default function AdminStudentsPage() {
           onAction={handleRowAction}
         />
 
-        <div className="student-pagination-row">
-          <div>
-            <span>Rows per page</span>
-            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className="inline-actions">
-            <Button variant="secondary" onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1}>
-              Previous
-            </Button>
-            <span style={{ alignSelf: 'center' }}>Page {page} of {totalPages}</span>
-            <Button variant="secondary" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}>
-              Next
-            </Button>
-            <Button variant="ghost" onClick={evaluateAllLifecycles}>
-              <RefreshCcw size={14} />
-              Recheck Lifecycle
-            </Button>
-          </div>
+        {/* No pagination — the roster always loads as a single page (useAdminStudentModule
+            fetches with a fixed high page size), so there is nothing to page through. */}
+        <div className="student-pagination-row" style={{ justifyContent: 'flex-end' }}>
+          <Button variant="ghost" onClick={evaluateAllLifecycles}>
+            <RefreshCcw size={14} />
+            Recheck Lifecycle
+          </Button>
         </div>
       </PageSection>
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import StudentStatusBadge from './StatusBadge';
 import StudentActionMenu from './StudentActionMenu';
 
@@ -29,12 +30,48 @@ export default function StudentTable({
   const pageIds = students.map((student) => student.id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedSet.has(id));
 
+  // The 13-column roster (~1380px) is wider than the content column below a certain window
+  // size, so the wrapper normally has to clip it with `overflow-x: auto`. But a sticky
+  // header can only stick to the *page* (matching Bill Management's `.billing-table-scroll`)
+  // while that wrapper stays `overflow: visible` — an `overflow-x: auto` container is also
+  // forced to compute `overflow-y: auto`, which makes the wrapper itself (not the page) the
+  // sticky containing block, and since it never scrolls vertically the header just renders
+  // permanently offset instead of tracking scroll. A fixed CSS breakpoint can't reliably
+  // predict when the table needs to clip (OS display scaling, browser zoom, and sidebar
+  // collapse all shift the real available width), so this measures it directly: only switch
+  // to the visible/sticky mode once the table genuinely fits without horizontal overflow.
+  const wrapperRef = useRef(null);
+  const [tableFits, setTableFits] = useState(false);
+
+  useEffect(() => {
+    const wrapperEl = wrapperRef.current;
+    if (!wrapperEl) return undefined;
+
+    const measure = () => {
+      setTableFits(wrapperEl.scrollWidth - wrapperEl.clientWidth <= 1);
+    };
+
+    measure();
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(wrapperEl);
+    window.addEventListener('resize', measure);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // Column count never changes at runtime, but row count and viewport width do — both can
+    // flip whether the table overflows horizontally.
+  }, [students.length]);
+
   return (
     <div
-      className="table-wrapper sticky-page-table student-table-scroll"
+      className={`table-wrapper sticky-page-table student-table-scroll${tableFits ? ' student-table-fits' : ''}`}
       role="region"
       aria-label="Student management table"
       tabIndex={0}
+      ref={wrapperRef}
     >
       <table className="data-table student-data-table">
         <thead>

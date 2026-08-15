@@ -8130,22 +8130,34 @@ button {
   }
 }
 
-/* --- Student roster: scrolls inside its own box, at every width -----------
+/* --- Student roster: flows with the page, at every width ------------------
    The 13-column roster needs ~1380px, which is wider than the content column
-   on anything short of an ultrawide screen. Handing the overflow back to the
-   page made the whole shell — sidebar and header included — slide sideways,
-   so the wrapper owns both scroll axes instead and the headers stick to the
-   top of the wrapper rather than to the page. */
+   on anything short of an ultrawide screen, so by default horizontal overflow
+   is contained inside this wrapper (same as any `.table-wrap` elsewhere)
+   rather than bubbling up and dragging the whole shell — sidebar included —
+   sideways.
 
-/* Sized so a default page of 10 rows fits without the wrapper scrolling inside a page that is
-   already scrolling — two nested scrollbars for one list is what made it feel cramped. The
-   reserved space covers the sticky header and the pagination row below the table; the floor keeps
-   it usable on a short window. */
+   The header can only be `position: sticky` to the *page* — matching Bill
+   Management's `.billing-table-scroll` — while the wrapper stays
+   `overflow: visible`. An `overflow-x: auto` wrapper is also forced to
+   compute `overflow-y: auto` (an axis can't stay `visible` once the other
+   isn't), which makes the wrapper its own scroll container even though it
+   never actually scrolls vertically — nothing constrains its height. A
+   sticky header inside a wrapper like that doesn't stick to the page, it
+   sticks to that inert scrollport, i.e. it renders permanently offset by
+   `top` from the wrapper's own start, landing on top of the first row or
+   two — that was the earlier header/row overlap bug. So sticky only turns on
+   below, once the viewport is wide enough that the 1380px table actually
+   fits the content column without needing horizontal containment at all
+   (mirroring the generic `.sticky-page-table` breakpoints above, just
+   recalculated for this table's wider min-width instead of the default
+   720px one). Below that width the header stays static and the wrapper
+   keeps clipping horizontally, same as the always-contained state below. */
 .table-wrapper.student-table-scroll,
 .app-shell .table-wrapper.student-table-scroll {
-  overflow: auto !important;
-  max-height: max(520px, calc(100vh - 8rem));
-  overscroll-behavior: contain;
+  overflow-x: auto !important;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
 }
 
 .table-wrapper.student-table-scroll:focus-visible {
@@ -8153,10 +8165,18 @@ button {
   outline-offset: 2px;
 }
 
-.table-wrapper.student-table-scroll .data-table thead th,
-.app-shell .table-wrapper.student-table-scroll .data-table thead th {
+/* `.student-table-fits` is set from JS (StudentTable.jsx) once it measures that the table
+   genuinely renders without horizontal overflow — a fixed px breakpoint can't account for OS
+   display scaling, browser zoom, or the sidebar being collapsed, all of which shift the real
+   available width independently of the CSS viewport. Only then is it safe to drop horizontal
+   containment and let the header stick to the page, exactly like Bill Management. */
+.table-wrapper.sticky-page-table.student-table-scroll.student-table-fits {
+  overflow: visible !important;
+}
+
+.table-wrapper.sticky-page-table.student-table-scroll.student-table-fits .data-table thead th {
   position: sticky;
-  top: 0;
+  top: 4.35rem;
 }
 
 .student-data-table {
@@ -8267,11 +8287,6 @@ button {
 
   .student-table-scroll .student-data-table th {
     font-size: 0.72rem;
-  }
-
-  .table-wrapper.student-table-scroll,
-  .app-shell .table-wrapper.student-table-scroll {
-    max-height: max(380px, calc(100vh - 8rem));
   }
 }
 

@@ -6,7 +6,10 @@ import { studentService } from '../services/studentService';
 import { queryCache } from '../services/queryCache';
 import { useToast } from '../context/ToastContext';
 
-const DEFAULT_PAGE_SIZE = 10;
+// No pagination on this page by design — the roster always loads as one page. 2000 comfortably
+// covers a hall's real population; it also matches the backend's page-size ceiling
+// (StudentsController.GetStudents).
+const SHOW_ALL_PAGE_SIZE = 2000;
 
 export default function useAdminStudentModule() {
   const toast = useToast();
@@ -19,10 +22,7 @@ export default function useAdminStudentModule() {
   const [errorMessage, setErrorMessage] = useState('');
 
   const [filters, setFilters] = useState(DEFAULT_STUDENT_FILTERS);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
   const [filterOptions, setFilterOptions] = useState({
     departments: [],
     levels: [],
@@ -55,21 +55,19 @@ export default function useAdminStudentModule() {
     try {
       // Ships the current selection so the server can tell us which of those ids still match —
       // not every matching id, which used to be downloaded on every page turn regardless of
-      // selection size.
+      // selection size. page is always 1 here: this list never paginates.
       const response = await studentService.getStudents({
-        filters, page, pageSize, selectedIds: selectedIdsRef.current,
+        filters, page: 1, pageSize: SHOW_ALL_PAGE_SIZE, selectedIds: selectedIdsRef.current,
       });
       setStudents(response.items);
       setTotal(response.total);
-      setTotalPages(response.totalPages);
-      setPage(response.page);
       setSelectedIds(response.filteredIds);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load students.');
     } finally {
       setIsLoading(false);
     }
-  }, [filters, page, pageSize]);
+  }, [filters]);
 
   useEffect(() => {
     loadStudents();
@@ -90,12 +88,10 @@ export default function useAdminStudentModule() {
 
   const updateFilter = useCallback((key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
-    setPage(1);
   }, []);
 
   const resetFilters = useCallback(() => {
     setFilters(DEFAULT_STUDENT_FILTERS);
-    setPage(1);
   }, []);
 
   const toggleStudentSelection = useCallback((id) => {
@@ -139,6 +135,12 @@ export default function useAdminStudentModule() {
 
     try {
       await fn();
+      // Every action that reaches here — single-row or bulk — has just done the one thing the
+      // admin asked for. Without this, a "Select All Filtered" click from an earlier bulk
+      // operation stayed armed through every unrelated action afterward (loadStudents only
+      // intersects the selection against the reloaded page, it never clears it), so the whole
+      // list kept reappearing checked with no visible reason why.
+      setSelectedIds([]);
       await loadStudents();
       return { ok: true };
     } catch (error) {
@@ -255,9 +257,9 @@ export default function useAdminStudentModule() {
       });
 
       toast.success('Bulk update completed', `${result.updatedCount} students updated.`);
-      clearSelection();
+      // Selection is cleared centrally by withSubmitState after every successful action.
     }, 'Bulk update failed');
-  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
+  }, [withSubmitState, selectedIds, filters, toast]);
 
   const bulkPromoteStudents = useCallback((targetLevel) => {
     return bulkUpdateStudents({ level: targetLevel });
@@ -281,9 +283,8 @@ export default function useAdminStudentModule() {
         selectedStudentIds: selectedIds,
       });
       toast.success('Archive completed', `${result.updatedCount} students archived.`);
-      clearSelection();
     }, 'Bulk archive failed');
-  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
+  }, [withSubmitState, selectedIds, filters, toast]);
 
   const bulkReactivateStudents = useCallback((payload) => {
     return withSubmitState(async () => {
@@ -294,9 +295,8 @@ export default function useAdminStudentModule() {
         ...payload,
       });
       toast.success('Bulk reactivation completed', `${result.updatedCount} students reactivated.`);
-      clearSelection();
     }, 'Bulk reactivation failed');
-  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
+  }, [withSubmitState, selectedIds, filters, toast]);
 
   const bulkPermanentDeleteStudents = useCallback((force = false) => {
     return withSubmitState(async () => {
@@ -311,9 +311,8 @@ export default function useAdminStudentModule() {
         `${result.deletedCount} records permanently deleted. `
         + (result.skippedIds.length ? `${result.skippedIds.length} skipped (not eligible).` : 'No records were skipped.'),
       );
-      clearSelection();
     }, 'Permanent deletion failed');
-  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
+  }, [withSubmitState, selectedIds, filters, toast]);
 
   const evaluateAllLifecycles = useCallback(() => {
     return withSubmitState(async () => {
@@ -337,12 +336,7 @@ export default function useAdminStudentModule() {
     updateFilter,
     resetFilters,
 
-    page,
-    pageSize,
-    setPage,
-    setPageSize,
     total,
-    totalPages,
     filterOptions,
 
     selectedIds,
