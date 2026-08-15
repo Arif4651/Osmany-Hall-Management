@@ -42,7 +42,9 @@ public sealed class StudentsController(
         CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 100);
+        // 2000 comfortably covers "show every student on one page" for any hall's real
+        // population while still bounding a single response.
+        pageSize = Math.Clamp(pageSize, 1, 2000);
         var query = ApplyFilters(await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken), search, department, level, hallName, status, gender).OrderBy(x => x.StudentName);
         var total = await query.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
