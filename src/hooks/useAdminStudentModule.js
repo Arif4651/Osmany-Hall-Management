@@ -140,6 +140,14 @@ export default function useAdminStudentModule() {
       // operation stayed armed through every unrelated action afterward (loadStudents only
       // intersects the selection against the reloaded page, it never clears it), so the whole
       // list kept reappearing checked with no visible reason why.
+      //
+      // The ref has to be cleared right here too, not just the state: loadStudents (called next)
+      // reads selectedIdsRef.current synchronously, but the effect that normally keeps that ref
+      // in sync with `selectedIds` only runs after the next render commits — which hasn't
+      // happened yet at this point in the same async call. Without this line, loadStudents would
+      // still read the pre-clear selection, send it to the server for reconciliation, and get it
+      // right back as `filteredIds` — silently undoing the clear above.
+      selectedIdsRef.current = [];
       setSelectedIds([]);
       await loadStudents();
       return { ok: true };
