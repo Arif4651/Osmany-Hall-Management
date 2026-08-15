@@ -8225,10 +8225,21 @@ button {
 /* Keep identity (checkbox + name) in view while scrolling sideways. The first
    column is 30px of checkbox plus 0.75rem of padding on each side. Applied
    only where the table still renders as a table — see the card layout below,
-   which would otherwise pin the header cells and shear the columns apart. */
+   which would otherwise pin the header cells and shear the columns apart.
+
+   Scoped to `:not(.student-table-fits)`: when the table fits without
+   horizontal overflow, there's nothing to freeze against (the wrapper isn't
+   even a scroll container any more — see `.student-table-fits` above), so
+   this became a no-op that was actively harmful instead: `th:first-child`
+   would carry both this rule's `position: sticky; left: 0` and the fits-mode
+   header's `position: sticky; top: 4.35rem` at once, and stacking a
+   horizontal sticky offset onto the header's vertical one broke rendering of
+   the first two header cells (the checkbox and Student Name columns went
+   missing). The body's `td:first-child`/`td:nth-child(2)` never combined
+   with a `top` offset, which is why only the header was affected. */
 @media (min-width: 701px) {
-  .student-table-scroll .student-data-table th:first-child,
-  .student-table-scroll .student-data-table td:first-child {
+  .student-table-scroll:not(.student-table-fits) .student-data-table th:first-child,
+  .student-table-scroll:not(.student-table-fits) .student-data-table td:first-child {
     position: sticky;
     left: 0;
     z-index: 6;
@@ -8238,8 +8249,8 @@ button {
     max-width: 54px;
   }
 
-  .student-table-scroll .student-data-table th:nth-child(2),
-  .student-table-scroll .student-data-table td:nth-child(2) {
+  .student-table-scroll:not(.student-table-fits) .student-data-table th:nth-child(2),
+  .student-table-scroll:not(.student-table-fits) .student-data-table td:nth-child(2) {
     position: sticky;
     left: 54px;
     z-index: 6;
@@ -8247,13 +8258,13 @@ button {
     box-shadow: 1px 0 0 var(--border);
   }
 
-  .student-table-scroll .student-data-table thead th:first-child,
-  .student-table-scroll .student-data-table thead th:nth-child(2) {
+  .student-table-scroll:not(.student-table-fits) .student-data-table thead th:first-child,
+  .student-table-scroll:not(.student-table-fits) .student-data-table thead th:nth-child(2) {
     z-index: 14;
     background: #f5f8fd;
   }
 
-  .student-table-scroll .student-data-table thead th:nth-child(2) {
+  .student-table-scroll:not(.student-table-fits) .student-data-table thead th:nth-child(2) {
     box-shadow: 1px 0 0 #dbe4f0, 0 1px 0 #dbe4f0;
   }
 }
