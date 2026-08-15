@@ -91,13 +91,49 @@ public sealed class MealResolutionContext
             ? rows.FirstOrDefault(x => x.EffectiveFrom <= date && x.EffectiveTo >= date)
             : null;
 
-    /// <summary>Whether the student's meal was on, honouring <paramref name="wingOverride"/> when supplied.</summary>
-    public bool IsMealOn(Guid studentId, string mealPeriod, DateOnly date, GlobalMealOverride? wingOverride)
+    /// <summary>
+    /// Whether the student's meal was on, honouring <paramref name="wingOverride"/> when supplied.
+    /// <para>
+    /// <paramref name="asOfUtc"/> is the moment the caller is charging against — a specific stock
+    /// transaction's <c>CreatedAtUtc</c>, when called from billing. Every field here is a plain
+    /// <see cref="DateOnly"/>, so on every day *after* the status took effect this parameter
+    /// changes nothing — the whole day is unambiguously on. It only matters on the exact day a
+    /// status (or wing override) both takes effect and was created — only reachable through an
+    /// admin same-day action (the emergency per-student toggle, or a wing-wide override created
+    /// for today), since the student-facing cutoff in
+    /// MealsController.GetEarliestStudentChangeDateAsync blocks any same-day self-service change.
+    /// Without this check, switching a meal on for today at noon — for one student or the whole
+    /// wing — would retroactively count as participation in a stock-out recorded at 10am that
+    /// day, charging for food that was already stocked out before anyone was turned on. Pass null
+    /// (the default) for callers with no specific transaction to charge against, such as a live
+    /// headcount preview before any stock-out exists yet — there is nothing to compare against.
+    /// </para>
+    /// </summary>
+    public bool IsMealOn(Guid studentId, string mealPeriod, DateOnly date, GlobalMealOverride? wingOverride, DateTime? asOfUtc = null)
     {
-        if (wingOverride is not null) return wingOverride.IsOn;
-        return statuses.TryGetValue((studentId, mealPeriod), out var rows)
-            && (rows.FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))?.IsOn ?? false);
+        if (wingOverride is not null)
+        {
+            return wingOverride.IsOn && !TurnedOnAfter(wingOverride.EffectiveFrom, wingOverride.CreatedAtUtc, date, asOfUtc);
+        }
+
+        if (!statuses.TryGetValue((studentId, mealPeriod), out var rows)) return false;
+
+        var active = rows.FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date));
+        if (active is null || !active.IsOn) return false;
+
+        return !TurnedOnAfter(active.EffectiveFrom, active.CreatedAtUtc, date, asOfUtc);
     }
+
+    /// <summary>
+    /// True when a same-day "on" record was created after the transaction it's being checked
+    /// against — see <see cref="IsMealOn"/>. Shared by the individual-status and wing-override
+    /// paths so the same-day rule can't drift between the two ways a meal gets turned on.
+    /// </summary>
+    private static bool TurnedOnAfter(DateOnly effectiveFrom, DateTime createdAtUtc, DateOnly date, DateTime? asOfUtc)
+        => asOfUtc.HasValue
+        && effectiveFrom == date
+        && DateOnly.FromDateTime(createdAtUtc) == date
+        && createdAtUtc > asOfUtc.Value;
 
     /// <summary>The option the student had selected for that meal on that weekday, if any.</summary>
     public Guid? FindSelectedOption(Guid studentId, string mealPeriod, DateOnly date)
@@ -105,8 +141,12 @@ public sealed class MealResolutionContext
             ? rows.FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))?.OptionItemId
             : null;
 
-    /// <summary>Students in the item's wing who are charged for it on that date and meal period.</summary>
-    public List<Student> Participants(InventoryItem item, string mealPeriod, DateOnly date)
+    /// <summary>
+    /// Students in the item's wing who are charged for it on that date and meal period.
+    /// <paramref name="asOfUtc"/> — see <see cref="IsMealOn"/> — should be the charging
+    /// transaction's own <c>CreatedAtUtc</c> when one exists.
+    /// </summary>
+    public List<Student> Participants(InventoryItem item, string mealPeriod, DateOnly date, DateTime? asOfUtc = null)
     {
         if (!StudentsByWing.TryGetValue(item.Wing, out var wingStudents)) return [];
         var wingOverride = FindOverride(item.Wing, mealPeriod, date);
@@ -115,13 +155,16 @@ public sealed class MealResolutionContext
                 item.Category,
                 item.Id,
                 item.LinkedOptionId,
-                IsMealOn(student.Id, mealPeriod, date, wingOverride),
+                IsMealOn(student.Id, mealPeriod, date, wingOverride, asOfUtc),
                 FindSelectedOption(student.Id, mealPeriod, date)))
             .ToList();
     }
 
-    /// <summary>Headcount for <see cref="Participants"/> without materialising the list.</summary>
-    public int CountParticipants(InventoryItem item, string mealPeriod, DateOnly date)
+    /// <summary>
+    /// Headcount for <see cref="Participants"/> without materialising the list.
+    /// <paramref name="asOfUtc"/> — see <see cref="IsMealOn"/>.
+    /// </summary>
+    public int CountParticipants(InventoryItem item, string mealPeriod, DateOnly date, DateTime? asOfUtc = null)
     {
         if (!StudentsByWing.TryGetValue(item.Wing, out var wingStudents)) return 0;
         var wingOverride = FindOverride(item.Wing, mealPeriod, date);
@@ -130,7 +173,7 @@ public sealed class MealResolutionContext
                 item.Category,
                 item.Id,
                 item.LinkedOptionId,
-                IsMealOn(student.Id, mealPeriod, date, wingOverride),
+                IsMealOn(student.Id, mealPeriod, date, wingOverride, asOfUtc),
                 FindSelectedOption(student.Id, mealPeriod, date)));
     }
 

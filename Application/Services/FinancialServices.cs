@@ -54,7 +54,7 @@ public sealed class InventoryTransactionService(HallDbContext db)
                         continue;
                     }
 
-                    var participantsCount = meals.CountParticipants(item, transaction.MealPeriod, transaction.Date);
+                    var participantsCount = meals.CountParticipants(item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
 
                     transaction.ParticipantCount = participantsCount;
                     transaction.Rate = participantsCount > 0 ? (transaction.TotalCost / participantsCount) : 0m;
@@ -600,7 +600,7 @@ public sealed class BillingCalculationService(
             if (transaction.Item is null || string.IsNullOrWhiteSpace(transaction.MealPeriod)) continue;
             if (string.IsNullOrWhiteSpace(transaction.Item.Wing)) continue;
 
-            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date);
+            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
 
             if (participants.Count == 0) continue;
             var share = transaction.TotalCost / participants.Count;
