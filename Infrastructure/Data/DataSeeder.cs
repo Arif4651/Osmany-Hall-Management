@@ -35,6 +35,25 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
                 }
                 await db.SaveChangesAsync(cancellationToken);
             }
+
+            // Repairs accounts left behind by status changes that updated only the student row:
+            // a reactivated student whose account is still disabled cannot sign in at all, and a
+            // deactivated one whose account is still enabled can sign in when they should not.
+            // The student row is the authority — it is what the admin screens actually edit.
+            var desyncedAccounts = await db.Users
+                .Where(x => x.Role == Roles.Student
+                    && x.Student != null
+                    && x.IsActive != x.Student.LoginAccessEnabled)
+                .Include(x => x.Student)
+                .ToListAsync(cancellationToken);
+            if (desyncedAccounts.Count > 0)
+            {
+                foreach (var user in desyncedAccounts)
+                {
+                    user.IsActive = user.Student!.LoginAccessEnabled;
+                }
+                await db.SaveChangesAsync(cancellationToken);
+            }
             var inventoryItems = await db.InventoryItems.ToListAsync(cancellationToken);
             if (inventoryItems.Count > 0)
             {

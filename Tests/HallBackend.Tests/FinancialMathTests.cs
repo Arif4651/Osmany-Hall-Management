@@ -22,7 +22,6 @@ public sealed class FinancialMathTests
     public void CalculateDue_KeepsFullyPaidBillSettledAfterChargeReduction()
     {
         Assert.Equal(0m, FinancialMath.CalculateDue(800m, 1000m));
-        Assert.Equal(0m, FinancialMath.CalculateDue(800m, 1000m, 500m));
     }
 
     [Fact]
@@ -30,6 +29,16 @@ public sealed class FinancialMathTests
     {
         Assert.Equal(250m, FinancialMath.CalculateDue(1000m, 750m));
         Assert.Equal(100m, FinancialMath.CalculateDue(1000m, 750m, 100m));
+    }
+
+    [Fact]
+    public void CalculateDue_ManualOverrideWinsOverCalculatedFigure()
+    {
+        // A settled or zero-charge month is the main reason an admin reaches for an override, so
+        // the override has to survive it rather than being swallowed by the calculated 0.
+        Assert.Equal(500m, FinancialMath.CalculateDue(800m, 1000m, 500m));
+        Assert.Equal(1200m, FinancialMath.CalculateDue(0m, 0m, 1200m));
+        Assert.Equal(0m, FinancialMath.CalculateDue(1000m, 0m, 0m));
     }
 
     [Fact]

@@ -17,18 +17,22 @@ public static class FinancialMath
     public static decimal NonNegativeDue(decimal totalBill, decimal approvedPaid)
         => totalBill - approvedPaid < 0m ? 0m : totalBill - approvedPaid;
 
+    /// <param name="adjustedDue">
+    /// A manual due override entered by an admin. It states outright what the student owes, so it
+    /// wins over the calculated figure — including when that figure is already 0, which is exactly
+    /// the case an override exists to correct. Only the calculated path clamps an overpayment.
+    /// </param>
     public static decimal CalculateDue(
         decimal totalBill,
         decimal approvedPaid,
         decimal? adjustedDue = null)
     {
-        var calculatedDue = NonNegativeDue(totalBill, approvedPaid);
-        if (calculatedDue == 0m)
+        if (adjustedDue.HasValue)
         {
-            return 0m;
+            return adjustedDue.Value < 0m ? 0m : adjustedDue.Value;
         }
 
-        return adjustedDue ?? calculatedDue;
+        return NonNegativeDue(totalBill, approvedPaid);
     }
 
     public static decimal ProportionalCost(decimal totalCost, int filteredCount, int totalCount)

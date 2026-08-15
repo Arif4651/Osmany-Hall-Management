@@ -84,7 +84,9 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
 
         var student = new Student();
         ApplyRequest(student, request);
-        ApplyStatusSideEffects(student, student.Status);
+        // Safe without the account sync: the account does not exist yet and is built from
+        // LoginAccessEnabled a few lines below.
+        ApplyStatusFlags(student, student.Status);
         db.Students.Add(student);
 
         var user = new AppUser
@@ -120,14 +122,14 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         if (validation.Count > 0) return BadRequest(new ValidationProblemDetails(validation));
 
         ApplyRequest(student, request);
-        ApplyStatusSideEffects(student, student.Status);
+        await ApplyStatusAsync(student, student.Status, cancellationToken);
         var user = await db.Users.FirstOrDefaultAsync(x => x.StudentId == student.Id, cancellationToken);
         if (user is not null)
         {
+            // IsActive is handled by ApplyStatusAsync above; only the identity fields are left.
             user.FullName = student.StudentName;
             user.UserName = student.StudentId;
             user.NormalizedUserName = student.StudentId.ToUpperInvariant();
-            user.IsActive = student.LoginAccessEnabled;
         }
         await db.SaveChangesAsync(cancellationToken);
         return student.ToDto();
@@ -139,7 +141,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     {
         var student = await (await ScopedStudentsAsync(db.Students, cancellationToken)).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (student is null) return NotFound();
-        ApplyStatusSideEffects(student, "inactive");
+        await ApplyStatusAsync(student, "inactive", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return student.ToDto();
     }
@@ -171,8 +173,10 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
             {
                 ApplyBulkField(student, field.Key, field.Value);
             }
-            ApplyStatusSideEffects(student, student.Status);
         }
+        // One pass over the whole selection, so archiving or reactivating in bulk moves the login
+        // accounts with it rather than leaving them on their previous setting.
+        await ApplyStatusAsync(students, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
         return new BulkStudentResponse(students.Count, students.Select(x => x.Id).ToList());
@@ -326,12 +330,63 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         }
     }
 
-    private static void ApplyStatusSideEffects(Student student, string status)
+    /// <summary>
+    /// Derives the student-side status flags. Touches only the student row, so it is safe on its
+    /// own <b>only</b> when the caller creates the login account itself in the same unit of work.
+    /// Every other caller must go through <see cref="ApplyStatusAsync(Student, string, CancellationToken)"/>
+    /// or its bulk overload, which also mirrors the result onto the account.
+    /// </summary>
+    private static void ApplyStatusFlags(Student student, string status)
     {
         student.Status = status;
         student.LoginAccessEnabled = status is "active" or "pending_clearance";
         student.ReactivationEligible = status is "inactive" or "archived" or "graduated" or "pending_clearance";
         student.PermanentDeleteEligible = status is "inactive" or "archived" or "graduated";
+    }
+
+    /// <summary>Applies a status change to one student and mirrors it onto their login account.</summary>
+    private async Task ApplyStatusAsync(Student student, string status, CancellationToken cancellationToken)
+    {
+        ApplyStatusFlags(student, status);
+        await SyncLoginAccessAsync([student], cancellationToken);
+    }
+
+    /// <summary>
+    /// Re-derives each student's flags from the status already set on them — a bulk edit can give
+    /// every student a different one — and mirrors the result onto their accounts.
+    /// </summary>
+    private async Task ApplyStatusAsync(IReadOnlyCollection<Student> students, CancellationToken cancellationToken)
+    {
+        foreach (var student in students) ApplyStatusFlags(student, student.Status);
+        await SyncLoginAccessAsync(students, cancellationToken);
+    }
+
+    /// <summary>
+    /// Copies <see cref="Student.LoginAccessEnabled"/> onto the matching <c>AppUser.IsActive</c>.
+    ///
+    /// Login access is stored twice: on the student for the admin screens, and on the account for
+    /// the login endpoint, which rejects on <c>!IsActive</c> before it ever checks a password.
+    /// When only the student was updated the two drifted apart in both directions — a reactivated
+    /// student whose account stayed disabled could not sign in despite reading as active
+    /// everywhere, and a deactivated student whose account stayed enabled could still sign in.
+    /// </summary>
+    private async Task SyncLoginAccessAsync(IReadOnlyCollection<Student> students, CancellationToken cancellationToken)
+    {
+        if (students.Count == 0) return;
+
+        var accessByStudentId = students.ToDictionary(x => x.Id, x => x.LoginAccessEnabled);
+        var ids = accessByStudentId.Keys.ToList();
+        var users = await db.Users
+            .Where(x => x.StudentId != null && ids.Contains(x.StudentId.Value))
+            .ToListAsync(cancellationToken);
+
+        foreach (var user in users)
+        {
+            if (user.StudentId is Guid studentId && accessByStudentId.TryGetValue(studentId, out var isEnabled))
+            {
+                user.IsActive = isEnabled;
+            }
+        }
     }
 
     private async Task DetachStudentNotificationsAsync(IEnumerable<Guid> studentIds, CancellationToken cancellationToken)

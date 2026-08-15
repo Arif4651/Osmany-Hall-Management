@@ -478,10 +478,16 @@ public sealed class BillingCalculationService(
         {
             throw new DomainValidationException("Month must be between 1 and 12.");
         }
-        var latestYear = DateTime.UtcNow.Year + 1;
-        if (year < EarliestBillingYear || year > latestYear)
+        var today = DateTime.UtcNow;
+        if (year < EarliestBillingYear || year > today.Year)
         {
-            throw new DomainValidationException($"Year must be between {EarliestBillingYear} and {latestYear}.");
+            throw new DomainValidationException($"Year must be between {EarliestBillingYear} and {today.Year}.");
+        }
+        // A month that has not started has no consumption to bill, so calculating one would only
+        // produce a bill of zeros that looks authoritative.
+        if (year == today.Year && month > today.Month)
+        {
+            throw new DomainValidationException("Billing period cannot be in the future.");
         }
     }
 
@@ -668,6 +674,10 @@ public sealed class BillingCalculationService(
     {
         var cursor = new DateOnly(year, month, 1);
         var end = DateOnly.FromDateTime(DateTime.Today).AddMonths(1);
+        // The starting month is always recalculated, even when it sits past the forward horizon —
+        // otherwise an edit to a future billing period (the picker allows several years ahead)
+        // would leave that month's cached bills stale, with the loop never running at all.
+        if (end < cursor) end = cursor;
         var rangeEnd = end.AddMonths(1).AddDays(-1);
 
         // Rebuild each affected non-stored item once for the whole range rather than once per
