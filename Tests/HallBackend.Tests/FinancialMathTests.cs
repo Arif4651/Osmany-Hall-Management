@@ -12,13 +12,6 @@ public sealed class FinancialMathTests
     }
 
     [Fact]
-    public void NonNegativeDue_ClampsOverpayment()
-    {
-        Assert.Equal(0m, FinancialMath.NonNegativeDue(1000m, 1200m));
-        Assert.Equal(250m, FinancialMath.NonNegativeDue(1000m, 750m));
-    }
-
-    [Fact]
     public void CalculateDue_RefundsTheDifferenceWhenChargesAreReducedAfterPayment()
     {
         // Paid 1000, then the month's charges were corrected down to 800. The student is 200 up,

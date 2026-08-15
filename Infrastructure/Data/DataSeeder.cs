@@ -5,8 +5,32 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HallBackend.Infrastructure.Data;
 
-public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
+public sealed class DataSeeder(
+    HallDbContext db,
+    PasswordService passwords,
+    IConfiguration configuration,
+    IHostEnvironment environment)
 {
+    /// <summary>
+    /// The seeded admin's password: from <c>Seed:&lt;Key&gt;Password</c> configuration (an
+    /// environment variable in production) when set, otherwise a fixed development-only default.
+    /// Outside Development, a missing value fails the seed loudly rather than falling back to a
+    /// value anyone can read in this source file.
+    /// </summary>
+    private string SeedPassword(string key, string developmentDefault)
+    {
+        var configured = configuration[$"Seed:{key}Password"];
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+
+        if (!environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                $"Seed:{key}Password must be configured before the first run outside Development.");
+        }
+
+        return developmentDefault;
+    }
+
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         if (await db.Users.AnyAsync(cancellationToken))
@@ -25,16 +49,6 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
                     new PaymentCategory { Name = "Bank Transfer" });
             }
             await db.SaveChangesAsync(cancellationToken);
-            // Update existing student users to not require password change
-            var studentUsers = await db.Users.Where(x => x.Role == Roles.Student).ToListAsync(cancellationToken);
-            if (studentUsers.Count > 0)
-            {
-                foreach (var user in studentUsers)
-                {
-                    user.MustChangePassword = false;
-                }
-                await db.SaveChangesAsync(cancellationToken);
-            }
 
             // Repairs accounts left behind by status changes that updated only the student row:
             // a reactivated student whose account is still disabled cannot sign in at all, and a
@@ -206,12 +220,20 @@ public sealed class DataSeeder(HallDbContext db, PasswordService passwords)
         }
 
         // Admin user only - students will be added dynamically through the admin panel
+        //
+        // Passwords come from Seed:*Password configuration outside Development (see
+        // SeedPassword above) — never a value fixed in source, since that value would sit in the
+        // repository forever. Every seeded account is forced to change its password at first
+        // login regardless of where the password came from.
         var admin = User("Male Wing Administrator", "admin.male", "admin.male@mist.ac.bd", Roles.MaleWingAdmin, "Male Wing Administrator", "Male");
-        admin.PasswordHash = passwords.Hash("male1234");
+        admin.PasswordHash = passwords.Hash(SeedPassword("MaleWingAdmin", "male1234"));
+        admin.MustChangePassword = true;
         var superAdmin = User("Super Administrator", "superadmin", "superadmin@mist.ac.bd", Roles.SuperAdmin, "Super Administrator");
-        superAdmin.PasswordHash = passwords.Hash("super1234");
+        superAdmin.PasswordHash = passwords.Hash(SeedPassword("SuperAdmin", "super1234"));
+        superAdmin.MustChangePassword = true;
         var femaleAdmin = User("Female Wing Administrator", "admin.female", "admin.female@mist.ac.bd", Roles.FemaleWingAdmin, "Female Wing Administrator", "Female");
-        femaleAdmin.PasswordHash = passwords.Hash("female1234");
+        femaleAdmin.PasswordHash = passwords.Hash(SeedPassword("FemaleWingAdmin", "female1234"));
+        femaleAdmin.MustChangePassword = true;
 
         db.Users.AddRange(admin, femaleAdmin, superAdmin);
         db.PaymentCategories.AddRange(

@@ -22,6 +22,7 @@ public static class ApiMapping
             student.Status,
             student.LoginAccessEnabled,
             student.ReactivationEligible,
-            student.PermanentDeleteEligible);
+            student.PermanentDeleteEligible,
+            student.JoinDate);
     }
 }

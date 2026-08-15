@@ -61,8 +61,14 @@ public sealed class PaymentsController(
     public async Task<ActionResult<PaymentSubmissionDto>> Submit(SubmitPaymentRequest request, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        // Bounded the same way a billing period is bounded elsewhere (BillingCalculationService):
+        // without this, a payment filed against year 3000 — or any period nobody will ever bill —
+        // is accepted, never matches a due, and quietly disappears from reconciliation instead of
+        // failing loudly at submission.
+        var currentYear = HallClock.Today.Year;
         if (request.Amount <= 0m || request.Charges < 0m || string.IsNullOrWhiteSpace(request.TransactionId)
-            || request.BillingMonth is < 1 or > 12)
+            || request.BillingMonth is < 1 or > 12
+            || request.BillingYear < 2000 || request.BillingYear > currentYear)
             return BadRequest(new { message = "Enter valid payment details." });
         if (!await db.PaymentCategories.AnyAsync(x => x.Id == request.CategoryId && x.IsActive, cancellationToken))
             return BadRequest(new { message = "Payment category is not active." });
@@ -104,7 +110,9 @@ public sealed class PaymentsController(
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var query = db.PaymentSubmissions.AsNoTracking();
-        var wingFilter = await currentUser.GetFinanceWingFilterAsync(gender, cancellationToken);
+        // Wing-locked for a wing admin, same as Bill Management and Due Bill — a wing admin no
+        // longer has a "switch to the other wing" option on Payment Verification.
+        var wingFilter = await currentUser.GetOwnWingFilterAsync(gender, cancellationToken);
         if (wingFilter is not null) query = query.Where(x => x.Student!.Gender == wingFilter);
 
         if (!string.IsNullOrWhiteSpace(status) && status.Trim().ToLowerInvariant() != "all")
@@ -178,7 +186,7 @@ public sealed class PaymentsController(
             .Where(x => x.Id == row.StudentId)
             .Select(x => x.Gender)
             .FirstOrDefaultAsync(cancellationToken);
-        if (!await currentUser.CanManageFinanceForWingAsync(studentWing, cancellationToken)) return Forbid();
+        if (!await currentUser.CanManageOwnWingFinanceAsync(studentWing, cancellationToken)) return Forbid();
         if (row.Status != "under_review") return Conflict(new { message = "This payment has already been reviewed." });
 
         row.Status = action == "approve" ? "approved" : "rejected";

@@ -159,8 +159,8 @@ public sealed class AdditionalMealsController(
         [FromQuery] string? wing,
         CancellationToken cancellationToken)
     {
-        var target = date ?? DateOnly.FromDateTime(DateTime.Today);
-        var scopedWing = await currentUser.GetFinanceWingFilterAsync(wing, cancellationToken);
+        var target = date ?? HallClock.Today;
+        var scopedWing = await currentUser.GetOwnWingFilterAsync(wing, cancellationToken);
         return await additionalMeals.GetSheetAsync(target, scopedWing, cancellationToken);
     }
 

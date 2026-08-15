@@ -15,8 +15,9 @@ namespace HallBackend.Controllers;
 [Route("api/daily-cost")]
 public sealed class DailyCostController(HallDbContext db, CurrentUserService currentUser) : ControllerBase
 {
+    // Not output-cached: the response carries the caller's own MyCost figures, and caching by
+    // anything other than the exact user would leak one student's personal costs to another.
     [HttpGet]
-    [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "daily-cost-cache")]
     public async Task<ActionResult<DailyCostReportDto>> Get(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string gender = "All",
         CancellationToken cancellationToken = default)
@@ -29,7 +30,11 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             .Select(x => x.StudentId)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var effectiveGender = await currentUser.GetMealWingAsync(gender, cancellationToken);
+        // GetMealWingAsync would silently turn "All" into "Male" for a wingless admin/super_admin
+        // — it has no way to say "every wing". GetMealWingFilterAsync does, returning null, which
+        // this report already treats as "All" everywhere below (every effectiveGender != "All"
+        // branch was written expecting this and was previously unreachable for such a caller).
+        var effectiveGender = await currentUser.GetMealWingFilterAsync(gender, cancellationToken) ?? "All";
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
 
@@ -39,7 +44,11 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             .ToListAsync(cancellationToken);
 
         // Optimize: Filter students by effectiveGender first
-        var studentsQuery = db.Students.AsNoTracking();
+        // Billable-status only (MealResolutionContext.BillableStatus) — matching the billing
+        // engine, the Meal Sheet and meal counts, so this report's per-head figures agree with
+        // what students are actually charged rather than diluting the divisor with departed
+        // students whose meal status was left on.
+        var studentsQuery = db.Students.AsNoTracking().Where(x => x.Status == MealResolutionContext.BillableStatus);
         if (effectiveGender != "All")
         {
             studentsQuery = studentsQuery.Where(x => x.Gender == effectiveGender);
@@ -95,7 +104,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
 
         var rows = new List<DailyCostRowDto>();
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = HallClock.Today;
         var tomorrow = today.AddDays(1);
 
         for (var date = from; date <= to; date = date.AddDays(1))
@@ -113,7 +122,11 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                 var participants = students.Where(student =>
                 {
                     if (effectiveGender != "All" && student.Gender != effectiveGender) return false;
-                    
+                    // A wing override doesn't know who existed at the hall when it was created —
+                    // without this, a student created today would show as a meal participant on
+                    // a past date their own account didn't exist on yet.
+                    if (!MealResolutionContext.HasJoinedBy(student, date)) return false;
+
                     // Optimize: Look up in grouped dictionary for overrides
                     if (overridesGrouped.TryGetValue(new { Wing = student.Gender, MealPeriod = period }, out var wingOverrides))
                     {
@@ -220,6 +233,12 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                                 myCost += tx.TotalCost / chargedStudents;
                             }
                         }
+
+                        // Matches overallPerHead, which is netCost (gross minus subsidy) divided
+                        // across every participant regardless of option: myCost was previously
+                        // gross-only, so a subsidised meal showed a smaller PerHead than the sum
+                        // of what the same meal's MyCost added up to across all participants.
+                        myCost -= FinancialMath.PerHead(subsidyAmount, totalStudents);
                     }
                 }
 
@@ -255,24 +274,32 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             rows.Add(new DailyCostRowDto(date, breakfast, lunch, dinner, totalPerHead, totalMyCost, rowOptions));
         }
 
-        // Footer totals: sum of each day's per-head for each period
+        // Footer totals: sum of each day's per-head for each period. Students is the average
+        // headcount over the days that actually have data, not a sum — summing a headcount
+        // across every day of the month produced a number in the thousands with no meaning (a
+        // 30-day month with 100 students reported 3,000 "students"). Days beyond tomorrow are
+        // still zeroed above and excluded here, so they cannot drag the average down.
+        var daysWithData = rows.Count(x => x.Date <= tomorrow);
+        int AverageStudents(Func<DailyCostRowDto, int> selector)
+            => daysWithData == 0 ? 0 : (int)Math.Round(rows.Sum(selector) / (decimal)daysWithData, MidpointRounding.AwayFromZero);
+
         var breakfastTotal = new DailyCostMealDto(
             rows.Sum(x => x.Breakfast.Cost),
-            rows.Sum(x => x.Breakfast.Students),
+            AverageStudents(x => x.Breakfast.Students),
             rows.Sum(x => x.Breakfast.PerHead),
             rows.Sum(x => x.Breakfast.MyCost),
             new List<DailyCostOptionBreakdownDto>());
 
         var lunchTotal = new DailyCostMealDto(
             rows.Sum(x => x.Lunch.Cost),
-            rows.Sum(x => x.Lunch.Students),
+            AverageStudents(x => x.Lunch.Students),
             rows.Sum(x => x.Lunch.PerHead),
             rows.Sum(x => x.Lunch.MyCost),
             new List<DailyCostOptionBreakdownDto>());
 
         var dinnerTotal = new DailyCostMealDto(
             rows.Sum(x => x.Dinner.Cost),
-            rows.Sum(x => x.Dinner.Students),
+            AverageStudents(x => x.Dinner.Students),
             rows.Sum(x => x.Dinner.PerHead),
             rows.Sum(x => x.Dinner.MyCost),
             new List<DailyCostOptionBreakdownDto>());

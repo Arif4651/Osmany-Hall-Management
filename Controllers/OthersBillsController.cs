@@ -60,13 +60,25 @@ public sealed class OthersBillsController(
     public async Task<ActionResult<OthersBillDto>> GetOne(Guid id, CancellationToken cancellationToken)
     {
         var bill = await othersBills.GetAsync(id, cancellationToken);
-        return bill is null ? NotFound() : bill;
+        if (bill is null) return NotFound();
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(adminWing) && bill.Wing != adminWing) return Forbid();
+        return bill;
     }
 
     [HttpDelete("{id:guid}")]
     [RequirePermission(MenuKeys.AdminOthersBill, PermissionActions.Delete)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
-        => await othersBills.DeleteAsync(id, cancellationToken) ? NoContent() : NotFound();
+    {
+        // The collection route (Get, above) is already wing-scoped via GetOwnWingFilterAsync;
+        // this single-item route was not, so one wing's admin could delete the other wing's
+        // generated bill by id. Load it first so the wing can actually be checked.
+        var bill = await othersBills.GetAsync(id, cancellationToken);
+        if (bill is null) return NotFound();
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(adminWing) && bill.Wing != adminWing) return Forbid();
+        return await othersBills.DeleteAsync(id, cancellationToken) ? NoContent() : NotFound();
+    }
 
     /// <summary>
     /// The student's own breakdown — count, unit rate and amount per item — for their bill page.

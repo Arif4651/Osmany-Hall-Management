@@ -479,7 +479,10 @@ public sealed class BillingCalculationService(
         {
             throw new DomainValidationException("Month must be between 1 and 12.");
         }
-        var today = DateTime.UtcNow;
+        // Hall-local, not UTC: near midnight UTC the two disagree on what "this month" is by a
+        // full calendar month in either direction for a UTC+6 hall, which would reject (or
+        // silently accept) the current period depending purely on server timezone.
+        var today = HallClock.Today;
         if (year < EarliestBillingYear || year > today.Year)
         {
             throw new DomainValidationException($"Year must be between {EarliestBillingYear} and {today.Year}.");
@@ -495,7 +498,7 @@ public sealed class BillingCalculationService(
     /// <summary>A period that has not started yet, and so has nothing to bill.</summary>
     public static bool IsFuturePeriod(int month, int year)
     {
-        var today = DateTime.UtcNow;
+        var today = HallClock.Today;
         return year > today.Year || (year == today.Year && month > today.Month);
     }
 
@@ -694,8 +697,8 @@ public sealed class BillingCalculationService(
     public async Task RecalculateForwardAsync(int month, int year, CancellationToken cancellationToken)
     {
         var cursor = new DateOnly(year, month, 1);
-        var now = DateTime.UtcNow;
-        var currentPeriod = new DateOnly(now.Year, now.Month, 1);
+        var today = HallClock.Today;
+        var currentPeriod = new DateOnly(today.Year, today.Month, 1);
 
         // The current month is the last one that can be billed: a month that has not started has
         // no consumption, and ValidatePeriod rejects it outright. Running to today + 1 month, as

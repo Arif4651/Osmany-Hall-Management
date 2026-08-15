@@ -15,7 +15,11 @@ namespace HallBackend.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/students")]
-public sealed class StudentsController(HallDbContext db, PasswordService passwords, CurrentUserService currentUser) : ControllerBase
+public sealed class StudentsController(
+    HallDbContext db,
+    PasswordService passwords,
+    CurrentUserService currentUser,
+    BillingCalculationService billing) : ControllerBase
 {
     private static readonly string[] ValidStatuses = ["active", "pending_clearance", "inactive", "graduated", "archived"];
     private static readonly string[] ValidLevels = ["Level-01", "Level-02", "Level-03", "Level-04", "Master's"];
@@ -25,18 +29,46 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
 
     [HttpGet]
     [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
-    public async Task<ActionResult<StudentListResponse>> GetStudents([FromQuery] string? search, [FromQuery] string? department, [FromQuery] string? level, [FromQuery] string? hallName, [FromQuery] string? status, [FromQuery] string? gender, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<StudentListResponse>> GetStudents(
+        [FromQuery] string? search, [FromQuery] string? department, [FromQuery] string? level, [FromQuery] string? hallName, [FromQuery] string? status, [FromQuery] string? gender,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
+        // The bulk-selection UI needs to know which of the ids it already holds still match the
+        // current filter (a selection made under a broader filter can be pruned when the admin
+        // narrows it). That used to be answered by shipping every matching id on every page turn —
+        // at 1,000+ students, that meant scanning and serialising the whole filtered set just to
+        // render one page of ten. Scoping the check to the caller's own selection keeps the cost
+        // proportional to how many rows are actually selected, not how many rows exist.
+        [FromQuery] List<Guid>? selectedIds = null,
+        CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
         var query = ApplyFilters(await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken), search, department, level, hallName, status, gender).OrderBy(x => x.StudentName);
-        var filteredIds = await query.Select(x => x.Id).ToListAsync(cancellationToken);
-        var total = filteredIds.Count;
+        var total = await query.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
         page = Math.Min(page, totalPages);
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).Select(x => x.ToDto()).ToListAsync(cancellationToken);
 
-        return new StudentListResponse(items, page, pageSize, total, totalPages, filteredIds);
+        var validSelectedIds = selectedIds is { Count: > 0 }
+            ? await query.Where(x => selectedIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(cancellationToken)
+            : [];
+
+        return new StudentListResponse(items, page, pageSize, total, totalPages, validSelectedIds);
+    }
+
+    /// <summary>
+    /// Every id matching the current filter, with no pagination — the full-cost query the paged
+    /// list above used to run on every page turn. Reserved for "select all matching", which the
+    /// admin only asks for explicitly.
+    /// </summary>
+    [HttpGet("filtered-ids")]
+    [RequirePermission(MenuKeys.AdminStudents, PermissionActions.View)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> GetFilteredIds(
+        [FromQuery] string? search, [FromQuery] string? department, [FromQuery] string? level, [FromQuery] string? hallName, [FromQuery] string? status, [FromQuery] string? gender,
+        CancellationToken cancellationToken)
+    {
+        var query = ApplyFilters(await ScopedStudentsAsync(db.Students.AsNoTracking(), cancellationToken), search, department, level, hallName, status, gender);
+        return await query.Select(x => x.Id).ToListAsync(cancellationToken);
     }
 
     [HttpGet("export")]
@@ -74,7 +106,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
 
     [HttpPost]
     [RequirePermission(MenuKeys.AdminStudents, PermissionActions.Create)]
-    public async Task<ActionResult<StudentDto>> CreateStudent(StudentUpsertRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentCredentialDto>> CreateStudent(StudentUpsertRequest request, CancellationToken cancellationToken)
     {
         var wing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(wing) && request.Gender != wing)
@@ -89,6 +121,11 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         ApplyStatusFlags(student, student.Status);
         db.Students.Add(student);
 
+        // By product decision, the initial password is the student's own ID (as before) rather
+        // than a random value — MustChangePassword still forces it to be replaced before the
+        // account can be used for anything else (RequirePasswordChangeMiddleware), which is what
+        // actually limits exposure from the ID being guessable.
+        var temporaryPassword = student.StudentId;
         var user = new AppUser
         {
             Student = student,
@@ -99,14 +136,22 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
             NormalizedEmail = string.Empty,
             Role = Roles.Student,
             Designation = "Resident Student",
-            MustChangePassword = false,
+            MustChangePassword = true,
             IsActive = student.LoginAccessEnabled,
-            PasswordHash = passwords.Hash(student.StudentId),
+            PasswordHash = passwords.Hash(temporaryPassword),
         };
         db.Users.Add(user);
 
         await db.SaveChangesAsync(cancellationToken);
-        return CreatedAtAction(nameof(GetStudent), new { id = student.Id }, student.ToDto());
+
+        // The current month's bill cache, if it already exists, has no row for this student —
+        // EnsureMonthCalculatedAsync short-circuits once any row is present for the month, so
+        // without this the new student's bill page 404s until an unrelated write happens to
+        // trigger a rebuild. The current month is never a future period, so this always runs.
+        var today = HallClock.Today;
+        await billing.RecalculateMonthAsync(today.Month, today.Year, cancellationToken);
+
+        return CreatedAtAction(nameof(GetStudent), new { id = student.Id }, new StudentCredentialDto(student.ToDto(), temporaryPassword));
     }
 
     [HttpPut("{id:guid}")]
@@ -155,6 +200,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         if (!force && !student.PermanentDeleteEligible) return BadRequest(new { message = "Student is not eligible for permanent deletion." });
 
         await DetachStudentNotificationsAsync([student.Id], cancellationToken);
+        await RemoveLoginAccountsAsync([student.Id], cancellationToken);
         db.Students.Remove(student);
         await db.SaveChangesAsync(cancellationToken);
         return new BulkStudentResponse(0, [], 1, [id], []);
@@ -165,6 +211,19 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
     public async Task<ActionResult<BulkStudentResponse>> BulkUpdate(BulkStudentRequest request, CancellationToken cancellationToken)
     {
         if (request.SelectedStudentIds.Count == 0) return BadRequest(new { message = "Select at least one student first." });
+
+        // Reject the whole batch on a bad value rather than silently skipping it — unlike the
+        // single-student path (ValidateAsync), this wrote whatever string was sent straight onto
+        // Status/Level with no check, so a typo (or a crafted request) could put students into a
+        // status no query matches, dropping them from every active list while the billing engine
+        // still counted them.
+        if (request.UpdateFields.TryGetValue("status", out var statusValue)
+            && !string.IsNullOrWhiteSpace(statusValue) && !ValidStatuses.Contains(statusValue))
+            return BadRequest(new { message = $"'{statusValue}' is not a valid status." });
+        if (request.UpdateFields.TryGetValue("level", out var levelValue)
+            && !string.IsNullOrWhiteSpace(levelValue) && !ValidLevels.Contains(levelValue))
+            return BadRequest(new { message = $"'{levelValue}' is not a valid level." });
+
         var students = await (await ScopedStudentsAsync(db.Students, cancellationToken)).Where(x => request.SelectedStudentIds.Contains(x.Id)).ToListAsync(cancellationToken);
 
         foreach (var student in students)
@@ -210,6 +269,7 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         if (eligible.Count > 0)
         {
             await DetachStudentNotificationsAsync(eligible.Select(x => x.Id), cancellationToken);
+            await RemoveLoginAccountsAsync(eligible.Select(x => x.Id), cancellationToken);
         }
 
         db.Students.RemoveRange(eligible);
@@ -243,11 +303,15 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
             db.Users.Add(user);
         }
 
-        user.PasswordHash = passwords.Hash(student.StudentId);
+        // Same product decision as account creation: reset restores the password to the
+        // student's own ID rather than issuing a random one. MustChangePassword still forces it
+        // to be replaced before the account can be used for anything else.
+        var temporaryPassword = student.StudentId;
+        user.PasswordHash = passwords.Hash(temporaryPassword);
         user.MustChangePassword = true;
         await db.SaveChangesAsync(cancellationToken);
 
-        return Ok(new { studentId = student.StudentId });
+        return Ok(new { studentId = student.StudentId, temporaryPassword });
     }
 
     private async Task<IQueryable<Student>> ScopedStudentsAsync(IQueryable<Student> query, CancellationToken cancellationToken)
@@ -299,7 +363,14 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         if (!ValidStatuses.Contains(status)) Add(nameof(request.Status), "Select a valid status.");
         if (!string.IsNullOrWhiteSpace(studentId) && !StudentCodeRegex.IsMatch(studentId)) Add(nameof(request.StudentId), "Student ID must be 4-20 characters using letters, numbers, or dashes.");
         if (await db.Students.AnyAsync(x => (x.StudentId == studentId || x.RollNumber == studentId) && x.Id != id, cancellationToken)) Add(nameof(request.StudentId), "This student ID already exists.");
-        if (await db.Users.AnyAsync(x => x.NormalizedUserName == studentId.ToUpperInvariant() && x.StudentId != id, cancellationToken)) Add(nameof(request.StudentId), "This student ID is already being used for login.");
+        // AppUser.StudentId is nullable — an account whose student was permanently deleted keeps
+        // its login row with StudentId set to null (see PermanentDelete's SetNull behavior). The
+        // old "x.StudentId != id" comparison treated a null-vs-null match (id is also null on
+        // create) as "not a conflict", so it let a duplicate username slip past validation and
+        // straight into an unhandled unique-constraint crash on save. On create (id is null) any
+        // existing row with this username is a genuine conflict, orphaned or not; on update, only
+        // exclude the student's own linked account.
+        if (await db.Users.AnyAsync(x => x.NormalizedUserName == studentId.ToUpperInvariant() && (id == null || x.StudentId != id), cancellationToken)) Add(nameof(request.StudentId), "This student ID is already being used for login.");
         return errors;
     }
 
@@ -316,6 +387,11 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
         student.HallName = request.HallName?.Trim() ?? string.Empty;
         student.RoomNo = request.RoomNo?.Trim() ?? string.Empty;
         student.Status = string.IsNullOrWhiteSpace(request.Status) ? "active" : request.Status.Trim();
+        // An explicit value (create or edit) always wins. Otherwise: a brand-new student
+        // (JoinDate still at its uninitialized default) gets today; an existing student keeps
+        // whatever join date it already has rather than being silently reset.
+        student.JoinDate = request.JoinDate
+            ?? (student.JoinDate == default ? HallClock.Today : student.JoinDate);
     }
 
     private static void ApplyBulkField(Student student, string key, string value)
@@ -403,6 +479,28 @@ public sealed class StudentsController(HallDbContext db, PasswordService passwor
             notification.StudentId = null;
             notification.Student = null;
         }
+    }
+
+    /// <summary>
+    /// Removes the login account tied to each permanently-deleted student. The FK is
+    /// <c>SetNull</c>, not cascade, so without this the account survives with its Student link
+    /// cleared — a harmless-looking orphan that nonetheless keeps the old student ID's username
+    /// permanently reserved. Re-registering the same ID as a new student then failed validation's
+    /// duplicate-username check (it treated the orphan's null StudentId as "not a conflict") and
+    /// crashed on the database's own unique constraint instead. Deleting the account here is safe:
+    /// a student's own account is never the actor referenced by any admin-side financial row
+    /// (inventory, bills, subsidies) — only admin accounts are, and those are never deleted here.
+    /// </summary>
+    private async Task RemoveLoginAccountsAsync(IEnumerable<Guid> studentIds, CancellationToken cancellationToken)
+    {
+        var ids = studentIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+
+        var accounts = await db.Users
+            .Where(x => x.StudentId.HasValue && ids.Contains(x.StudentId.Value))
+            .ToListAsync(cancellationToken);
+
+        db.Users.RemoveRange(accounts);
     }
 
     private static bool IsAll(string? value) => string.IsNullOrWhiteSpace(value) || value == "all";

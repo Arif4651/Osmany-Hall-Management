@@ -9,6 +9,13 @@ namespace HallBackend.Application.Services;
 
 public sealed class JwtTokenService(IConfiguration configuration)
 {
+    /// <summary>
+    /// Carries <see cref="AppUser.MustChangePassword"/> into the token so
+    /// <see cref="HallBackend.Infrastructure.RequirePasswordChangeMiddleware"/> can enforce it
+    /// server-side rather than trusting the client to honour the frontend's own redirect.
+    /// </summary>
+    public const string MustChangePasswordClaimType = "must_change_password";
+
     public (string Token, LoginSuccess Response) CreateToken(AppUser user)
         => CreateToken(new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, user.Role == "student" ? user.Student?.Gender : user.Wing, user.StudentId, user.MustChangePassword));
 
@@ -30,6 +37,7 @@ public sealed class JwtTokenService(IConfiguration configuration)
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.FullName),
             new Claim(ClaimTypes.Role, user.Role),
+            new Claim(MustChangePasswordClaimType, user.MustChangePassword ? "true" : "false"),
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));

@@ -19,6 +19,19 @@ public sealed class DueController(
     BillingCalculationService billing,
     ILogger<DueController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Serializes the read-then-write in <see cref="Adjust"/> per student/month: two admins
+    /// correcting the same due at once both read the same "previous" figure before either had
+    /// written, so both deltas applied against the same baseline and the second admin's intended
+    /// correction landed on top of the first's rather than replacing it. Keyed per (student,
+    /// month, year) so unrelated adjustments never wait on each other.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> AdjustmentLocks = new();
+
+    private static SemaphoreSlim LockFor(Guid studentId, int month, int year)
+        => AdjustmentLocks.GetOrAdd($"{studentId}:{year}-{month}", _ => new SemaphoreSlim(1, 1));
+
+
     [HttpGet]
     [RequirePermission(MenuKeys.AdminDue, PermissionActions.View)]
     public async Task<IReadOnlyList<DueRowDto>> Get([FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender, CancellationToken cancellationToken)
@@ -70,27 +83,39 @@ public sealed class DueController(
             .FirstOrDefaultAsync(cancellationToken);
         if (studentWing is null) return NotFound(new { message = "Student not found." });
         if (!await currentUser.CanManageOwnWingFinanceAsync(studentWing, cancellationToken)) return Forbid();
-        await billing.RecalculateMonthAsync(request.BillingMonth, request.BillingYear, cancellationToken);
-        var previous = await db.MonthlyBillCache.AsNoTracking()
-            .Where(x => x.StudentId == request.StudentId && x.Month == request.BillingMonth && x.Year == request.BillingYear)
-            .Select(x => x.DueBill).FirstOrDefaultAsync(cancellationToken);
-        db.DueAdjustments.Add(new DueAdjustment
-        {
-            StudentId = request.StudentId,
-            BillingMonth = request.BillingMonth,
-            BillingYear = request.BillingYear,
-            AdjustedAmount = request.AdjustedAmount,
-            PreviousAmount = previous,
-            Note = request.Note?.Trim(),
-            AdjustedById = currentUser.UserId,
-        });
-        await db.SaveChangesAsync(cancellationToken);
 
-        // The adjustment is committed by this point, so a failure rebuilding the derived bills is
-        // not a failure of the adjustment — reporting it as one told the admin their change had
-        // been rejected while it was sitting in the database. The figures can be rebuilt from the
-        // Recalculate action; losing track of what was saved cannot be undone.
-        var recalculated = await TryRecalculateForwardAsync(request.BillingMonth, request.BillingYear, cancellationToken);
+        var gate = LockFor(request.StudentId, request.BillingMonth, request.BillingYear);
+        await gate.WaitAsync(cancellationToken);
+        bool recalculated;
+        try
+        {
+            await billing.RecalculateMonthAsync(request.BillingMonth, request.BillingYear, cancellationToken);
+            var previous = await db.MonthlyBillCache.AsNoTracking()
+                .Where(x => x.StudentId == request.StudentId && x.Month == request.BillingMonth && x.Year == request.BillingYear)
+                .Select(x => x.DueBill).FirstOrDefaultAsync(cancellationToken);
+            db.DueAdjustments.Add(new DueAdjustment
+            {
+                StudentId = request.StudentId,
+                BillingMonth = request.BillingMonth,
+                BillingYear = request.BillingYear,
+                AdjustedAmount = request.AdjustedAmount,
+                PreviousAmount = previous,
+                Note = request.Note?.Trim(),
+                AdjustedById = currentUser.UserId,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+
+            // The adjustment is committed by this point, so a failure rebuilding the derived bills is
+            // not a failure of the adjustment — reporting it as one told the admin their change had
+            // been rejected while it was sitting in the database. The figures can be rebuilt from the
+            // Recalculate action; losing track of what was saved cannot be undone.
+            recalculated = await TryRecalculateForwardAsync(request.BillingMonth, request.BillingYear, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
         return Ok(new
         {
             recalculated,

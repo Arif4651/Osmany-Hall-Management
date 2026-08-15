@@ -31,11 +31,12 @@ public sealed class AdditionalMealService(HallDbContext db)
     public async Task<DateOnly> GetEarliestEditableDateAsync(CancellationToken cancellationToken)
     {
         var cutoff = await db.MealSettings.AsNoTracking()
+            .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (TimeOnly?)x.CutoffTime)
             .FirstOrDefaultAsync(cancellationToken) ?? new TimeOnly(17, 0);
 
-        var daysAhead = TimeOnly.FromDateTime(DateTime.Now) >= cutoff ? 2 : 1;
-        return DateOnly.FromDateTime(DateTime.Today).AddDays(daysAhead);
+        var daysAhead = HallClock.TimeOfDay >= cutoff ? 2 : 1;
+        return HallClock.Today.AddDays(daysAhead);
     }
 
     public async Task<IReadOnlyList<AdditionalMealItem>> GetEligibleItemsAsync(
@@ -192,7 +193,13 @@ public sealed class AdditionalMealService(HallDbContext db)
     /// <summary>
     /// Monthly consumption per student for one item and wing — the denominator the Others Bill is
     /// divided by. Returns every eligible active student, including those with zero, so the admin
-    /// preview shows a complete roster.
+    /// preview shows a complete roster — plus anyone else who actually consumed that month.
+    ///
+    /// The second half matters: restricting the roster to currently-active students meant a
+    /// student who took tea and was later deactivated dropped out of both the numerator and the
+    /// denominator. Regenerating the bill after they left then divided the same pooled amount
+    /// across fewer units, silently raising the unit rate for everyone who stayed and writing off
+    /// the departed student's share entirely.
     /// </summary>
     public async Task<IReadOnlyList<(Guid StudentId, int Count)>> GetMonthlyConsumptionAsync(
         int month, int year, Guid itemId, string wing, CancellationToken cancellationToken)
@@ -200,19 +207,21 @@ public sealed class AdditionalMealService(HallDbContext db)
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
 
-        var students = await db.Students.AsNoTracking()
-            .Where(x => x.Status == "active" && x.Gender == wing)
-            .OrderBy(x => x.StudentName)
-            .Select(x => x.Id)
-            .ToListAsync(cancellationToken);
-
         var counts = await db.AdditionalMealSelections.AsNoTracking()
-            .Where(x => x.ItemId == itemId && x.Date >= from && x.Date <= to)
+            .Where(x => x.ItemId == itemId && x.Date >= from && x.Date <= to
+                && x.Student != null && x.Student.Gender == wing)
             .GroupBy(x => x.StudentId)
             .Select(x => new { StudentId = x.Key, Count = x.Sum(y => y.Quantity) })
             .ToDictionaryAsync(x => x.StudentId, x => x.Count, cancellationToken);
 
-        return students.Select(id => (id, counts.GetValueOrDefault(id))).ToList();
+        var activeStudentIds = await db.Students.AsNoTracking()
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == wing)
+            .OrderBy(x => x.StudentName)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var roster = activeStudentIds.Concat(counts.Keys.Except(activeStudentIds)).Distinct().ToList();
+        return roster.Select(id => (id, counts.GetValueOrDefault(id))).ToList();
     }
 
     /// <summary>Counts for the admin report, grouped by date, meal, item or student.</summary>

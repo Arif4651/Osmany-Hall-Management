@@ -23,7 +23,9 @@ public sealed class MealsController(
     public async Task<ActionResult<MealModuleDto>> GetModule([FromQuery] string? wing, CancellationToken cancellationToken)
     {
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
-        var setting = await db.MealSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken) ?? new MealSetting();
+        // Deterministic in case more than one row ever exists (no DB constraint enforces exactly
+        // one) — always the oldest, so every reader agrees on which row is "the" settings row.
+        var setting = await db.MealSettings.AsNoTracking().OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken) ?? new MealSetting();
         var mealTypes = await db.MealTypes.AsNoTracking().OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
         var days = await db.MealDays.AsNoTracking()
             .OrderBy(x => x.SortOrder)
@@ -60,7 +62,7 @@ public sealed class MealsController(
     [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<MealModuleDto>> UpdateCutoff(UpdateCutoffRequest request, CancellationToken cancellationToken)
     {
-        var setting = await db.MealSettings.FirstOrDefaultAsync(cancellationToken);
+        var setting = await db.MealSettings.OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
         if (setting is null)
         {
             setting = new MealSetting();
@@ -157,13 +159,13 @@ public sealed class MealsController(
     public async Task<ActionResult<MealCountsForDateDto>> GetMealCounts(
         [FromQuery] DateOnly? date, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
-        var target = date ?? DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        var target = date ?? HallClock.Today.AddDays(1);
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
         var mealTypes = await db.MealTypes.AsNoTracking()
             .OrderBy(x => x.SortOrder)
             .ToListAsync(cancellationToken);
 
-        var isFuture = target > DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        var isFuture = target > HallClock.Today.AddDays(1);
         var dayCode = target.DayOfWeek.ToString()[..3].ToLowerInvariant();
 
         if (isFuture)
@@ -176,11 +178,11 @@ public sealed class MealsController(
                 0, // DisabledStudents
                 new List<MealCountOptionDto>()
             )).ToList();
-            return new MealCountsForDateDto(target, dayCode, emptyCounts);
+            return new MealCountsForDateDto(target, dayCode, emptyCounts, IsAvailable: false);
         }
 
         var activeStudents = await db.Students.AsNoTracking()
-            .Where(x => x.Status == "active" && x.Gender == selectedWing)
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing)
             .ToListAsync(cancellationToken);
         var activeStudentIds = activeStudents.Select(x => x.Id).ToList();
         var statuses = await db.MealStatusHistory.AsNoTracking()
@@ -278,14 +280,14 @@ public sealed class MealsController(
         [FromQuery] string? wing,
         CancellationToken cancellationToken)
     {
-        var target = date ?? DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        var target = date ?? HallClock.Today.AddDays(1);
         var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
         var student = await db.Students.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == studentRecordId && x.Gender == selectedWing, cancellationToken);
 
         if (student is null)
             return NotFound(new { message = "Student was not found in the selected wing." });
-        if (!string.Equals(student.Status, "active", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(student.Status, MealResolutionContext.BillableStatus, StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "Only active students can be managed from meal controls." });
 
         return await BuildStudentMealControlAsync(student, selectedWing, target, cancellationToken);
@@ -300,7 +302,7 @@ public sealed class MealsController(
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
             return BadRequest(new { message = "Invalid meal period." });
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = HallClock.Today;
         if (request.EffectiveFrom < today)
             return BadRequest(new { message = "Meal changes can only be applied for today or future dates." });
 
@@ -310,7 +312,7 @@ public sealed class MealsController(
 
         if (student is null)
             return NotFound(new { message = "Student was not found in the selected wing." });
-        if (!string.Equals(student.Status, "active", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(student.Status, MealResolutionContext.BillableStatus, StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "Only active students can be managed from meal controls." });
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -321,6 +323,9 @@ public sealed class MealsController(
             await AdminForceOptionPreferenceAsync(student.Id, selectedWing, request.MealPeriod, request.OptionItemId, request.EffectiveFrom, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            // This changes who is billed for the meal, same as a student's own preference change —
+            // without this the admin's change never reaches any bill.
+            await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
             return await BuildStudentMealControlAsync(student, selectedWing, request.EffectiveFrom, cancellationToken);
         }
         catch (InvalidOperationException ex)
@@ -331,11 +336,17 @@ public sealed class MealsController(
     }
 
     [HttpGet("options")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.View, AltMenuKey = MenuKeys.AdminMeals)]
     public async Task<IReadOnlyList<MenuOptionDto>> GetOptions(CancellationToken cancellationToken)
     {
+        // Wing-scoped: an unfiltered list let a student read the other wing's option item ids,
+        // which SaveMyPreferences would (before H6) accept without checking they belonged to the
+        // caller's own wing.
+        var wing = await currentUser.GetMealWingAsync(null, cancellationToken);
         var items = await db.MealItems.AsNoTracking()
             .Where(x => x.IsOptional && x.InventoryItemId.HasValue
-                && x.InventoryItem != null && !x.InventoryItem.IsDeleted)
+                && x.InventoryItem != null && !x.InventoryItem.IsDeleted
+                && x.InventoryItem.Wing == wing)
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
         return items
@@ -346,34 +357,16 @@ public sealed class MealsController(
             .ToList();
     }
 
-    [HttpGet("debug-preferences")]
-    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.View)]
-    public async Task<IActionResult> DebugPreferences([FromQuery] string studentId, CancellationToken cancellationToken)
-    {
-        var student = await db.Students.FirstOrDefaultAsync(x => x.StudentId == studentId, cancellationToken);
-        if (student == null) return NotFound("Student not found");
-        var prefs = await db.MealPreferenceHistory
-            .Where(x => x.StudentId == student.Id)
-            .OrderBy(x => x.EffectiveFrom)
-            .Select(x => new {
-                x.Id,
-                x.MealPeriod,
-                x.OptionItemId,
-                OptionName = x.OptionItem != null ? x.OptionItem.Item : "None",
-                x.EffectiveFrom,
-                x.EffectiveTo,
-                x.DayOfWeek
-            })
-            .ToListAsync(cancellationToken);
-        return Ok(new { student = student.StudentName, studentGuid = student.Id, preferences = prefs });
-    }
+    // Removed "debug-preferences": an unmaintained diagnostic endpoint with no frontend caller
+    // that dumped a named student's full preference history and internal ids.
 
     [HttpGet("preferences/me")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<MealPreferenceStateDto>>> GetMyPreferences(
         [FromQuery] DateOnly? date, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
-        var target = date ?? DateOnly.FromDateTime(DateTime.Today);
+        var target = date ?? HallClock.Today;
         var wing = await db.Students.AsNoTracking()
             .Where(x => x.Id == studentId)
             .Select(x => x.Gender)
@@ -398,6 +391,7 @@ public sealed class MealsController(
     }
 
     [HttpPut("preferences/me")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.Edit)]
     public async Task<ActionResult<IReadOnlyList<MealPreferenceStateDto>>> SaveMyPreferences(
         SaveMealPreferenceStateRequest request, CancellationToken cancellationToken)
     {
@@ -405,13 +399,22 @@ public sealed class MealsController(
         if (request.EffectiveFrom < earliest)
             return BadRequest(new { message = $"Meal changes can be applied from {earliest:yyyy-MM-dd}." });
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
             foreach (var meal in request.Meals)
             {
                 await history.SetStatusAsync(studentId, meal.MealPeriod, meal.IsOn, request.EffectiveFrom, cancellationToken);
-                await history.SetPreferenceAsync(studentId, meal.MealPeriod, meal.OptionItemId, request.EffectiveFrom, cancellationToken);
+                // Validates the choice is an active Options item of the student's own wing and
+                // present on that day's configured menu — calling history.SetPreferenceAsync
+                // directly (as this used to) skipped that check entirely, so a student could pick
+                // any active Options item including the other wing's, and be charged for none of
+                // it since Participants only ever considers students in the item's own wing.
+                await SaveStudentOptionPreferenceAsync(studentId, wing, meal.MealPeriod, meal.OptionItemId, request.EffectiveFrom, cancellationToken);
             }
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -426,6 +429,7 @@ public sealed class MealsController(
     }
 
     [HttpPost("preferences/me/off-range")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.Edit)]
     public async Task<ActionResult> SaveMyMealOffRange(
         SaveMealOffRangeRequest request, CancellationToken cancellationToken)
     {
@@ -480,6 +484,7 @@ public sealed class MealsController(
     }
 
     [HttpGet("snapshot/me")]
+    [RequirePermission(MenuKeys.StudentMealSnapshot, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<MealSnapshotRowDto>>> GetMySnapshot(
         [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken cancellationToken)
     {
@@ -547,63 +552,10 @@ public sealed class MealsController(
         return rows;
     }
 
-    [HttpGet("menu")]
-    public async Task<IReadOnlyList<MenuMealDto>> GetMenu(CancellationToken cancellationToken)
-    {
-        var configurations = await db.MealConfigurations.AsNoTracking()
-            .Include(x => x.MealType)
-            .Include(x => x.Items)
-            .OrderBy(x => x.MealDayId)
-            .ToListAsync(cancellationToken);
-        return MealHistoryService.MealPeriods.Select(period =>
-        {
-            var items = configurations.FirstOrDefault(x => x.MealType!.Code == period)?.Items
-                .ToList() ?? [];
-            return new MenuMealDto(
-                period,
-                items.Where(x => !x.IsOptional)
-                    .Select(x => new MenuOptionDto(x.InventoryItemId ?? x.Id, x.Name, x.Cost)).ToList(),
-                items.Where(x => x.IsOptional)
-                    .Select(x => new MenuOptionDto(x.InventoryItemId ?? x.Id, x.Name, x.Cost)).ToList());
-        }).ToList();
-    }
-
-    [HttpPut("menu")]
-    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
-    public async Task<ActionResult<IReadOnlyList<MenuMealDto>>> SaveMenu(SaveMenuMealRequest request, CancellationToken cancellationToken)
-    {
-        if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod)) return BadRequest(new { message = "Invalid meal period." });
-        var selectedIds = request.CommonItemIds.Concat(request.OptionItemIds).Distinct().ToList();
-        var selected = await db.InventoryItems.Where(x => selectedIds.Contains(x.Id) && !x.IsDeleted).ToListAsync(cancellationToken);
-        if (request.CommonItemIds.Any(id => selected.All(x => x.Id != id || x.Category != "Common"))
-            || request.OptionItemIds.Any(id => selected.All(x => x.Id != id || x.Category != "Options")))
-            return BadRequest(new { message = "Menu items must match their inventory category." });
-        var mealType = await db.MealTypes.FirstOrDefaultAsync(x => x.Code == request.MealPeriod, cancellationToken);
-        if (mealType is null) return NotFound();
-        var configs = await db.MealConfigurations.Include(x => x.Items)
-            .Where(x => x.MealTypeId == mealType.Id).ToListAsync(cancellationToken);
-        foreach (var config in configs)
-        {
-            var previousCosts = config.Items
-                .Where(x => x.InventoryItemId.HasValue)
-                .GroupBy(x => x.InventoryItemId!.Value)
-                .ToDictionary(x => x.Key, x => x.First().Cost);
-            db.MealItems.RemoveRange(config.Items);
-            foreach (var item in selected)
-            {
-                db.MealItems.Add(new MealItem
-                {
-                    MealConfigurationId = config.Id,
-                    InventoryItemId = item.Id,
-                    Name = item.Item,
-                    Cost = previousCosts.GetValueOrDefault(item.Id),
-                    IsOptional = item.Category == "Options",
-                });
-            }
-        }
-        await db.SaveChangesAsync(cancellationToken);
-        return Ok(await GetMenu(cancellationToken));
-    }
+    // Removed: GET/PUT "menu" once flattened every day and both wings' configurations into one
+    // (a PUT here overwrote all fourteen day/wing combinations with the same items, zeroing
+    // their display costs in the process). The frontend never called it — it already uses
+    // GET /api/meals/module and PUT /api/meals/configuration, which are day- and wing-scoped.
 
     // ── Global Meal Overrides (Admin) ─────────────────────────────────────────
 
@@ -612,7 +564,7 @@ public sealed class MealsController(
     public async Task<IReadOnlyList<GlobalMealOverrideDto>> GetOverrides(
         [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
-        var queryFrom = from ?? DateOnly.FromDateTime(DateTime.Today);
+        var queryFrom = from ?? HallClock.Today;
         var queryTo = to ?? queryFrom.AddMonths(3);
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
         return await db.GlobalMealOverrides.AsNoTracking()
@@ -633,6 +585,9 @@ public sealed class MealsController(
             return BadRequest(new { message = "End date must be on or after start date." });
         if (request.EffectiveTo.DayNumber - request.EffectiveFrom.DayNumber > 366)
             return BadRequest(new { message = "Override cannot span more than one year." });
+        var today = HallClock.Today;
+        if (request.EffectiveFrom < today)
+            return BadRequest(new { message = "Overrides can only start today or in the future — a past date has already been billed." });
         var selectedWing = await currentUser.GetMealWingAsync(request.Wing, cancellationToken);
 
         var overlapping = await db.GlobalMealOverrides
@@ -642,9 +597,46 @@ public sealed class MealsController(
                 && x.EffectiveFrom <= request.EffectiveTo)
             .ToListAsync(cancellationToken);
 
-        if (overlapping.Count > 0)
+        // Truncate overlapping rows to the boundary rather than deleting them outright — a row
+        // is only ever removed here when the new range fully contains it, and since the new
+        // range cannot start before today (checked above), a fully-contained row cannot reach
+        // into the past either. A row that starts before the new range keeps its earlier days; a
+        // row surrounding the new range is split so both its outer edges survive.
+        foreach (var row in overlapping)
         {
-            db.GlobalMealOverrides.RemoveRange(overlapping);
+            var startsBefore = row.EffectiveFrom < request.EffectiveFrom;
+            var endsAfter = row.EffectiveTo > request.EffectiveTo;
+
+            if (startsBefore && endsAfter)
+            {
+                // The new range sits entirely inside this one: keep the left remainder on the
+                // existing row and add a new row for the right remainder.
+                var rightRemainderTo = row.EffectiveTo;
+                row.EffectiveTo = request.EffectiveFrom.AddDays(-1);
+                db.GlobalMealOverrides.Add(new GlobalMealOverride
+                {
+                    Wing = row.Wing,
+                    MealPeriod = row.MealPeriod,
+                    EffectiveFrom = request.EffectiveTo.AddDays(1),
+                    EffectiveTo = rightRemainderTo,
+                    IsOn = row.IsOn,
+                    Note = row.Note,
+                    CreatedById = row.CreatedById,
+                });
+            }
+            else if (startsBefore)
+            {
+                row.EffectiveTo = request.EffectiveFrom.AddDays(-1);
+            }
+            else if (endsAfter)
+            {
+                row.EffectiveFrom = request.EffectiveTo.AddDays(1);
+            }
+            else
+            {
+                // Fully contained in the new range — nothing of it survives outside it.
+                db.GlobalMealOverrides.Remove(row);
+            }
         }
 
         var entity = new GlobalMealOverride
@@ -659,6 +651,9 @@ public sealed class MealsController(
         };
         db.GlobalMealOverrides.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
+        // Changes who is billed for this wing/period across the whole range — without this the
+        // override took effect on the meal sheet but never reached a bill.
+        await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
         return new GlobalMealOverrideDto(entity.Id, entity.Wing, entity.MealPeriod, entity.EffectiveFrom, entity.EffectiveTo, entity.IsOn, entity.Note, entity.CreatedAtUtc);
     }
 
@@ -670,20 +665,24 @@ public sealed class MealsController(
         if (entity is null) return NotFound();
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(adminWing) && entity.Wing != adminWing) return Forbid();
+        var effectiveFrom = entity.EffectiveFrom;
         db.GlobalMealOverrides.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
+        // Removing an override changes who was billed for that range just as creating one does.
+        await billing.RecalculateForwardAsync(effectiveFrom.Month, effectiveFrom.Year, cancellationToken);
         return NoContent();
     }
 
     // ── Guest Meal Requests (Student) ─────────────────────────────────────────
 
     [HttpGet("guest-meals/me")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<GuestMealRequestDto>>> GetMyGuestMeals(
         [FromQuery] int? month, [FromQuery] int? year, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
-        var targetMonth = month ?? DateTime.Today.Month;
-        var targetYear = year ?? DateTime.Today.Year;
+        var targetMonth = month ?? HallClock.Today.Month;
+        var targetYear = year ?? HallClock.Today.Year;
         var from = new DateOnly(targetYear, targetMonth, 1);
         var to = from.AddMonths(1).AddDays(-1);
         var rows = await db.GuestMealRequests.AsNoTracking()
@@ -694,6 +693,7 @@ public sealed class MealsController(
     }
 
     [HttpPost("guest-meals/me")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.Edit)]
     public async Task<ActionResult<GuestMealRequestDto>> SaveMyGuestMeal(
         SaveGuestMealRequest request, CancellationToken cancellationToken)
     {
@@ -734,6 +734,7 @@ public sealed class MealsController(
     }
 
     [HttpDelete("guest-meals/me/{id:guid}")]
+    [RequirePermission(MenuKeys.StudentMeals, PermissionActions.Delete)]
     public async Task<IActionResult> DeleteMyGuestMeal(Guid id, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
@@ -751,16 +752,16 @@ public sealed class MealsController(
     public async Task<ActionResult<MealSheetDto>> GetMealSheet(
         [FromQuery] DateOnly? date, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
-        var target = date ?? DateOnly.FromDateTime(DateTime.Today);
+        var target = date ?? HallClock.Today;
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
         
         // Fetch all active students
         var students = await db.Students.AsNoTracking()
-            .Where(x => x.Status == "active" && x.Gender == selectedWing)
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing)
             .OrderBy(x => x.RoomNo).ThenBy(x => x.StudentId)
             .ToListAsync(cancellationToken);
 
-        var isFuture = target > DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        var isFuture = target > HallClock.Today.AddDays(1);
         var rows = new List<MealSheetRowDto>();
 
         if (isFuture)
@@ -864,18 +865,19 @@ public sealed class MealsController(
             bCount,
             lCount,
             dCount,
-            rows
+            rows,
+            IsAvailable: !isFuture
         );
     }
 
     private async Task<DateOnly> GetEarliestStudentChangeDateAsync(CancellationToken cancellationToken)
     {
         var cutoff = await db.MealSettings.AsNoTracking()
+            .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (TimeOnly?)x.CutoffTime)
             .FirstOrDefaultAsync(cancellationToken) ?? new TimeOnly(17, 0);
-        var now = DateTime.Now;
-        var daysAhead = TimeOnly.FromDateTime(now) >= cutoff ? 2 : 1;
-        return DateOnly.FromDateTime(now.Date).AddDays(daysAhead);
+        var daysAhead = HallClock.TimeOfDay >= cutoff ? 2 : 1;
+        return HallClock.Today.AddDays(daysAhead);
     }
 
     /// <summary>

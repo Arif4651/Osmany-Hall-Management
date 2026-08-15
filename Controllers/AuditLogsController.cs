@@ -7,8 +7,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HallBackend.Controllers;
 
+// Roles.Admin ("admin") matches no account that can actually exist: DataSeeder migrates every
+// legacy "admin" user to male_wing_admin on startup, and new admins are only ever created as
+// male_wing_admin/female_wing_admin (AdminSettingsController) or super_admin (seeded). The audit
+// trail spans both wings, so — like role management — it is a super-admin-only view rather than
+// something scoped per wing.
 [ApiController]
-[Authorize(Roles = Roles.Admin)]
+[Authorize(Roles = Roles.SuperAdmin)]
 [Route("api/audit-logs")]
 public sealed class AuditLogsController(HallDbContext db) : ControllerBase
 {

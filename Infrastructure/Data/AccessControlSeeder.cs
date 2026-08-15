@@ -253,13 +253,18 @@ public sealed class AccessControlSeeder(HallDbContext db)
         }
 
         // Students read everything on their portal, and manage only their own meals, payments and
-        // additional preferences. Delete is granted on additional preferences because unmarking a
-        // slot removes the row outright.
+        // additional preferences. Delete is granted on meals (a guest-meal request is removed
+        // outright, the same reasoning as additional preferences below) and on additional
+        // preferences, because unmarking a slot removes the row outright in both cases.
         var studentGrants = new Dictionary<string, (bool, bool, bool, bool)>(StringComparer.OrdinalIgnoreCase);
         Grant(studentGrants, Applicable(Roles.Student, studentViewOnly), true, false, false, false);
         Grant(
             studentGrants,
-            Applicable(Roles.Student, [MenuKeys.StudentMeals, MenuKeys.StudentPayments]),
+            Applicable(Roles.Student, [MenuKeys.StudentMeals]),
+            true, true, true, true);
+        Grant(
+            studentGrants,
+            Applicable(Roles.Student, [MenuKeys.StudentPayments]),
             true, true, true, false);
         Grant(
             studentGrants,

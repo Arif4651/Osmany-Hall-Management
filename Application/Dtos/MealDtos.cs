@@ -14,7 +14,12 @@ public sealed record MealCountDto(
     int EnabledStudents,
     int DisabledStudents,
     IReadOnlyList<MealCountOptionDto> OptionalChoices);
-public sealed record MealCountsForDateDto(DateOnly Date, string DayId, IReadOnlyList<MealCountDto> Meals);
+/// <summary>
+/// <paramref name="IsAvailable"/> is false only for a date the meal-decision window hasn't
+/// reached yet — the zero counts on that response are not real counts, just placeholders, and
+/// the client should say so rather than showing "0 students" as if that were known.
+/// </summary>
+public sealed record MealCountsForDateDto(DateOnly Date, string DayId, IReadOnlyList<MealCountDto> Meals, bool IsAvailable = true);
 public sealed record UpdateCutoffRequest(TimeOnly CutoffTime);
 public sealed record UpsertMealConfigurationRequest(
     string DayId,
@@ -79,10 +84,12 @@ public sealed record MealSheetRowDto(
     int LunchGuestCount,
     int DinnerGuestCount);
 
+/// <summary>See <see cref="MealCountsForDateDto.IsAvailable"/> — same meaning here.</summary>
 public sealed record MealSheetDto(
     DateOnly Date,
     int TotalStudents,
     int BreakfastCount,
     int LunchCount,
     int DinnerCount,
-    IReadOnlyList<MealSheetRowDto> Rows);
+    IReadOnlyList<MealSheetRowDto> Rows,
+    bool IsAvailable = true);

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Threading.RateLimiting;
 using HallBackend.Application.Services;
@@ -5,6 +6,7 @@ using HallBackend.Application.Serialization;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -30,6 +32,7 @@ if (jwtSecret.StartsWith("CHANGE_", StringComparison.OrdinalIgnoreCase))
 builder.Services.AddDbContext<HallDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtTokenService>();
+builder.Services.AddSingleton<LoginAttemptLimiter>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUserService>();
 builder.Services.AddScoped<InventoryTransactionService>();
@@ -64,23 +67,26 @@ builder.Services.Configure<GzipCompressionProviderOptions>(opts =>
 // Server-side cache for read-heavy, rarely-mutated endpoints.
 // IMPORTANT: policies are "NoStore" by default for authenticated routes —
 // only apply policies explicitly on endpoints that are safe to cache.
+//
+// Auth is a cookie ("hall-auth-token"), not an Authorization header — the frontend never sends
+// one — so SetVaryByHeader("Authorization") always sees the same (empty) value for every caller
+// and every user was served the same cached response. Vary by the authenticated user's id
+// instead, read from the claim the JWT bearer handler has already populated by the time output
+// caching runs (it sits after UseAuthentication/UseAuthorization in the pipeline below).
+static string CurrentUserCacheKey(HttpContext context)
+    => context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+
 builder.Services.AddOutputCache(opts =>
 {
     // Notices: refresh every 5 minutes; invalidated on notice write operations.
     opts.AddPolicy("notices-cache", b =>
         b.Expire(TimeSpan.FromMinutes(5))
-         .SetVaryByHeader("Authorization"));
+         .VaryByValue(context => new KeyValuePair<string, string>("uid", CurrentUserCacheKey(context))));
 
     // Student filter options (departments / levels / halls): 10-minute cache.
     opts.AddPolicy("filter-options-cache", b =>
         b.Expire(TimeSpan.FromMinutes(10))
-         .SetVaryByHeader("Authorization"));
-
-    // Daily Cost Report: 2 minutes TTL
-    opts.AddPolicy("daily-cost-cache", b =>
-        b.Expire(TimeSpan.FromMinutes(2))
-         .SetVaryByQuery("month", "year", "gender")
-         .SetVaryByHeader("Authorization"));
+         .VaryByValue(context => new KeyValuePair<string, string>("uid", CurrentUserCacheKey(context))));
 });
 
 // ── Rate Limiting ─────────────────────────────────────────────────────────────
@@ -89,7 +95,11 @@ builder.Services.AddRateLimiter(opts =>
 {
     opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    // Max 10 login attempts per minute per IP address.
+    // Max 10 login attempts per minute per client address. Correct only once ForwardedHeaders
+    // (below) has resolved RemoteIpAddress to the real client — behind the reverse proxy this
+    // app is deployed behind, that address used to be the proxy's for every request, so every
+    // caller shared one 10-per-minute budget: a busy morning locked everyone out at once, and an
+    // actual attacker was throttled no harder than anyone else.
     opts.AddPolicy("auth-login", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -100,6 +110,22 @@ builder.Services.AddRateLimiter(opts =>
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit = 0,
             }));
+});
+
+// ── Forwarded Headers ─────────────────────────────────────────────────────────
+// This app sits behind a reverse proxy (Render's edge, in front of a Vercel-hosted frontend —
+// see the CORS comment below), so HttpContext.Connection.RemoteIpAddress is otherwise always the
+// proxy's own address, never the caller's. That silently broke the login rate limiter: every
+// caller shared one partition keyed on the proxy's IP, so it protected nobody and could lock out
+// every user at once under normal traffic. KnownNetworks/KnownProxies are cleared because the
+// proxy's address is not fixed and not enumerable in advance; this is safe specifically because
+// the platform's edge is the only path to this app — nothing reaches it by connecting directly
+// and forging the header.
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opts.KnownNetworks.Clear();
+    opts.KnownProxies.Clear();
 });
 
 builder.Services.AddCors(options =>
@@ -189,6 +215,10 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<AccessControlSeeder>().SeedAsync();
 }
 
+// Resolve the real client address/scheme from the proxy's headers before anything downstream
+// (rate limiting, HTTPS redirection, logging) reads them.
+app.UseForwardedHeaders();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
@@ -203,6 +233,8 @@ app.UseCors("frontend");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<HallBackend.Infrastructure.CsrfProtectionMiddleware>();
+app.UseMiddleware<HallBackend.Infrastructure.RequirePasswordChangeMiddleware>();
 app.UseOutputCache();
 
 app.MapHealthChecks("/health");

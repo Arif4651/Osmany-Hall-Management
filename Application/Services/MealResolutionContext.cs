@@ -20,6 +20,14 @@ namespace HallBackend.Application.Services;
 /// </summary>
 public sealed class MealResolutionContext
 {
+    /// <summary>
+    /// The single definition of "counts as a hall resident for billing purposes". Every module
+    /// that computes a headcount or a per-student share — the meal sheet, meal counts, DSW
+    /// eligibility, the tea/Others Bill roster, and this billing engine — must use the same rule,
+    /// or the divisor one screen shows never matches the divisor another one billed against.
+    /// </summary>
+    public const string BillableStatus = "active";
+
     private readonly Dictionary<(string Wing, string MealPeriod), List<GlobalMealOverride>> overrides;
     private readonly Dictionary<(Guid StudentId, string MealPeriod), List<MealStatusHistory>> statuses;
     private readonly Dictionary<(Guid StudentId, string MealPeriod, DayOfWeek DayOfWeek), List<MealPreferenceHistory>> preferences;
@@ -47,7 +55,13 @@ public sealed class MealResolutionContext
         DateOnly to,
         CancellationToken cancellationToken)
     {
-        var students = await db.Students.AsNoTracking().ToListAsync(cancellationToken);
+        // Only billable-status students participate — matching the Meal Sheet, meal counts, DSW
+        // eligibility and Others Bill consumption, which have always filtered this way. Billing
+        // used to load every student regardless of status, so a graduated or archived student
+        // whose meal was left on kept being charged and kept diluting everyone else's share.
+        var students = await db.Students.AsNoTracking()
+            .Where(x => x.Status == BillableStatus)
+            .ToListAsync(cancellationToken);
         var overrideRows = await db.GlobalMealOverrides.AsNoTracking()
             .Where(x => x.EffectiveFrom <= to && x.EffectiveTo >= from)
             .ToListAsync(cancellationToken);
@@ -97,7 +111,7 @@ public sealed class MealResolutionContext
         if (!StudentsByWing.TryGetValue(item.Wing, out var wingStudents)) return [];
         var wingOverride = FindOverride(item.Wing, mealPeriod, date);
         return wingStudents
-            .Where(student => FinancialMath.IsChargeParticipant(
+            .Where(student => HasJoinedBy(student, date) && FinancialMath.IsChargeParticipant(
                 item.Category,
                 item.Id,
                 item.LinkedOptionId,
@@ -112,11 +126,19 @@ public sealed class MealResolutionContext
         if (!StudentsByWing.TryGetValue(item.Wing, out var wingStudents)) return 0;
         var wingOverride = FindOverride(item.Wing, mealPeriod, date);
         return wingStudents
-            .Count(student => FinancialMath.IsChargeParticipant(
+            .Count(student => HasJoinedBy(student, date) && FinancialMath.IsChargeParticipant(
                 item.Category,
                 item.Id,
                 item.LinkedOptionId,
                 IsMealOn(student.Id, mealPeriod, date, wingOverride),
                 FindSelectedOption(student.Id, mealPeriod, date)));
     }
+
+    /// <summary>
+    /// Whether the student had already joined the hall as of <paramref name="date"/>. A wing-wide
+    /// meal override forces every current student's meal "on" for its date range with no idea who
+    /// existed at the hall when it was created — without this check, a student created today
+    /// would be retroactively billed for an override dated before they joined.
+    /// </summary>
+    public static bool HasJoinedBy(Student student, DateOnly date) => student.JoinDate <= date;
 }

@@ -59,7 +59,9 @@ public sealed class BillingController(
         [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
     {
         if (month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
-        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        // Forward, not just this month — otherwise later months keep a stale carried-due figure
+        // that this recalculation never touches.
+        await billing.RecalculateForwardAsync(month, year, cancellationToken);
         return NoContent();
     }
 

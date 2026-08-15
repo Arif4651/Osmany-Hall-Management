@@ -15,9 +15,35 @@ public sealed class AuthController(
     HallDbContext db,
     PasswordService passwords,
     JwtTokenService tokens,
+    LoginAttemptLimiter loginAttempts,
     IWebHostEnvironment env,
     ILogger<AuthController> logger) : ControllerBase
 {
+    private void WriteAuthCookie(string tokenString, DateTime expiresAtUtc)
+    {
+        Response.Cookies.Append(AuthCookieName, tokenString, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = ShouldUseSecureCookie(),
+            SameSite = GetAuthCookieSameSiteMode(),
+            Expires = expiresAtUtc,
+            Path = "/",
+        });
+
+        // Deliberately NOT HttpOnly: the frontend must be able to read this and echo it back as
+        // the X-CSRF-Token header (CsrfProtectionMiddleware). Its secrecy from JavaScript is not
+        // the point — the point is that a cross-site request can send the auth cookie
+        // automatically but cannot read this one to construct a matching header.
+        Response.Cookies.Append(HallBackend.Infrastructure.CsrfProtectionMiddleware.CookieName, Guid.NewGuid().ToString("N"), new CookieOptions
+        {
+            HttpOnly = false,
+            Secure = ShouldUseSecureCookie(),
+            SameSite = GetAuthCookieSameSiteMode(),
+            Expires = expiresAtUtc,
+            Path = "/",
+        });
+    }
+
     private const string AuthCookieName = "hall-auth-token";
 
     [HttpPost("login")]
@@ -27,6 +53,17 @@ public sealed class AuthController(
         var totalTimer = Stopwatch.StartNew();
         var identifier = request.Email.Trim().ToUpperInvariant();
         var isEmailIdentifier = identifier.Contains('@');
+
+        // Independent of the per-IP limiter above: this blocks repeated attempts against one
+        // account regardless of how many addresses they come from.
+        if (loginAttempts.IsLockedOut(identifier))
+        {
+            LogLoginTiming("account_locked", 0, 0, 0, 0, totalTimer.Elapsed.TotalMilliseconds);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Too many failed attempts for this account. Try again later.",
+            });
+        }
 
         var stageTimer = Stopwatch.StartNew();
         var user = await db.Users
@@ -52,6 +89,7 @@ public sealed class AuthController(
 
         if (user is null || !user.IsActive)
         {
+            loginAttempts.RecordFailure(identifier);
             LogLoginTiming("invalid_or_inactive", userQueryMs, 0, 0, 0, totalTimer.Elapsed.TotalMilliseconds);
             return Unauthorized(new { message = "Invalid credentials. Please try again." });
         }
@@ -59,10 +97,12 @@ public sealed class AuthController(
         stageTimer.Restart();
         if (!passwords.Verify(request.Password, user.PasswordHash))
         {
+            loginAttempts.RecordFailure(identifier);
             var passwordVerifyMs = stageTimer.Elapsed.TotalMilliseconds;
             LogLoginTiming("invalid_password", userQueryMs, passwordVerifyMs, 0, 0, totalTimer.Elapsed.TotalMilliseconds);
             return Unauthorized(new { message = "Invalid credentials. Please try again." });
         }
+        loginAttempts.RecordSuccess(identifier);
         var successfulPasswordVerifyMs = stageTimer.Elapsed.TotalMilliseconds;
 
         stageTimer.Restart();
@@ -78,14 +118,7 @@ public sealed class AuthController(
         var tokenCreateMs = stageTimer.Elapsed.TotalMilliseconds;
 
         // Write the JWT into an HttpOnly cookie so JavaScript cannot read it.
-        Response.Cookies.Append(AuthCookieName, tokenString, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = ShouldUseSecureCookie(),
-            SameSite = GetAuthCookieSameSiteMode(),
-            Expires = loginSuccess.ExpiresAtUtc,
-            Path = "/",
-        });
+        WriteAuthCookie(tokenString, loginSuccess.ExpiresAtUtc);
 
         LogLoginTiming(
             "success",
@@ -106,6 +139,13 @@ public sealed class AuthController(
         Response.Cookies.Delete(AuthCookieName, new CookieOptions
         {
             HttpOnly = true,
+            Secure = ShouldUseSecureCookie(),
+            SameSite = GetAuthCookieSameSiteMode(),
+            Path = "/",
+        });
+        Response.Cookies.Delete(HallBackend.Infrastructure.CsrfProtectionMiddleware.CookieName, new CookieOptions
+        {
+            HttpOnly = false,
             Secure = ShouldUseSecureCookie(),
             SameSite = GetAuthCookieSameSiteMode(),
             Path = "/",
@@ -143,6 +183,17 @@ public sealed class AuthController(
         user.PasswordHash = passwords.Hash(request.NewPassword);
         user.MustChangePassword = false;
         await db.SaveChangesAsync(cancellationToken);
+
+        // Reissue the cookie with a fresh token carrying MustChangePassword=false. Without this,
+        // RequirePasswordChangeMiddleware would keep reading the old token's claim and lock the
+        // user out of every other endpoint for the rest of the token's lifetime, immediately
+        // after they did exactly what was asked of them.
+        var gender = user.Role == HallBackend.Domain.Constants.Roles.Student
+            ? await db.Students.AsNoTracking().Where(x => x.Id == user.StudentId).Select(x => (string?)x.Gender).FirstOrDefaultAsync(cancellationToken)
+            : user.Wing;
+        var refreshedUser = new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, gender, user.StudentId, false);
+        var (tokenString, loginSuccess) = tokens.CreateToken(refreshedUser);
+        WriteAuthCookie(tokenString, loginSuccess.ExpiresAtUtc);
 
         return NoContent();
     }

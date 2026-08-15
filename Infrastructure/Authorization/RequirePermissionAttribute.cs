@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using HallBackend.Application.Services;
+using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.EntityFrameworkCore;
 
 namespace HallBackend.Infrastructure.Authorization;
 
@@ -32,7 +35,32 @@ public sealed class RequirePermissionAttribute(string menuKey, string action)
             return;
         }
 
-        var role = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        var idClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(idClaim, out var userId))
+        {
+            context.Result = new UnauthorizedResult();
+            return;
+        }
+
+        // Read the role from the database rather than the token's Role claim: a token is valid
+        // for up to Jwt:ExpiresMinutes (120) after issue, so a role demotion, an account
+        // deactivation, or a wing reassignment made mid-session would otherwise not take effect
+        // on any permission-guarded endpoint until the old token expired. This runs on every
+        // guarded request, matching the rest of the app's already-heavy per-request DB usage
+        // (CurrentUserService does the same for wing scoping).
+        var account = await context.HttpContext.RequestServices.GetRequiredService<HallDbContext>()
+            .Users.AsNoTracking()
+            .Where(x => x.Id == userId)
+            .Select(x => new { x.Role, x.IsActive })
+            .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+
+        if (account is null || !account.IsActive)
+        {
+            context.Result = new UnauthorizedResult();
+            return;
+        }
+
+        var role = account.Role;
         var permissions = context.HttpContext.RequestServices.GetRequiredService<PermissionService>();
 
         var allowed = await permissions.HasPermissionAsync(

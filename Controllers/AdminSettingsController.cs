@@ -26,7 +26,13 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
             .Select(x => new AdminAccountDto(x.Id, x.FullName, x.Email, x.UserName, x.Role, x.Wing, x.Designation, x.IsActive))
             .ToListAsync(cancellationToken);
 
+    // Creating or editing a wing-admin account — including setting its password — is restricted
+    // to the super admin. admin.settings can be granted to any role through the permission
+    // matrix, and without this a wing admin holding that grant could reset the other wing's
+    // admin password or reassign its role/wing, moving privilege sideways across the wing
+    // boundary every other financial screen enforces.
     [HttpPost("admins")]
+    [Authorize(Roles = Roles.SuperAdmin)]
     [RequirePermission(MenuKeys.AdminSettings, PermissionActions.Create)]
     public async Task<ActionResult<AdminAccountDto>> CreateAdmin(SaveAdminAccountRequest request, CancellationToken cancellationToken)
     {
@@ -57,6 +63,7 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
     }
 
     [HttpPut("admins/{id:guid}")]
+    [Authorize(Roles = Roles.SuperAdmin)]
     [RequirePermission(MenuKeys.AdminSettings, PermissionActions.Edit)]
     public async Task<ActionResult<AdminAccountDto>> UpdateAdmin(Guid id, SaveAdminAccountRequest request, CancellationToken cancellationToken)
     {

@@ -33,7 +33,10 @@ public sealed class DswSubsidiesController(
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
 
         var students = await db.Students.AsNoTracking()
-            .Where(x => x.Status == "active" && x.Gender == selectedWing)
+            // JoinDate: a student who joined after request.Date cannot have been eligible for a
+            // meal on that date — without this, editing an old subsidy after a new student joins
+            // would silently add them to a distribution for a date before they existed.
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing && x.JoinDate <= request.Date)
             .OrderBy(x => x.StudentName)
             .ToListAsync(cancellationToken);
         var studentIds = students.Select(x => x.Id).ToList();
@@ -67,6 +70,13 @@ public sealed class DswSubsidiesController(
         try
         {
             var perStudentSubsidy = request.SubsidyAmount / eligibleStudents.Count;
+            // Plain division does not reconcile: ৳1,000 over 3 students rounds to ৳333.33 each
+            // at 2dp and loses a paisa. AllocateByConsumption (one "unit" per eligible student)
+            // hands the leftover paisa out by largest remainder so the distributions always sum
+            // to exactly SubsidyAmount.
+            var allocations = FinancialMath.AllocateByConsumption(
+                request.SubsidyAmount,
+                eligibleStudents.Select(s => (StudentId: s.Id, Count: 1)).ToList());
             var entity = new DswSubsidy
             {
                 Wing = selectedWing,
@@ -74,6 +84,7 @@ public sealed class DswSubsidiesController(
                 Date = request.Date,
                 MealPeriod = request.MealPeriod,
                 EligibleStudentCount = eligibleStudents.Count,
+                // Display-only average; the ground truth is each distribution row's own amount.
                 PerStudentSubsidy = perStudentSubsidy,
                 Notes = request.Notes?.Trim(),
                 CreatedById = currentUser.UserId,
@@ -81,13 +92,13 @@ public sealed class DswSubsidiesController(
             db.DswSubsidies.Add(entity);
             await db.SaveChangesAsync(cancellationToken);
 
-            db.DswSubsidyDistributions.AddRange(eligibleStudents.Select(student => new DswSubsidyDistribution
+            db.DswSubsidyDistributions.AddRange(allocations.Select(allocation => new DswSubsidyDistribution
             {
                 SubsidyId = entity.Id,
-                StudentId = student.Id,
+                StudentId = allocation.StudentId,
                 Date = request.Date,
                 MealPeriod = request.MealPeriod,
-                SubsidyAmount = perStudentSubsidy,
+                SubsidyAmount = allocation.Amount,
             }));
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -111,6 +122,7 @@ public sealed class DswSubsidiesController(
     }
 
     [HttpGet]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<DswSubsidyDto>>> GetSubsidies(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
     {
@@ -130,16 +142,24 @@ public sealed class DswSubsidiesController(
     {
         var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (subsidy is null) return NotFound();
-        
+
+        // A wing admin must not be able to reach into the other wing's subsidy — GetManagedWingAsync
+        // only pins the caller's own wing, it does not check that the row being edited is theirs.
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(adminWing) && subsidy.Wing != adminWing) return Forbid();
+
         if (request.SubsidyAmount <= 0m)
             return BadRequest(new { message = "Subsidy amount must be greater than zero." });
         if (!MealHistoryService.MealPeriods.Contains(request.MealPeriod))
             return BadRequest(new { message = "Invalid meal period." });
 
         var selectedWing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
-        
+
         var students = await db.Students.AsNoTracking()
-            .Where(x => x.Status == "active" && x.Gender == selectedWing)
+            // JoinDate: a student who joined after request.Date cannot have been eligible for a
+            // meal on that date — without this, editing an old subsidy after a new student joins
+            // would silently add them to a distribution for a date before they existed.
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing && x.JoinDate <= request.Date)
             .OrderBy(x => x.StudentName)
             .ToListAsync(cancellationToken);
         var studentIds = students.Select(x => x.Id).ToList();
@@ -176,7 +196,10 @@ public sealed class DswSubsidiesController(
             db.DswSubsidyDistributions.RemoveRange(oldDistributions);
 
             var perStudentSubsidy = request.SubsidyAmount / eligibleStudents.Count;
-            
+            var allocations = FinancialMath.AllocateByConsumption(
+                request.SubsidyAmount,
+                eligibleStudents.Select(s => (StudentId: s.Id, Count: 1)).ToList());
+
             subsidy.Wing = selectedWing;
             subsidy.SubsidyAmount = request.SubsidyAmount;
             var oldDate = subsidy.Date;
@@ -185,14 +208,14 @@ public sealed class DswSubsidiesController(
             subsidy.EligibleStudentCount = eligibleStudents.Count;
             subsidy.PerStudentSubsidy = perStudentSubsidy;
             subsidy.Notes = request.Notes?.Trim();
-            
-            db.DswSubsidyDistributions.AddRange(eligibleStudents.Select(student => new DswSubsidyDistribution
+
+            db.DswSubsidyDistributions.AddRange(allocations.Select(allocation => new DswSubsidyDistribution
             {
                 SubsidyId = subsidy.Id,
-                StudentId = student.Id,
+                StudentId = allocation.StudentId,
                 Date = request.Date,
                 MealPeriod = request.MealPeriod,
-                SubsidyAmount = perStudentSubsidy,
+                SubsidyAmount = allocation.Amount,
             }));
 
             await db.SaveChangesAsync(cancellationToken);
@@ -226,22 +249,28 @@ public sealed class DswSubsidiesController(
         var subsidy = await db.DswSubsidies.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (subsidy is null) return NotFound();
 
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(adminWing) && subsidy.Wing != adminWing) return Forbid();
+
         var distributions = await db.DswSubsidyDistributions.Where(x => x.SubsidyId == id).ToListAsync(cancellationToken);
         db.DswSubsidyDistributions.RemoveRange(distributions);
         db.DswSubsidies.Remove(subsidy);
-        
+
         await db.SaveChangesAsync(cancellationToken);
         await billing.RecalculateForwardAsync(subsidy.Date.Month, subsidy.Date.Year, cancellationToken);
         return NoContent();
     }
 
     [HttpPost("recalculate")]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Edit)]
     public async Task<IActionResult> Recalculate(
         [FromQuery] int month,
         [FromQuery] int year,
         CancellationToken cancellationToken)
     {
-        await billing.RecalculateMonthAsync(month, year, cancellationToken);
+        // Forward, not just this month: a manual recalculation must also refresh every later
+        // month's carried-due, or that chain silently keeps a stale figure (M6).
+        await billing.RecalculateForwardAsync(month, year, cancellationToken);
         return NoContent();
     }
 }

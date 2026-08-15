@@ -32,8 +32,6 @@ public sealed record SaveMealOffRangeRequest(
     DateOnly From, DateOnly To, IReadOnlyList<string> MealPeriods);
 public sealed record MealSnapshotRowDto(DateOnly Date, IReadOnlyList<MealPreferenceStateDto> Meals);
 public sealed record MenuOptionDto(Guid Id, string Name, decimal Cost);
-public sealed record MenuMealDto(string MealPeriod, IReadOnlyList<MenuOptionDto> CommonItems, IReadOnlyList<MenuOptionDto> Options);
-public sealed record SaveMenuMealRequest(string MealPeriod, IReadOnlyList<Guid> CommonItemIds, IReadOnlyList<Guid> OptionItemIds);
 
 public sealed record MonthlyBillDto(
     Guid StudentId, string StudentName, string RollNumber, string HallId, string Gender,

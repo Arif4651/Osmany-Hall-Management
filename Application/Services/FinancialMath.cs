@@ -14,9 +14,6 @@ public static class FinancialMath
             : ((previousQuantity * previousWac) + (incomingQuantity * incomingRate)) / quantity;
     }
 
-    public static decimal NonNegativeDue(decimal totalBill, decimal approvedPaid)
-        => totalBill - approvedPaid < 0m ? 0m : totalBill - approvedPaid;
-
     /// <summary>True when a balance is money the hall owes the student rather than the reverse.</summary>
     public static bool IsCredit(decimal balance) => balance < 0m;
 

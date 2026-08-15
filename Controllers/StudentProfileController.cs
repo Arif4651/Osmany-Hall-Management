@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using HallBackend.Application.Dtos;
 using HallBackend.Application.Mapping;
 using HallBackend.Domain.Constants;
@@ -14,6 +15,10 @@ namespace HallBackend.Controllers;
 [Route("api/student/profile")]
 public sealed class StudentProfileController(HallDbContext db) : ControllerBase
 {
+    // Same rule StudentsController applies on the admin side — a phone number typed here must
+    // meet the same bar as one an admin enters.
+    private static readonly Regex PhoneRegex = new("^\\+?\\d{10,15}$", RegexOptions.Compiled);
+
     [HttpGet]
     public async Task<ActionResult<StudentDto>> Get(CancellationToken cancellationToken)
     {
@@ -30,14 +35,17 @@ public sealed class StudentProfileController(HallDbContext db) : ControllerBase
             return NotFound(new { message = "Student profile was not found." });
         }
 
+        // Room allocation is hall administration, not self-declared: it feeds the meal sheet's
+        // physical ordering and where the kitchen expects to find a student, so only an admin
+        // (StudentsController) may change it. RoomNo was previously accepted here unchecked.
         if (!string.IsNullOrWhiteSpace(request.MobileNumber))
         {
+            var normalized = Regex.Replace(request.MobileNumber, "\\s+", "");
+            if (!PhoneRegex.IsMatch(normalized))
+            {
+                return BadRequest(new { message = "Enter a valid mobile number with 10-15 digits." });
+            }
             student.MobileNumber = request.MobileNumber.Trim();
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.RoomNo))
-        {
-            student.RoomNo = request.RoomNo.Trim();
         }
 
         await db.SaveChangesAsync(cancellationToken);
