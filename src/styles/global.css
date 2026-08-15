@@ -5972,6 +5972,17 @@ button {
   background: linear-gradient(145deg, #fff, #f8f2ff);
 }
 
+/* A credit balance is money in the student's favour, so it reads green rather than as the
+   alarming negative number a plain "-৳30.83" would look like. */
+.summary-grid .financial-card-credit {
+  border-color: #a7e3c8;
+  background: linear-gradient(145deg, #fff, #f0fdf7);
+}
+
+.summary-grid .financial-card-credit strong {
+  color: #047857;
+}
+
 .billing-management-layout {
   display: grid;
   gap: 1rem;
@@ -8045,10 +8056,14 @@ button {
    so the wrapper owns both scroll axes instead and the headers stick to the
    top of the wrapper rather than to the page. */
 
+/* Sized so a default page of 10 rows fits without the wrapper scrolling inside a page that is
+   already scrolling — two nested scrollbars for one list is what made it feel cramped. The
+   reserved space covers the sticky header and the pagination row below the table; the floor keeps
+   it usable on a short window. */
 .table-wrapper.student-table-scroll,
 .app-shell .table-wrapper.student-table-scroll {
   overflow: auto !important;
-  max-height: max(340px, calc(100vh - 14rem));
+  max-height: max(520px, calc(100vh - 8rem));
   overscroll-behavior: contain;
 }
 
@@ -8175,7 +8190,7 @@ button {
 
   .table-wrapper.student-table-scroll,
   .app-shell .table-wrapper.student-table-scroll {
-    max-height: max(320px, calc(100vh - 12rem));
+    max-height: max(380px, calc(100vh - 8rem));
   }
 }
 

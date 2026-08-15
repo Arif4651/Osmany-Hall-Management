@@ -12,7 +12,7 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { adminDataService } from '../../services/adminDataService';
-import { formatCurrency, moneyInput } from '../../utils/formatters';
+import { formatCurrency, formatBalance, isCredit, moneyInput } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 
 const now = new Date();
@@ -73,7 +73,8 @@ export default function DueBill() {
   };
 
   const parsedAmount = Number(adjustment.amount);
-  const hasValidAmount = adjustment.amount !== '' && Number.isFinite(parsedAmount) && parsedAmount >= 0;
+  // Any finite figure is valid, including a negative one — that grants the student a credit.
+  const hasValidAmount = adjustment.amount !== '' && Number.isFinite(parsedAmount);
   const amountChanged = hasValidAmount && Number(editing?.dueBill ?? 0) !== parsedAmount;
 
   // Clear the row highlight once it has served its purpose, so it does not linger across
@@ -89,14 +90,14 @@ export default function DueBill() {
     if (!student) return;
 
     if (!hasValidAmount) {
-      setModalError('Enter a due amount of 0 or more before confirming.');
+      setModalError('Enter a due amount before confirming — negative puts the student in credit.');
       return;
     }
 
     setModalError('');
     setIsSaving(true);
     try {
-      await adminDataService.saveDueAdjustment({
+      const result = await adminDataService.saveDueAdjustment({
         studentId: student.studentId,
         billingMonth: period.month,
         billingYear: period.year,
@@ -111,6 +112,11 @@ export default function DueBill() {
         `Due updated for ${student.studentName}`,
         `${formatCurrency(student.dueBill)} → ${formatCurrency(parsedAmount)} · ${monthLabel(period)}`,
       );
+      // The override is saved either way; this only reports that the derived totals are behind,
+      // which is recoverable from Bill Management rather than something to retry here.
+      if (result && result.recalculated === false) {
+        toast.info('Totals not refreshed yet', result.message);
+      }
       invalidate('due-rows-');
       invalidate('admin-billing-combined');
       await load();
@@ -450,8 +456,11 @@ export default function DueBill() {
                     <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>
                       {row.hallId}
                     </td>
-                    <td className="due-amount-cell" style={{ padding: '0.75rem', fontWeight: '600' }}>
-                      {formatCurrency(row.dueBill)}
+                    <td
+                      className="due-amount-cell"
+                      style={{ padding: '0.75rem', fontWeight: '600', color: isCredit(row.dueBill) ? '#047857' : undefined }}
+                    >
+                      {formatBalance(row.dueBill)}
                       {row.isOverridden && (
                         <span className="warning-badge" style={{
                           marginLeft: '0.35rem',
@@ -531,10 +540,10 @@ export default function DueBill() {
             <span className="override-preview-label">
               {editing?.studentCode} · {monthLabel(period)}
             </span>
-            <span className="override-preview-from">{formatCurrency(editing?.dueBill || 0)}</span>
+            <span className="override-preview-from">{formatBalance(editing?.dueBill || 0)}</span>
             <ArrowRight size={15} aria-hidden="true" style={{ color: 'var(--muted)' }} />
             <span className="override-preview-to">
-              {hasValidAmount ? formatCurrency(parsedAmount) : '—'}
+              {hasValidAmount ? formatBalance(parsedAmount) : '—'}
             </span>
             {!amountChanged && hasValidAmount && (
               <span className="override-preview-label">(no change to the current amount)</span>
@@ -543,10 +552,11 @@ export default function DueBill() {
 
           <div className="form-grid">
             <label className="field-control">
-              <span>New Amount</span>
+              {/* Negative is allowed and meaningful: it puts the student in credit, the same
+                  balance an overpayment leaves behind. */}
+              <span>New Amount (negative = credit)</span>
               <input
                 type="number"
-                min="0"
                 step="0.0001"
                 value={adjustment.amount}
                 disabled={isSaving}

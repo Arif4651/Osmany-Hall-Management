@@ -5,7 +5,7 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatBalance, isCredit } from '../../utils/formatters';
 
 const now = new Date();
 
@@ -125,20 +125,47 @@ export default function Billing() {
             <h3>Service Bill</h3>
             <strong>{formatCurrency(bill.serviceBill)}</strong>
           </div>
-          <div className="financial-card">
-            <h3>Carried Due</h3>
-            <strong>{formatCurrency(bill.carriedDue)}</strong>
-            <p>Outstanding from previous month</p>
+          <div className={`financial-card${isCredit(bill.carriedDue) ? ' financial-card-credit' : ''}`}>
+            <h3>Carried {isCredit(bill.carriedDue) ? 'Credit' : 'Due'}</h3>
+            <strong>{formatBalance(bill.carriedDue)}</strong>
+            <p>
+              {isCredit(bill.carriedDue)
+                ? 'Overpayment brought forward from last month'
+                : 'Outstanding from previous month'}
+            </p>
           </div>
+          {/* Shown only when the hall office has corrected this month. Without it the components
+              would not add up to the total and the difference would look unaccounted for. */}
+          {(bill.adjustment ?? 0) !== 0 && (
+            <div className="financial-card financial-card-highlight">
+              <h3>Adjustment</h3>
+              <strong>{bill.adjustment > 0 ? '+ ' : '- '}{formatCurrency(Math.abs(bill.adjustment))}</strong>
+              <p>Manual correction applied by the hall office</p>
+            </div>
+          )}
           <div className="financial-card">
             <h3>Total Bill</h3>
             <strong>{formatCurrency(bill.totalBill)}</strong>
-            <p>Monthly − Subsidy + Guest + Others + Service + Carried</p>
+            <p>
+              Monthly − Subsidy + Guest + Others + Service + Carried
+              {(bill.adjustment ?? 0) !== 0 ? ' + Adjustment' : ''}
+            </p>
           </div>
-          <div className="financial-card">
-            <h3>Due Bill</h3>
-            <strong>{formatCurrency(bill.dueBill)}</strong>
-            <p>{bill.status}</p>
+          {(bill.totalPaid ?? 0) > 0 && (
+            <div className="financial-card financial-card-highlight">
+              <h3>Paid</h3>
+              <strong>- {formatCurrency(bill.totalPaid)}</strong>
+              <p>Approved payments for this month</p>
+            </div>
+          )}
+          <div className={`financial-card${isCredit(bill.dueBill) ? ' financial-card-credit' : ''}`}>
+            <h3>{isCredit(bill.dueBill) ? 'Credit Balance' : 'Due Bill'}</h3>
+            <strong>{formatBalance(bill.dueBill)}</strong>
+            <p>
+              {isCredit(bill.dueBill)
+                ? 'You paid more than this month needed — it goes towards next month'
+                : `${bill.status} — Total Bill minus approved payments`}
+            </p>
           </div>
         </section>
       )}

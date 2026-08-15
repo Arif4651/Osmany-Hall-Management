@@ -396,7 +396,7 @@ export default function BillingManagement() {
           onChange={({ month, year }) => setFilters({ ...filters, month, year })}
           label="Billing period"
         />
-        <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option></select></label>
+        <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option><option>Credit</option></select></label>
         <label>Wing<select value={lockedWing || filters.gender} disabled={Boolean(lockedWing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!lockedWing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
         <button className="primary-action" onClick={load} disabled={loading}>Generate</button>
         <button type="button" className="btn btn-secondary" onClick={recalculateMonth} disabled={loading || isRecalculating}>
