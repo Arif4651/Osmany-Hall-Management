@@ -55,36 +55,17 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
         }
         var students = await studentsQuery.ToListAsync(cancellationToken);
 
-        var statuses = await db.MealStatusHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
-            .ToListAsync(cancellationToken);
-        
-        // Optimize: Group statuses by (StudentId, MealPeriod) to avoid O(N) lookup in loop
-        var statusesGrouped = statuses
-            .GroupBy(x => new { x.StudentId, x.MealPeriod })
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
-
-        var overrides = await db.GlobalMealOverrides.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && x.EffectiveTo >= from)
-            .ToListAsync(cancellationToken);
-
-        // Optimize: Group overrides by (Wing, MealPeriod)
-        var overridesGrouped = overrides
-            .GroupBy(x => new { x.Wing, x.MealPeriod })
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
+        // Shared with the billing engine (BillingCalculationService) rather than re-querying and
+        // re-grouping overrides/statuses/preferences by hand a second time here: two independent
+        // copies of "who counts as on for this meal" are two things that can silently drift apart
+        // — which is exactly what happened before this changed. `asOfUtc` support (excluding a
+        // same-day toggle from a stock-out recorded before it) lives once, in this class, and both
+        // callers get it automatically instead of one having the fix and the other not.
+        var meals = await MealResolutionContext.LoadAsync(db, from, to, cancellationToken);
 
         var subsidies = await db.DswSubsidies.AsNoTracking()
             .Where(x => x.Date >= from && x.Date <= to && !x.IsReversed)
             .ToListAsync(cancellationToken);
-
-        var preferences = await db.MealPreferenceHistory.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
-            .ToListAsync(cancellationToken);
-
-        // Optimize: Group preferences by (StudentId, MealPeriod, DayOfWeek)
-        var preferencesGrouped = preferences
-            .GroupBy(x => new { x.StudentId, x.MealPeriod, x.DayOfWeek })
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList());
 
         var optionItems = await db.InventoryItems.AsNoTracking()
             .Where(x => x.Category == "Options" && !x.IsDeleted)
@@ -127,42 +108,16 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                     // a past date their own account didn't exist on yet.
                     if (!MealResolutionContext.HasJoinedBy(student, date)) return false;
 
-                    // Optimize: Look up in grouped dictionary for overrides
-                    if (overridesGrouped.TryGetValue(new { Wing = student.Gender, MealPeriod = period }, out var wingOverrides))
-                    {
-                        var mealOverride = wingOverrides.FirstOrDefault(x => x.EffectiveFrom <= date && x.EffectiveTo >= date);
-                        if (mealOverride is not null)
-                        {
-                            return mealOverride.IsOn;
-                        }
-                    }
-
-                    // Optimize: Look up in grouped dictionary for statuses
-                    if (statusesGrouped.TryGetValue(new { StudentId = student.Id, MealPeriod = period }, out var studentStatuses))
-                    {
-                        var activeStatus = studentStatuses
-                            .FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date));
-                        return activeStatus?.IsOn == true;
-                    }
-
-                    return false;
+                    var wingOverride = meals.FindOverride(student.Gender, period, date);
+                    return meals.IsMealOn(student.Id, period, date, wingOverride);
                 }).ToList();
 
                 var totalStudents = participants.Count;
                 var overallPerHead = FinancialMath.PerHead(netCost, totalStudents);
 
-                // Let's resolve the preferences for these participants using grouped lookup
-                var participantPreferences = participants.Select(student =>
-                {
-                    Guid? selectedOptionId = null;
-                    if (preferencesGrouped.TryGetValue(new { StudentId = student.Id, MealPeriod = period, DayOfWeek = date.DayOfWeek }, out var studentPrefs))
-                    {
-                        selectedOptionId = studentPrefs
-                            .FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))
-                            ?.OptionItemId;
-                    }
-                    return new { Student = student, OptionId = selectedOptionId };
-                }).ToList();
+                var participantPreferences = participants
+                    .Select(student => new { Student = student, OptionId = meals.FindSelectedOption(student.Id, period, date) })
+                    .ToList();
 
                 // Get active options that have students or transactions
                 var activeOptions = optionItems
@@ -213,24 +168,16 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                                 continue;
                             }
 
-                            var chargedStudents = participantPreferences.Count(x => FinancialMath.IsChargeParticipant(
-                                tx.Item.Category,
-                                tx.Item.Id,
-                                tx.Item.LinkedOptionId,
-                                true,
-                                x.OptionId));
+                            // The exact set BillingCalculationService charges for this transaction
+                            // — same-day toggle guard included, via tx.CreatedAtUtc — rather than
+                            // the day-wide participant list above, which has no way to tell "turned
+                            // on before this stock-out" from "turned on after it".
+                            var chargedParticipants = meals.Participants(tx.Item, period, date, tx.CreatedAtUtc);
+                            if (chargedParticipants.Count == 0) continue;
 
-                            if (chargedStudents == 0) continue;
-                            var isCharged = FinancialMath.IsChargeParticipant(
-                                tx.Item.Category,
-                                tx.Item.Id,
-                                tx.Item.LinkedOptionId,
-                                true,
-                                studentPreference.OptionId);
-
-                            if (isCharged)
+                            if (chargedParticipants.Any(p => p.Id == currentStudentId.Value))
                             {
-                                myCost += tx.TotalCost / chargedStudents;
+                                myCost += tx.TotalCost / chargedParticipants.Count;
                             }
                         }
 
