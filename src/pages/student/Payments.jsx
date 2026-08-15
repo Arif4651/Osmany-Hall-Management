@@ -90,6 +90,24 @@ export default function Payments() {
 
   const error = loadError;
 
+  // Shared between the table (desktop) and card (mobile) views so the two never drift apart.
+  const statusStyle = (row) => {
+    const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ');
+    let bg = '#f1f5f9';
+    let color = '#64748b';
+    if (statusNorm === 'approved') {
+      bg = '#ecfdf5';
+      color = '#047857';
+    } else if (statusNorm === 'pending' || statusNorm === 'under review') {
+      bg = '#fffbeb';
+      color = '#b45309';
+    } else if (statusNorm === 'rejected') {
+      bg = '#fef2f2';
+      color = '#b91c1c';
+    }
+    return { statusNorm, bg, color };
+  };
+
   return (
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
@@ -167,43 +185,32 @@ export default function Payments() {
       <section className="financial-card table-wrap">
         {isLoading && !rows.length ? (
           <TableSkeleton rows={5} cols={8} />
+        ) : rows.length === 0 ? (
+          <p style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', margin: 0 }}>
+            No payment records found.
+          </p>
         ) : (
-          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Billing Period</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Submitted At</th>
-                <th style={{ textAlign: 'right', padding: '0.75rem' }}>Amount</th>
-                <th style={{ textAlign: 'right', padding: '0.75rem' }}>Charges</th>
-                <th style={{ textAlign: 'right', padding: '0.75rem' }}>Approved Amount</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Category</th>
-                <th style={{ textAlign: 'left', padding: '0.75rem' }}>Transaction ID</th>
-                <th style={{ textAlign: 'center', padding: '0.75rem' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
+          <>
+            {/* Desktop/tablet: the full table. Below the breakpoint (.responsive-table rule in
+                global.css) this is hidden in favour of the stacked cards, so a student on a
+                phone reads their payment history top-to-bottom instead of scrolling an
+                8-column table sideways. */}
+            <table className="data-table responsive-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                    No payment records found.
-                  </td>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Billing Period</th>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Submitted At</th>
+                  <th style={{ textAlign: 'right', padding: '0.75rem' }}>Amount</th>
+                  <th style={{ textAlign: 'right', padding: '0.75rem' }}>Charges</th>
+                  <th style={{ textAlign: 'right', padding: '0.75rem' }}>Approved Amount</th>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Category</th>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Transaction ID</th>
+                  <th style={{ textAlign: 'center', padding: '0.75rem' }}>Status</th>
                 </tr>
-              ) : (
-                rows.map((row) => {
-                  const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ');
-                  let badgeBg = '#f1f5f9';
-                  let badgeColor = '#64748b';
-                  if (statusNorm === 'approved') {
-                    badgeBg = '#ecfdf5';
-                    badgeColor = '#047857';
-                  } else if (statusNorm === 'pending' || statusNorm === 'under review') {
-                    badgeBg = '#fffbeb';
-                    badgeColor = '#b45309';
-                  } else if (statusNorm === 'rejected') {
-                    badgeBg = '#fef2f2';
-                    badgeColor = '#b91c1c';
-                  }
-                  
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const { statusNorm, bg, color } = statusStyle(row);
                   return (
                     <tr key={row.id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>
@@ -229,8 +236,8 @@ export default function Payments() {
                       </td>
                       <td style={{ padding: '0.75rem', textAlign: 'center' }}>
                         <span style={{
-                          background: badgeBg,
-                          color: badgeColor,
+                          background: bg,
+                          color,
                           padding: '0.25rem 0.6rem',
                           borderRadius: '20px',
                           fontSize: '0.8rem',
@@ -245,10 +252,48 @@ export default function Payments() {
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+
+            {/* Mobile: one card per payment, label/value pairs stacked instead of table columns. */}
+            <div className="responsive-card-list">
+              {rows.map((row) => {
+                const { statusNorm, bg, color } = statusStyle(row);
+                return (
+                  <div className="responsive-card" key={row.id}>
+                    <div className="responsive-card-head">
+                      <strong>{months[row.billingMonth - 1]?.label} {row.billingYear}</strong>
+                      <span style={{
+                        background: bg,
+                        color,
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: '20px',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        textTransform: 'capitalize',
+                      }}>
+                        {statusNorm}
+                      </span>
+                    </div>
+                    <div className="responsive-card-body">
+                      <div><span>Amount</span><b>{formatCurrency(row.submittedAmount)}</b></div>
+                      <div><span>Charges</span><b>{formatCurrency(row.submittedCharge)}</b></div>
+                      <div>
+                        <span>Approved</span>
+                        <b style={{ color: row.approvedAmount ? 'var(--success)' : 'inherit' }}>
+                          {row.approvedAmount == null ? '—' : formatCurrency(row.approvedAmount)}
+                        </b>
+                      </div>
+                      <div><span>Category</span><b>{row.category}</b></div>
+                      <div><span>Submitted</span><b>{formatDate(row.submittedAtUtc)}</b></div>
+                      <div className="responsive-card-span"><span>Transaction ID</span><b>{row.transactionId}</b></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </section>
     </div>

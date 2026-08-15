@@ -90,20 +90,20 @@ export default function Billing() {
           <div className="financial-card">
             <h3>Monthly Bill</h3>
             <strong>{formatCurrency(bill.monthlyBill)}</strong>
-            <p>Regular meal charges before subsidy</p>
+            {/* <p>Regular meal charges before subsidy</p> */}
           </div>
           {(bill.dswSubsidy ?? 0) > 0 && (
             <div className="financial-card financial-card-highlight">
               <h3>DSW Subsidy</h3>
               <strong>- {formatCurrency(bill.dswSubsidy)}</strong>
-              <p>Deducted from eligible meal charges</p>
+              {/* <p>Deducted from eligible meal charges</p> */}
             </div>
           )}
           {(bill.guestMealBill ?? 0) > 0 && (
             <div className="financial-card financial-card-highlight">
               <h3>Guest Meal Bill</h3>
               <strong>{formatCurrency(bill.guestMealBill)}</strong>
-              <p>Extra guest meal charges</p>
+              {/* <p>Extra guest meal charges</p> */}
             </div>
           )}
           {/* Shown whenever the student's wing has an optional item — even at zero this month, so
@@ -134,22 +134,22 @@ export default function Billing() {
                 : 'Outstanding from previous month'}
             </p>
           </div>
-          {/* Shown only when the hall office has corrected this month. Without it the components
-              would not add up to the total and the difference would look unaccounted for. */}
+          {/* Adjustment card hidden from students by request — the manual correction still flows
+              into Total Bill / Due Bill, it just isn't broken out as its own line here.
           {(bill.adjustment ?? 0) !== 0 && (
             <div className="financial-card financial-card-highlight">
               <h3>Adjustment</h3>
               <strong>{bill.adjustment > 0 ? '+ ' : '- '}{formatCurrency(Math.abs(bill.adjustment))}</strong>
-              <p>Manual correction applied by the hall office</p>
             </div>
-          )}
+          )} */}
+          
           <div className="financial-card">
             <h3>Total Bill</h3>
             <strong>{formatCurrency(bill.totalBill)}</strong>
-            <p>
+            {/* <p>
               Monthly − Subsidy + Guest + Others + Service + Carried
               {(bill.adjustment ?? 0) !== 0 ? ' + Adjustment' : ''}
-            </p>
+            </p> */}
           </div>
           {(bill.totalPaid ?? 0) > 0 && (
             <div className="financial-card financial-card-highlight">
@@ -164,7 +164,7 @@ export default function Billing() {
             <p>
               {isCredit(bill.dueBill)
                 ? 'You paid more than this month needed — it goes towards next month'
-                : `${bill.status} — Total Bill minus approved payments`}
+                : 'Amount you need to pay more'}
             </p>
           </div>
         </section>
@@ -179,7 +179,7 @@ export default function Billing() {
               much each person took.
             </p>
           </div>
-          <div className="admin-meal-table-wrap">
+          <div className="admin-meal-table-wrap responsive-table">
             <table className="admin-meal-table">
               <thead>
                 <tr>
@@ -205,6 +205,28 @@ export default function Billing() {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile: one card per item, plus a total card so nothing needs the table's footer row. */}
+          <div className="responsive-card-list">
+            {othersLines.map((line) => (
+              <div className="responsive-card" key={line.itemId}>
+                <div className="responsive-card-head">
+                  <strong>{line.itemName}</strong>
+                  <b>{formatCurrency(line.amount)}</b>
+                </div>
+                <div className="responsive-card-body">
+                  <div><span>Monthly Count</span><b>{line.consumptionCount}</b></div>
+                  <div><span>Unit Rate</span><b>{formatCurrency(line.unitRate)}</b></div>
+                </div>
+              </div>
+            ))}
+            <div className="responsive-card">
+              <div className="responsive-card-head">
+                <strong>Total Others Bill</strong>
+                <b>{formatCurrency(othersTotal)}</b>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -214,7 +236,7 @@ export default function Billing() {
             <h3 style={{ marginBottom: '0.25rem' }}>DSW Subsidy Adjustments</h3>
             <p style={{ margin: 0, color: 'var(--muted)' }}>Monthly subsidy deductions applied to your bill.</p>
           </div>
-          <div className="table-wrap">
+          <div className="table-wrap responsive-table">
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -235,6 +257,22 @@ export default function Billing() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile: one card per subsidy deduction. */}
+          <div className="responsive-card-list">
+            {subsidies.map((item) => (
+              <div className="responsive-card" key={`${item.subsidyId}-${item.date}-${item.mealPeriod}`}>
+                <div className="responsive-card-head">
+                  <strong>{item.date}</strong>
+                  <b style={{ color: '#047857' }}>- {formatCurrency(item.amount)}</b>
+                </div>
+                <div className="responsive-card-body">
+                  <div><span>Meal</span><b style={{ textTransform: 'capitalize' }}>{item.mealPeriod}</b></div>
+                  <div className="responsive-card-span"><span>Note</span><b>{item.notes || 'DSW Subsidy'}</b></div>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}

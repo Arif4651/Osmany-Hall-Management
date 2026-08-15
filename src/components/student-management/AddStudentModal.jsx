@@ -5,6 +5,7 @@ import { DEFAULT_STUDENT_FORM } from '../../types/student.types';
 import StudentFormFields from './StudentFormFields';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { todayLocal } from '../../utils/formatters';
 
 export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreate }) {
   const { user, role } = useAuth();
@@ -35,10 +36,13 @@ export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreat
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    // Build the payload — always override gender with the locked wing gender for wing admins
+    // Build the payload — always override gender with the locked wing gender for wing admins.
+    // joinDate falls back to today if the admin never touched that field (it displays today as
+    // a placeholder, but the underlying form state stays blank until actually edited).
     const payload = {
       ...formData,
       status: 'active',
+      joinDate: formData.joinDate || todayLocal(),
       ...(lockedGender ? { gender: lockedGender } : {}),
     };
 
@@ -111,7 +115,8 @@ export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreat
         />
       </form>
       <div className="student-helper-note">
-        Initial credentials are generated automatically using Student ID.
+        Initial credentials are generated automatically using Student ID. The student must change
+        the password at first login.
       </div>
     </Modal>
   );

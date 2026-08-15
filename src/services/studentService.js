@@ -1,4 +1,5 @@
 import { apiRequest, toQueryString } from './apiClient';
+import { toCredentials } from '../utils/credentialHelpers';
 
 function normalizeFilters(filters = {}) {
   return {
@@ -19,13 +20,6 @@ function normalizeUpdateFields(updateFields = {}) {
   );
 }
 
-function initialCredentials(studentId) {
-  return {
-    defaultLoginId: studentId,
-    defaultPassword: studentId,
-  };
-}
-
 function withLegacyRollNumber(payload = {}) {
   const studentId = String(payload.studentId || '').trim();
   return {
@@ -35,8 +29,14 @@ function withLegacyRollNumber(payload = {}) {
 }
 
 export const studentService = {
-  getStudents: async ({ filters = {}, page = 1, pageSize = 10 } = {}) => {
-    return apiRequest(`/students${toQueryString({ ...normalizeFilters(filters), page, pageSize })}`);
+  getStudents: async ({ filters = {}, page = 1, pageSize = 10, selectedIds = [] } = {}) => {
+    return apiRequest(`/students${toQueryString({ ...normalizeFilters(filters), page, pageSize, selectedIds })}`);
+  },
+
+  // The full matching id list, with no pagination — only for "select all matching", called on
+  // demand rather than downloaded on every page turn.
+  getFilteredIds: async (filters = {}) => {
+    return apiRequest(`/students/filtered-ids${toQueryString(normalizeFilters(filters))}`);
   },
 
   getStudentsForExport: async ({ filters = {} } = {}) => {
@@ -52,14 +52,16 @@ export const studentService = {
   },
 
   createStudent: async (payload) => {
+    // { student, temporaryPassword } — the password is generated server-side and returned
+    // exactly once; it is never derivable from the student ID or anything else on this page.
     const created = await apiRequest('/students', {
       method: 'POST',
       body: JSON.stringify(withLegacyRollNumber(payload)),
     });
 
     return {
-      ...created,
-      credentials: initialCredentials(created.studentId),
+      ...created.student,
+      credentials: toCredentials(created.student.studentId, created.temporaryPassword),
     };
   },
 
@@ -137,12 +139,8 @@ export const studentService = {
     return apiRequest(`/students/${id}/permanent${toQueryString({ force })}`, { method: 'DELETE' });
   },
 
-  generateInitialCredentials: async (studentId) => {
-    return initialCredentials(studentId);
-  },
-
   resetStudentPassword: async (id) => {
     const result = await apiRequest(`/students/${id}/reset-password`, { method: 'POST' });
-    return initialCredentials(result.studentId);
+    return toCredentials(result.studentId, result.temporaryPassword);
   },
 };

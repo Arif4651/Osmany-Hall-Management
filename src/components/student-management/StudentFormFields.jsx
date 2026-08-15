@@ -5,6 +5,7 @@ import {
   STUDENT_STATUSES,
 } from '../../types/student.types';
 import { useAuth } from '../../context/AuthContext';
+import { todayLocal } from '../../utils/formatters';
 
 export default function StudentFormFields({ formData, errors = {}, onChange, includeStatus = true }) {
   const { user, role } = useAuth();
@@ -137,6 +138,21 @@ export default function StudentFormFields({ formData, errors = {}, onChange, inc
           placeholder="e.g. 210"
         />
         {errors.roomNo ? <small className="form-error">{errors.roomNo}</small> : null}
+      </label>
+
+      <label className="field-control">
+        <span>Join Date</span>
+        <input
+          type="date"
+          value={formData.joinDate || todayLocal()}
+          max={todayLocal()}
+          onChange={(event) => onChange('joinDate', event.target.value)}
+        />
+        {/* <small style={{ color: 'var(--muted)' }}>
+          When the student actually moved in. Billing never charges them for anything before this
+          date — backdate it if the account is being created after the fact.
+        </small> */}
+        {errors.joinDate ? <small className="form-error">{errors.joinDate}</small> : null}
       </label>
 
       {includeStatus ? (

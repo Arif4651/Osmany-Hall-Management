@@ -21,6 +21,11 @@ export const DEFAULT_STUDENT_FORM = {
   hallName: '',
   roomNo: '',
   status: 'active',
+  // Left blank rather than pre-filled with today's date here — StudentFormFields renders
+  // today's date as a placeholder until the admin actually touches the field, and the create
+  // flow fills in the real value at submit time (see AddStudentModal), so it's never stale from
+  // sitting open across midnight.
+  joinDate: '',
 };
 
 export const DEFAULT_STUDENT_FILTERS = {

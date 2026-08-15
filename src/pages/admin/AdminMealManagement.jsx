@@ -567,7 +567,7 @@ export default function AdminMealManagement() {
                 <Button variant="secondary" onClick={() => loadOperations()}><Users size={16} /> Refresh</Button>
               </div>
             </div>
-            {countDate > tomorrowLocal() && (
+            {(counts ? !counts.isAvailable : countDate > tomorrowLocal()) && (
               <div className="admin-meal-message" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #ffeeba', backgroundColor: '#fff3cd', color: '#856404', margin: '0 0 1rem 0' }}>
                 <AlertCircle size={18} />
                 <span>Meal counts for dates beyond tomorrow are not displayed as student choices are subject to change.</span>

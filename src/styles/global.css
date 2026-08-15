@@ -4606,6 +4606,87 @@ button {
   padding: 0;
 }
 
+/* Reusable "table on wide screens, one card per row on narrow ones" pair. Used by Payments
+   history and the Billing page's Others Bill / DSW Subsidy breakdown tables — anywhere a
+   student-facing table has enough columns to force horizontal scrolling on a phone. Both views
+   stay in the DOM; only the breakpoint below toggles which one is visible, so there is no second
+   data fetch or state to keep in sync. */
+.responsive-card-list {
+  display: none;
+}
+
+.responsive-card {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.responsive-card:last-child {
+  border-bottom: none;
+}
+
+.responsive-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+}
+
+.responsive-card-head strong {
+  font-size: .95rem;
+  color: #1e293b;
+}
+
+.responsive-card-body {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: .55rem .9rem;
+}
+
+.responsive-card-body > div {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  min-width: 0;
+}
+
+.responsive-card-body span {
+  font-size: .72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.responsive-card-body b {
+  font-size: .9rem;
+  color: #26364e;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* For a field too long to share a half-width column (a transaction ID, a note). */
+.responsive-card-span {
+  grid-column: 1 / -1;
+}
+
+.responsive-card-span b {
+  font-family: monospace;
+  font-size: .85rem;
+}
+
+@media (max-width: 700px) {
+  .responsive-table {
+    display: none;
+  }
+
+  .responsive-card-list {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
 .financial-page .data-table {
   width: 100%;
   min-width: 960px;

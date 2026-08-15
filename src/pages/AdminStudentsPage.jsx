@@ -158,7 +158,12 @@ export default function AdminStudentsPage() {
   };
 
   const handleBulkDeleteConfirm = async () => {
-    await bulkPermanentDeleteStudents(true);
+    // Same eligibility rule as the single-row delete: only inactive/archived/graduated
+    // students are actually removed. force:true used to skip that check here, so bulk-delete
+    // could wipe an Active student's full billing/payment history in two clicks while the
+    // single-row action correctly refused to. bulkPermanentDeleteStudents already reports how
+    // many were skipped as not eligible.
+    await bulkPermanentDeleteStudents(false);
     setIsBulkDeleteConfirmOpen(false);
   };
 
@@ -388,6 +393,7 @@ export default function AdminStudentsPage() {
         summary={selectionSummary}
         updateFields={{ action: 'Delete Permanently' }}
         isDestructive
+        destructiveNote="Only Inactive, Archived, or Graduated students in the selection are actually deleted — Active students are skipped and left untouched."
         onClose={() => {
           setIsBulkDeleteConfirmOpen(false);
         }}

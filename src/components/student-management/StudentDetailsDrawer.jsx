@@ -29,6 +29,7 @@ export default function StudentDetailsDrawer({ student, onClose, onEdit, onReact
         <Field label="Level / Year" value={student.level} />
         <Field label="Hall Name" value={student.hallName} />
         <Field label="Room No" value={student.roomNo} />
+        <Field label="Join Date" value={student.joinDate} />
         <div className="student-drawer-row">
           <span>Status</span>
           <StudentStatusBadge status={student.status} />

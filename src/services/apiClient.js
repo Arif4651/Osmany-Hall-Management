@@ -90,6 +90,20 @@ function humanizeErrorMessage(message) {
 }
 
 const inFlightRequests = new Map();
+const CSRF_COOKIE_NAME = 'hall-csrf-token';
+const CSRF_HEADER_NAME = 'X-CSRF-Token';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+
+/**
+ * Reads the non-HttpOnly CSRF cookie the backend sets alongside the auth cookie at login.
+ * Echoed back as a header on every mutating request so the server can confirm the request came
+ * from JavaScript running on this origin — a cross-site request can make the browser send the
+ * auth cookie automatically, but cannot read this cookie to construct a matching header.
+ */
+function readCsrfCookie() {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE_NAME}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -106,6 +120,11 @@ export async function apiRequest(path, options = {}) {
 
     if (!headers.has('Content-Type') && options.body) {
       headers.set('Content-Type', 'application/json');
+    }
+
+    if (!SAFE_METHODS.has(method) && !headers.has(CSRF_HEADER_NAME)) {
+      const csrfToken = readCsrfCookie();
+      if (csrfToken) headers.set(CSRF_HEADER_NAME, csrfToken);
     }
 
     const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
@@ -159,9 +178,14 @@ export function toQueryString(params = {}) {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      searchParams.set(key, value);
+    if (value === undefined || value === null || value === '') return;
+    // Repeated keys (?key=a&key=b), not a comma-joined value — ASP.NET Core's default query
+    // binding for a List<T> parameter expects the former, not the latter.
+    if (Array.isArray(value)) {
+      value.forEach((entry) => searchParams.append(key, entry));
+      return;
     }
+    searchParams.set(key, value);
   });
 
   const query = searchParams.toString();

@@ -8,6 +8,7 @@ export default function BulkConfirmationModal({
   summary,
   updateFields,
   isDestructive,
+  destructiveNote,
   onClose,
   onConfirm,
 }) {
@@ -53,7 +54,7 @@ export default function BulkConfirmationModal({
             borderRadius: '4px',
             color: '#c00'
           }}>
-            Please review the affected records before confirming.
+            {destructiveNote || 'Please review the affected records before confirming.'}
           </div>
         ) : null}
       </div>

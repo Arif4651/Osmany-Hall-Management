@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_STUDENT_FILTERS } from '../types/student.types';
 import { summarizeBulkSelection } from '../utils/bulkSelectionHelpers';
-import { generateInitialCredentials } from '../utils/credentialHelpers';
 import { getNextLevel } from '../utils/studentHelpers';
 import { studentService } from '../services/studentService';
 import { queryCache } from '../services/queryCache';
@@ -24,7 +23,6 @@ export default function useAdminStudentModule() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [filteredIds, setFilteredIds] = useState([]);
   const [filterOptions, setFilterOptions] = useState({
     departments: [],
     levels: [],
@@ -33,6 +31,10 @@ export default function useAdminStudentModule() {
   });
 
   const [selectedIds, setSelectedIds] = useState([]);
+  // Read inside loadStudents without making it (and the effect that calls it) re-run on every
+  // selection change — only the filter/page changing should trigger a reload.
+  const selectedIdsRef = useRef(selectedIds);
+  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
 
   const loadFilterOptions = useCallback(async () => {
     // Cache for 10 minutes — departments/levels/halls rarely change
@@ -51,14 +53,17 @@ export default function useAdminStudentModule() {
     setErrorMessage('');
 
     try {
-      const response = await studentService.getStudents({ filters, page, pageSize });
+      // Ships the current selection so the server can tell us which of those ids still match —
+      // not every matching id, which used to be downloaded on every page turn regardless of
+      // selection size.
+      const response = await studentService.getStudents({
+        filters, page, pageSize, selectedIds: selectedIdsRef.current,
+      });
       setStudents(response.items);
       setTotal(response.total);
       setTotalPages(response.totalPages);
-      setFilteredIds(response.filteredIds);
       setPage(response.page);
-
-      setSelectedIds((prev) => prev.filter((id) => response.filteredIds.includes(id)));
+      setSelectedIds(response.filteredIds);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load students.');
     } finally {
@@ -77,8 +82,8 @@ export default function useAdminStudentModule() {
   }, [loadFilterOptions]);
 
   const selectionSummary = useMemo(
-    () => summarizeBulkSelection(filteredIds, selectedIds),
-    [filteredIds, selectedIds],
+    () => summarizeBulkSelection(total, selectedIds),
+    [total, selectedIds],
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -112,9 +117,17 @@ export default function useAdminStudentModule() {
     });
   }, [selectedSet]);
 
-  const selectAllFiltered = useCallback(() => {
-    setSelectedIds(filteredIds);
-  }, [filteredIds]);
+  // Fetched only on demand — the id list for every matching student, unbounded by page size.
+  // Previously this was already sitting in state because the paged list endpoint downloaded it
+  // on every page turn; now it costs a request only when the admin actually asks for it.
+  const selectAllFiltered = useCallback(async () => {
+    try {
+      const ids = await studentService.getFilteredIds(filters);
+      setSelectedIds(ids);
+    } catch (error) {
+      toast.error('Could not select all', error instanceof Error ? error.message : 'Please try again.');
+    }
+  }, [filters, toast]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds([]);
@@ -148,13 +161,12 @@ export default function useAdminStudentModule() {
     try {
       const created = await studentService.createStudent(payload);
       await Promise.all([loadStudents(), loadFilterOptions()]);
-      // The credentials come from the id the server actually assigned, never from the submitted
-      // form — those can differ, and handing over a password that does not work is worse than
-      // handing over none.
+      // The credentials come from what the server actually generated and assigned, never
+      // derived here — the password is random and returned exactly once.
       return {
         ok: true,
         student: created,
-        credentials: generateInitialCredentials(created.studentId),
+        credentials: created.credentials,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Operation failed.';
@@ -335,7 +347,6 @@ export default function useAdminStudentModule() {
 
     selectedIds,
     selectedSet,
-    filteredIds,
     selectionSummary,
     toggleStudentSelection,
     togglePageSelection,

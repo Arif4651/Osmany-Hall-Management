@@ -190,6 +190,18 @@ export function AuthProvider({ children }) {
 
       const user = await apiRequest('/auth/me');
       setSession((prev) => (prev ? { ...prev, user } : prev));
+
+      // The permissions effect above only re-runs when userId/userRole change, and neither does
+      // here — so without this, a fresh account whose first-ever /permissions/me call landed
+      // while MustChangePassword was still true (and was refused, falling back to "nothing
+      // granted") would stay locked out of every page for the rest of the session even after
+      // successfully changing the password.
+      try {
+        setPermissions(await permissionService.getMyPermissions());
+      } catch {
+        // Leave the fallback in place; the user can still reload to pick up a working fetch.
+      }
+
       return { ok: true };
     } catch (error) {
       return {

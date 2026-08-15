@@ -16,6 +16,7 @@ function toFormData(student) {
     hallName: student.hallName || '',
     roomNo: student.roomNo || '',
     status: student.status || 'active',
+    joinDate: student.joinDate || '',
   };
 }
 
