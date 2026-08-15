@@ -218,6 +218,14 @@ export default function DailyCost() {
     doc.save(`daily-cost-${filters.year}-${filters.month}.pdf`);
   };
 
+  // Local calendar date, matching the plain YYYY-MM-DD strings the report rows use — a UTC-based
+  // key would drift a day off around midnight for anyone not in that timezone.
+  const todayDateKey = useMemo(() => {
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  }, []);
+
   const parseRowDate = (dateStr) => {
     try {
       const parts = dateStr.split('-');
@@ -386,11 +394,15 @@ export default function DailyCost() {
                 <tbody>
                   {report.rows.map((row) => {
                     const { dayName, dateLabel } = parseRowDate(row.date);
+                    const isToday = row.date === todayDateKey;
                     return (
-                      <tr key={row.date}>
+                      <tr key={row.date} className={isToday ? 'is-today-row' : undefined}>
                         <td>
                           <div className="table-date-cell">
-                            <span className="day-name">{dayName}</span>
+                            <span className="day-name">
+                              {dayName}
+                              {isToday && <span className="today-badge">Today</span>}
+                            </span>
                             <span className="date-label">{dateLabel}</span>
                           </div>
                         </td>

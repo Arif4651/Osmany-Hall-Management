@@ -5509,6 +5509,37 @@ button {
   background: #f8fbff;
 }
 
+/* Highlights today's row so a student scanning a month of near-identical numbers can find
+   "where am I" at a glance. Uses the brand primary rather than one of the existing
+   breakfast/lunch/dinner column tints (amber/blue/purple) so it doesn't read as "this is the
+   lunch column" — and the badge means it's not relying on color alone. */
+.daily-cost-table-card tr.is-today-row td {
+  background: color-mix(in srgb, var(--primary) 7%, #fff);
+}
+
+.daily-cost-table-card tr.is-today-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.table-date-cell .day-name {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.today-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--primary);
+  border-radius: 999px;
+  padding: .12rem .5rem;
+}
+
 @media (max-width: 1050px) {
   .daily-cost-cards {
     grid-template-columns: repeat(2, 1fr);
