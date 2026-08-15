@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_STUDENT_FILTERS } from '../types/student.types';
 import { summarizeBulkSelection } from '../utils/bulkSelectionHelpers';
 import { getNextLevel } from '../utils/studentHelpers';
@@ -31,10 +31,6 @@ export default function useAdminStudentModule() {
   });
 
   const [selectedIds, setSelectedIds] = useState([]);
-  // Read inside loadStudents without making it (and the effect that calls it) re-run on every
-  // selection change — only the filter/page changing should trigger a reload.
-  const selectedIdsRef = useRef(selectedIds);
-  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
 
   const loadFilterOptions = useCallback(async () => {
     // Cache for 10 minutes — departments/levels/halls rarely change
@@ -51,17 +47,21 @@ export default function useAdminStudentModule() {
   const loadStudents = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage('');
+    // Selection is deliberately reset on every load — initial mount, a filter/search/sort
+    // change, a manual refresh, or a reload after an action all funnel through here. This list
+    // has no real pagination (the whole roster loads at once every time), so there is no
+    // legitimate case for carrying a selection across a reload; a previous version tried to by
+    // sending the current selection to the server and trusting whatever it echoed back, which is
+    // exactly what caused the selection to silently snap back to "everything selected" after
+    // actions. Selection should only ever change from an explicit user action (a checkbox click,
+    // "select all filtered", or an explicit clear) — never as a side effect of fetching data.
+    setSelectedIds([]);
 
     try {
-      // Ships the current selection so the server can tell us which of those ids still match —
-      // not every matching id, which used to be downloaded on every page turn regardless of
-      // selection size. page is always 1 here: this list never paginates.
-      const response = await studentService.getStudents({
-        filters, page: 1, pageSize: SHOW_ALL_PAGE_SIZE, selectedIds: selectedIdsRef.current,
-      });
+      // page is always 1 here: this list never paginates.
+      const response = await studentService.getStudents({ filters, page: 1, pageSize: SHOW_ALL_PAGE_SIZE });
       setStudents(response.items);
       setTotal(response.total);
-      setSelectedIds(response.filteredIds);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load students.');
     } finally {
@@ -135,20 +135,9 @@ export default function useAdminStudentModule() {
 
     try {
       await fn();
-      // Every action that reaches here — single-row or bulk — has just done the one thing the
-      // admin asked for. Without this, a "Select All Filtered" click from an earlier bulk
-      // operation stayed armed through every unrelated action afterward (loadStudents only
-      // intersects the selection against the reloaded page, it never clears it), so the whole
-      // list kept reappearing checked with no visible reason why.
-      //
-      // The ref has to be cleared right here too, not just the state: loadStudents (called next)
-      // reads selectedIdsRef.current synchronously, but the effect that normally keeps that ref
-      // in sync with `selectedIds` only runs after the next render commits — which hasn't
-      // happened yet at this point in the same async call. Without this line, loadStudents would
-      // still read the pre-clear selection, send it to the server for reconciliation, and get it
-      // right back as `filteredIds` — silently undoing the clear above.
-      selectedIdsRef.current = [];
-      setSelectedIds([]);
+      // loadStudents resets the selection itself on every reload (see its comment) — every
+      // action that reaches here, single-row or bulk, has just done the one thing the admin
+      // asked for, so there's nothing to carry forward.
       await loadStudents();
       return { ok: true };
     } catch (error) {
@@ -265,7 +254,8 @@ export default function useAdminStudentModule() {
       });
 
       toast.success('Bulk update completed', `${result.updatedCount} students updated.`);
-      // Selection is cleared centrally by withSubmitState after every successful action.
+      // Selection is cleared centrally by loadStudents (called via withSubmitState) after every
+      // successful action.
     }, 'Bulk update failed');
   }, [withSubmitState, selectedIds, filters, toast]);
 

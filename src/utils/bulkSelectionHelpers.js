@@ -1,10 +1,10 @@
 /**
  * Summarises a bulk selection against the current filter.
  *
- * `selectedIds` is assumed already pruned to ids that match the current filter — the student
- * list response only ever returns ids from `selectedIds` that still match (see
- * useAdminStudentModule's loadStudents), so nothing here needs the full matched id set just to
- * count against it.
+ * `selectedIds` only ever grows from explicit user actions (a checkbox, "select all filtered")
+ * and is reset on every reload (see useAdminStudentModule's loadStudents), so it's always a
+ * subset of what's currently matched — nothing here needs the full matched id set just to count
+ * against it.
  */
 export function summarizeBulkSelection(totalMatched = 0, selectedIds = []) {
   const totalSelected = selectedIds.length;

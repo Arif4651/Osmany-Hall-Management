@@ -29,8 +29,8 @@ function withLegacyRollNumber(payload = {}) {
 }
 
 export const studentService = {
-  getStudents: async ({ filters = {}, page = 1, pageSize = 10, selectedIds = [] } = {}) => {
-    return apiRequest(`/students${toQueryString({ ...normalizeFilters(filters), page, pageSize, selectedIds })}`);
+  getStudents: async ({ filters = {}, page = 1, pageSize = 10 } = {}) => {
+    return apiRequest(`/students${toQueryString({ ...normalizeFilters(filters), page, pageSize })}`);
   },
 
   // The full matching id list, with no pagination — only for "select all matching", called on
