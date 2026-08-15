@@ -137,6 +137,13 @@ public sealed class MonthlyBillCache : Entity
     public decimal OthersBill { get; set; }
     public decimal ServiceBill { get; set; }
     public decimal CarriedDue { get; set; }
+    /// <summary>
+    /// Net manual correction applied by an admin from the Due screen, signed: positive charges
+    /// more, negative charges less. It is part of <see cref="TotalBill"/> rather than a
+    /// replacement for <see cref="DueBill"/>, so payments still reduce it and the components of
+    /// the bill always add back up to the total the student is shown.
+    /// </summary>
+    public decimal Adjustment { get; set; }
     public decimal TotalApprovedPaid { get; set; }
     public decimal DueBill { get; set; }
     public decimal TotalBill { get; set; }

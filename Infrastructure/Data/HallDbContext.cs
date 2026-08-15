@@ -341,7 +341,9 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.ToTable("due_adjustments", table =>
             {
                 table.HasCheckConstraint("ck_due_adjustments_month", "\"BillingMonth\" BETWEEN 1 AND 12");
-                table.HasCheckConstraint("ck_due_adjustments_amount", "\"AdjustedAmount\" >= 0 AND \"PreviousAmount\" >= 0");
+                // Both columns are signed balances, not amounts owed: a student in credit has a
+                // negative due, so an adjustment recorded against that month legitimately carries
+                // negative values on either side.
             });
             entity.HasIndex(x => new { x.StudentId, x.BillingMonth, x.BillingYear });
             entity.Property(x => x.AdjustedAmount).HasPrecision(12, 4);
@@ -388,6 +390,7 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.Property(x => x.GuestMealBill).HasPrecision(12, 4);
             entity.Property(x => x.ServiceBill).HasPrecision(12, 4);
             entity.Property(x => x.CarriedDue).HasPrecision(12, 4);
+            entity.Property(x => x.Adjustment).HasPrecision(12, 4);
             entity.Property(x => x.TotalApprovedPaid).HasPrecision(12, 4);
             entity.Property(x => x.DueBill).HasPrecision(12, 4);
             entity.Property(x => x.TotalBill).HasPrecision(12, 4);

@@ -157,11 +157,18 @@ public sealed class BillingController(
 
     private static MonthlyBillDto ToDto(MonthlyBillCache x, bool overridden)
     {
-        var status = x.DueBill == 0m ? "Paid" : x.DueBill == x.TotalBill ? "Unpaid" : "Partial Paid";
+        // Read from what was actually paid. Comparing DueBill to TotalBill inferred payment from
+        // the wrong thing: a manual adjustment moves DueBill away from TotalBill without a single
+        // taka being paid, which reported a student who had paid nothing as "Partial Paid".
+        var status = FinancialMath.IsCredit(x.DueBill)
+            ? "Credit"
+            : x.DueBill == 0m
+                ? "Paid"
+                : x.TotalApprovedPaid > 0m ? "Partial Paid" : "Unpaid";
         return new MonthlyBillDto(
             x.StudentId, x.Student?.StudentName ?? string.Empty, x.Student?.RollNumber ?? string.Empty,
             x.Student?.HallId ?? string.Empty, x.Student?.Gender ?? string.Empty,
             x.Month, x.Year, x.ServiceBill, x.MonthlyBill, x.DswSubsidy, x.GuestMealBill, x.CarriedDue, x.DueBill,
-            x.TotalBill, status, overridden, false, x.OthersBill);
+            x.TotalBill, status, overridden, false, x.OthersBill, x.Adjustment, x.TotalApprovedPaid);
     }
 }

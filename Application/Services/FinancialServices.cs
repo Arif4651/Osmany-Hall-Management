@@ -450,6 +450,7 @@ public sealed record MonthlyBillResult(
     decimal OthersBill,
     decimal ServiceBill,
     decimal CarriedDue,
+    decimal Adjustment,
     decimal ApprovedPaid,
     decimal DueBill,
     decimal TotalBill);
@@ -485,18 +486,35 @@ public sealed class BillingCalculationService(
         }
         // A month that has not started has no consumption to bill, so calculating one would only
         // produce a bill of zeros that looks authoritative.
-        if (year == today.Year && month > today.Month)
+        if (IsFuturePeriod(month, year))
         {
             throw new DomainValidationException("Billing period cannot be in the future.");
         }
     }
 
+    /// <summary>A period that has not started yet, and so has nothing to bill.</summary>
+    public static bool IsFuturePeriod(int month, int year)
+    {
+        var today = DateTime.UtcNow;
+        return year > today.Year || (year == today.Year && month > today.Month);
+    }
+
     /// <summary>
     /// Ensures the month has been calculated, doing the work at most once across concurrent
     /// callers. Read endpoints should prefer this over recalculating on every cache miss.
+    ///
+    /// A month that has not started is a no-op rather than an error: nothing is billed yet, so the
+    /// honest answer is an empty bill. Throwing turned "there is nothing here yet" into a red
+    /// failure on a page the reader had simply paged forward into.
     /// </summary>
     public async Task EnsureMonthCalculatedAsync(int month, int year, CancellationToken cancellationToken)
     {
+        if (month is < 1 or > 12)
+        {
+            throw new DomainValidationException("Month must be between 1 and 12.");
+        }
+        if (IsFuturePeriod(month, year)) return;
+
         ValidatePeriod(month, year);
         if (await HasCachedBillsAsync(month, year, cancellationToken)) return;
 
@@ -618,11 +636,12 @@ public sealed class BillingCalculationService(
                 || await db.OthersBills.AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken);
             if (hasPreviousSources) await RecalculateMonthAsync(previous.Month, previous.Year, cancellationToken);
         }
+        // The previous month's cached DueBill already carries any adjustment made to it, so it is
+        // the single source for what rolls forward — no second lookup of that month's overrides.
         var previousDue = await db.MonthlyBillCache.AsNoTracking()
             .Where(x => x.Month == previous.Month && x.Year == previous.Year)
             .ToDictionaryAsync(x => x.StudentId, x => x.DueBill, cancellationToken);
-        var previousOverrides = await LatestOverridesAsync(previous.Month, previous.Year, cancellationToken);
-        var currentOverrides = await LatestOverridesAsync(month, year, cancellationToken);
+        var adjustments = await AdjustmentTotalsAsync(month, year, cancellationToken);
         var payments = await db.PaymentSubmissions.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year && x.Status == "approved")
             .GroupBy(x => x.StudentId)
@@ -633,19 +652,20 @@ public sealed class BillingCalculationService(
         var results = new List<MonthlyBillResult>();
         foreach (var student in students)
         {
-            var carried = previousOverrides.GetValueOrDefault(student.Id, previousDue.GetValueOrDefault(student.Id));
+            var carried = previousDue.GetValueOrDefault(student.Id);
             var subsidy = subsidyTotals.GetValueOrDefault(student.Id);
             var othersBill = othersBillTotals.GetValueOrDefault(student.Id);
             var service = serviceByWing.GetValueOrDefault(student.Gender);
+            // A manual correction is one more charge line, not an override of the result: it goes
+            // into the total alongside everything else, so the components still add up to what the
+            // student is shown and payments still work the balance down.
+            var adjustment = adjustments.GetValueOrDefault(student.Id);
             // MonthlyBill is reported at its raw, pre-subsidy value — the subsidy is shown as its
             // own line item — but the subsidy still comes out of the total exactly as before.
-            var total = monthly[student.Id] - subsidy + guestBill[student.Id] + othersBill + service + carried;
+            var total = monthly[student.Id] - subsidy + guestBill[student.Id] + othersBill + service + carried + adjustment;
             var approved = payments.GetValueOrDefault(student.Id);
-            var adjustedDue = currentOverrides.TryGetValue(student.Id, out var overrideDue)
-                ? overrideDue
-                : (decimal?)null;
-            var due = FinancialMath.CalculateDue(total, approved, adjustedDue);
-            var result = new MonthlyBillResult(student.Id, monthly[student.Id], subsidy, guestBill[student.Id], othersBill, service, carried, approved, due, total);
+            var due = FinancialMath.CalculateDue(total, approved);
+            var result = new MonthlyBillResult(student.Id, monthly[student.Id], subsidy, guestBill[student.Id], othersBill, service, carried, adjustment, approved, due, total);
             results.Add(result);
 
             if (!existing.TryGetValue(student.Id, out var cache))
@@ -659,6 +679,7 @@ public sealed class BillingCalculationService(
             cache.OthersBill = result.OthersBill;
             cache.ServiceBill = result.ServiceBill;
             cache.CarriedDue = result.CarriedDue;
+            cache.Adjustment = result.Adjustment;
             cache.TotalApprovedPaid = result.ApprovedPaid;
             cache.DueBill = result.DueBill;
             cache.TotalBill = result.TotalBill;
@@ -673,11 +694,19 @@ public sealed class BillingCalculationService(
     public async Task RecalculateForwardAsync(int month, int year, CancellationToken cancellationToken)
     {
         var cursor = new DateOnly(year, month, 1);
-        var end = DateOnly.FromDateTime(DateTime.Today).AddMonths(1);
-        // The starting month is always recalculated, even when it sits past the forward horizon —
-        // otherwise an edit to a future billing period (the picker allows several years ahead)
-        // would leave that month's cached bills stale, with the loop never running at all.
-        if (end < cursor) end = cursor;
+        var now = DateTime.UtcNow;
+        var currentPeriod = new DateOnly(now.Year, now.Month, 1);
+
+        // The current month is the last one that can be billed: a month that has not started has
+        // no consumption, and ValidatePeriod rejects it outright. Running to today + 1 month, as
+        // this used to, meant every forward pass ended by asking for next month and throwing
+        // "Billing period cannot be in the future" — after the caller had already committed its
+        // write, so the change landed but the request came back as a failure.
+        if (cursor > currentPeriod) return;
+        var end = currentPeriod;
+
+        // Everything from the edited month up to now is rebuilt, so the carried-due chain stays
+        // continuous; nothing beyond exists to rebuild, because future months are never billed.
         var rangeEnd = end.AddMonths(1).AddDays(-1);
 
         // Rebuild each affected non-stored item once for the whole range rather than once per
@@ -736,12 +765,18 @@ public sealed class BillingCalculationService(
         return meals;
     }
 
-    private async Task<Dictionary<Guid, decimal>> LatestOverridesAsync(int month, int year, CancellationToken cancellationToken)
-    {
-        var rows = await db.DueAdjustments.AsNoTracking()
+    /// <summary>
+    /// The net signed correction each student carries for the month.
+    ///
+    /// Each row records the due the admin was looking at (<c>PreviousAmount</c>) and the due they
+    /// asked for (<c>AdjustedAmount</c>); the difference is that entry's contribution. Summing
+    /// them lets a month be corrected repeatedly — every entry moves the balance by what the admin
+    /// intended at the time, and the earlier entries are neither lost nor re-applied.
+    /// </summary>
+    private async Task<Dictionary<Guid, decimal>> AdjustmentTotalsAsync(int month, int year, CancellationToken cancellationToken)
+        => await db.DueAdjustments.AsNoTracking()
             .Where(x => x.BillingMonth == month && x.BillingYear == year)
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
-        return rows.GroupBy(x => x.StudentId).ToDictionary(x => x.Key, x => x.First().AdjustedAmount);
-    }
+            .GroupBy(x => x.StudentId)
+            .Select(g => new { StudentId = g.Key, Amount = g.Sum(x => x.AdjustedAmount - x.PreviousAmount) })
+            .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
 }

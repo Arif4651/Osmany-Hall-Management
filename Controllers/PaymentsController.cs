@@ -17,7 +17,8 @@ namespace HallBackend.Controllers;
 public sealed class PaymentsController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    ILogger<PaymentsController> logger) : ControllerBase
 {
     [HttpGet("categories")]
     public async Task<IReadOnlyList<PaymentCategoryDto>> GetCategories([FromQuery] bool includeInactive = false, CancellationToken cancellationToken = default)
@@ -191,7 +192,25 @@ public sealed class PaymentsController(
 
         // Recalculate after the commit: it can span many months, and holding the review
         // transaction open for its duration would keep row locks for the whole run.
-        if (action == "approve") await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+        //
+        // Because the review is already durable, a rebuild failure must not surface as a failed
+        // approval — that told the admin the payment had been rejected while it was approved in
+        // the database, and invited them to approve it a second time. The bills are derived and
+        // can be rebuilt from Bill Management; the approval cannot be un-confused.
+        if (action == "approve")
+        {
+            try
+            {
+                await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                logger.LogError(
+                    error,
+                    "Payment {PaymentId} was approved, but rebuilding the bills for {Month}/{Year} failed.",
+                    row.Id, row.BillingMonth, row.BillingYear);
+            }
+        }
 
         var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
         return ToDto(saved);

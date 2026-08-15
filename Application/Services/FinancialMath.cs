@@ -17,23 +17,31 @@ public static class FinancialMath
     public static decimal NonNegativeDue(decimal totalBill, decimal approvedPaid)
         => totalBill - approvedPaid < 0m ? 0m : totalBill - approvedPaid;
 
-    /// <param name="adjustedDue">
-    /// A manual due override entered by an admin. It states outright what the student owes, so it
-    /// wins over the calculated figure — including when that figure is already 0, which is exactly
-    /// the case an override exists to correct. Only the calculated path clamps an overpayment.
-    /// </param>
-    public static decimal CalculateDue(
-        decimal totalBill,
-        decimal approvedPaid,
-        decimal? adjustedDue = null)
-    {
-        if (adjustedDue.HasValue)
-        {
-            return adjustedDue.Value < 0m ? 0m : adjustedDue.Value;
-        }
+    /// <summary>True when a balance is money the hall owes the student rather than the reverse.</summary>
+    public static bool IsCredit(decimal balance) => balance < 0m;
 
-        return NonNegativeDue(totalBill, approvedPaid);
-    }
+    /// <summary>
+    /// The month's closing balance: positive when the student owes, negative when they are in
+    /// credit. The negative side matters — it is what rolls into the next month's carried due, so
+    /// a student who rounds a bKash payment up, or pays a term in advance, keeps the difference.
+    /// Clamping it to zero, as this once did, quietly transferred every overpayment to the hall.
+    ///
+    /// Manual admin corrections are <b>not</b> handled here: they are folded into
+    /// <paramref name="totalBill"/> as a signed adjustment before this is called. Pinning the due
+    /// directly, as an earlier version did, meant an adjusted month could never be paid off — the
+    /// due stayed at the admin's figure no matter how much the student paid — and left the due
+    /// disagreeing with the total the student was shown.
+    /// </summary>
+    public static decimal CalculateDue(decimal totalBill, decimal approvedPaid)
+        => totalBill - approvedPaid;
+
+    /// <summary>
+    /// The signed correction needed to move a month's due to <paramref name="targetDue"/>, frozen
+    /// at the moment an admin enters it. Stored as a delta rather than an absolute due so later
+    /// payments keep reducing the balance normally.
+    /// </summary>
+    public static decimal AdjustmentToReach(decimal targetDue, decimal currentDue)
+        => targetDue - currentDue;
 
     public static decimal ProportionalCost(decimal totalCost, int filteredCount, int totalCount)
         => totalCount == 0 ? 0m : totalCost * filteredCount / totalCount;

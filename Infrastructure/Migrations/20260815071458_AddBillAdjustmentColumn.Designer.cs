@@ -3,6 +3,7 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HallBackend.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    partial class HallDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260815071458_AddBillAdjustmentColumn")]
+    partial class AddBillAdjustmentColumn
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -579,6 +582,8 @@ namespace HallBackend.Migrations
 
                     b.ToTable("due_adjustments", null, t =>
                         {
+                            t.HasCheckConstraint("ck_due_adjustments_amount", "\"AdjustedAmount\" >= 0 AND \"PreviousAmount\" >= 0");
+
                             t.HasCheckConstraint("ck_due_adjustments_month", "\"BillingMonth\" BETWEEN 1 AND 12");
                         });
                 });

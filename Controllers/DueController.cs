@@ -16,7 +16,8 @@ namespace HallBackend.Controllers;
 public sealed class DueController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    ILogger<DueController> logger) : ControllerBase
 {
     [HttpGet]
     [RequirePermission(MenuKeys.AdminDue, PermissionActions.View)]
@@ -60,7 +61,9 @@ public sealed class DueController(
     [RequirePermission(MenuKeys.AdminDue, PermissionActions.Edit)]
     public async Task<IActionResult> Adjust(SaveDueAdjustmentRequest request, CancellationToken cancellationToken)
     {
-        if (request.BillingMonth is < 1 or > 12 || request.AdjustedAmount < 0m) return BadRequest(new { message = "Invalid due adjustment." });
+        // A negative target is allowed: it grants the student a credit, the same balance an
+        // overpayment produces. Only the period is genuinely constrained.
+        if (request.BillingMonth is < 1 or > 12) return BadRequest(new { message = "Invalid due adjustment." });
         var studentWing = await db.Students.AsNoTracking()
             .Where(x => x.Id == request.StudentId)
             .Select(x => x.Gender)
@@ -82,7 +85,32 @@ public sealed class DueController(
             AdjustedById = currentUser.UserId,
         });
         await db.SaveChangesAsync(cancellationToken);
-        await billing.RecalculateForwardAsync(request.BillingMonth, request.BillingYear, cancellationToken);
-        return NoContent();
+
+        // The adjustment is committed by this point, so a failure rebuilding the derived bills is
+        // not a failure of the adjustment — reporting it as one told the admin their change had
+        // been rejected while it was sitting in the database. The figures can be rebuilt from the
+        // Recalculate action; losing track of what was saved cannot be undone.
+        var recalculated = await TryRecalculateForwardAsync(request.BillingMonth, request.BillingYear, cancellationToken);
+        return Ok(new
+        {
+            recalculated,
+            message = recalculated
+                ? null
+                : "The override was saved, but the bill totals could not be rebuilt just now. Use Recalculate on Bill Management to refresh them.",
+        });
+    }
+
+    private async Task<bool> TryRecalculateForwardAsync(int month, int year, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await billing.RecalculateForwardAsync(month, year, cancellationToken);
+            return true;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            logger.LogError(error, "Bill rebuild after a due adjustment for {Month}/{Year} failed.", month, year);
+            return false;
+        }
     }
 }

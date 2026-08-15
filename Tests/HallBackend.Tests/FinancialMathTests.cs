@@ -19,26 +19,85 @@ public sealed class FinancialMathTests
     }
 
     [Fact]
-    public void CalculateDue_KeepsFullyPaidBillSettledAfterChargeReduction()
+    public void CalculateDue_RefundsTheDifferenceWhenChargesAreReducedAfterPayment()
     {
-        Assert.Equal(0m, FinancialMath.CalculateDue(800m, 1000m));
+        // Paid 1000, then the month's charges were corrected down to 800. The student is 200 up,
+        // and that 200 is theirs: it becomes next month's carried credit rather than being
+        // written off to the hall, which is what clamping this to zero used to do.
+        Assert.Equal(-200m, FinancialMath.CalculateDue(800m, 1000m));
+        Assert.True(FinancialMath.IsCredit(FinancialMath.CalculateDue(800m, 1000m)));
     }
 
     [Fact]
-    public void CalculateDue_StillAppliesAdjustmentWhenBillIsNotFullyPaid()
+    public void CalculateDue_IsWhatIsLeftAfterPayments()
     {
         Assert.Equal(250m, FinancialMath.CalculateDue(1000m, 750m));
-        Assert.Equal(100m, FinancialMath.CalculateDue(1000m, 750m, 100m));
+        Assert.Equal(0m, FinancialMath.CalculateDue(1000m, 1000m));
     }
 
     [Fact]
-    public void CalculateDue_ManualOverrideWinsOverCalculatedFigure()
+    public void CalculateDue_KeepsOverpaymentAsCreditInsteadOfAbsorbingIt()
     {
-        // A settled or zero-charge month is the main reason an admin reaches for an override, so
-        // the override has to survive it rather than being swallowed by the calculated 0.
-        Assert.Equal(500m, FinancialMath.CalculateDue(800m, 1000m, 500m));
-        Assert.Equal(1200m, FinancialMath.CalculateDue(0m, 0m, 1200m));
-        Assert.Equal(0m, FinancialMath.CalculateDue(1000m, 0m, 0m));
+        // Rounding a bKash payment up: the extra belongs to the student, so it survives as a
+        // negative balance rather than being clamped away.
+        Assert.Equal(-30.83m, FinancialMath.CalculateDue(269.17m, 300m));
+        Assert.True(FinancialMath.IsCredit(FinancialMath.CalculateDue(269.17m, 300m)));
+        Assert.False(FinancialMath.IsCredit(FinancialMath.CalculateDue(269.17m, 269.17m)));
+    }
+
+    [Fact]
+    public void Credit_DrawsDownAgainstTheFollowingMonth()
+    {
+        // August: 269.17 charged, 300 paid -> 30.83 credit carried into September.
+        var carried = FinancialMath.CalculateDue(269.17m, 300m);
+        Assert.Equal(-30.83m, carried);
+
+        // September: 400 of charges against that credit, nothing paid yet.
+        var septemberTotal = 400m + carried;
+        Assert.Equal(369.17m, FinancialMath.CalculateDue(septemberTotal, 0m));
+    }
+
+    [Fact]
+    public void Credit_SpanningSeveralMonthsIsConsumedNotLost()
+    {
+        // A term paid up front: 5000 against a 269.17 month leaves 4730.83 to spend down.
+        var afterAugust = FinancialMath.CalculateDue(269.17m, 5000m);
+        Assert.Equal(-4730.83m, afterAugust);
+
+        var afterSeptember = FinancialMath.CalculateDue(400m + afterAugust, 0m);
+        Assert.Equal(-4330.83m, afterSeptember);
+        Assert.True(FinancialMath.IsCredit(afterSeptember));
+    }
+
+    [Fact]
+    public void AdjustmentToReach_ProducesTheDeltaThatLandsOnTheAdminsFigure()
+    {
+        // The admin types the due they want; the delta is what gets stored, so the correction can
+        // be folded into the total as one more charge line.
+        Assert.Equal(10.8333m, FinancialMath.AdjustmentToReach(280m, 269.1667m));
+        Assert.Equal(1200m, FinancialMath.AdjustmentToReach(1200m, 0m));
+        Assert.Equal(-250m, FinancialMath.AdjustmentToReach(0m, 250m));
+    }
+
+    [Fact]
+    public void Adjustment_LandsOnTheTargetDueAndStaysPayable()
+    {
+        // A zero-charge month adjusted up to 1200: the figure the admin asked for, and unlike the
+        // old absolute override it clears once the student actually pays it.
+        var adjustment = FinancialMath.AdjustmentToReach(1200m, FinancialMath.CalculateDue(0m, 0m));
+        Assert.Equal(1200m, FinancialMath.CalculateDue(0m + adjustment, 0m));
+        Assert.Equal(0m, FinancialMath.CalculateDue(0m + adjustment, 1200m));
+        Assert.Equal(200m, FinancialMath.CalculateDue(0m + adjustment, 1000m));
+    }
+
+    [Fact]
+    public void Adjustment_NeverPushesDueAboveTheTotalBill()
+    {
+        // The student's bill has to reconcile: an adjustment is inside the total, so what they owe
+        // can never exceed what they were charged.
+        var total = 269.1667m + FinancialMath.AdjustmentToReach(280m, 269.1667m);
+        Assert.Equal(280m, total);
+        Assert.True(FinancialMath.CalculateDue(total, 0m) <= total);
     }
 
     [Fact]
