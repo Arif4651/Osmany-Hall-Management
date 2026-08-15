@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const WING_LABELS = { Female: 'Female wing only', Male: 'Male wing only', All: 'Both wings' };
 
@@ -21,6 +22,7 @@ const WING_LABELS = { Female: 'Female wing only', Male: 'Male wing only', All: '
  */
 export default function AdditionalItemsPanel() {
   const { user } = useAuth();
+  const toast = useToast();
   // The admin's own wing, or null for a super admin. Note this is deliberately user.wing and not
   // the page's selected wing — the latter is just a viewing filter.
   const adminWing = user?.wing || null;
@@ -32,7 +34,6 @@ export default function AdditionalItemsPanel() {
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -78,11 +79,16 @@ export default function AdditionalItemsPanel() {
         defaultQuantity: Number(form.defaultQuantity) || 1,
         isActive: form.isActive,
       };
-      if (editing === 'new') await adminDataService.createAdditionalItem(payload);
+      const isNew = editing === 'new';
+      if (isNew) await adminDataService.createAdditionalItem(payload);
       else await adminDataService.updateAdditionalItem(editing, payload);
       setEditing(null);
-      setMessage('Item saved.');
       await load();
+      toast.success(
+        isNew ? 'Additional item created' : 'Additional item updated',
+        `${payload.name} · ${WING_LABELS[payload.eligibleWing] || payload.eligibleWing}`
+        + `${payload.isActive ? '' : ' · inactive'}.`,
+      );
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -94,10 +100,12 @@ export default function AdditionalItemsPanel() {
     if (!window.confirm(`Delete "${item.name}"? If it already has selections or bills it will be deactivated instead.`)) return;
     try {
       const result = await adminDataService.deleteAdditionalItem(item.id);
-      setMessage(result?.message || 'Item removed.');
       await load();
+      // The server decides between a real delete and a deactivation, so its own wording is the
+      // accurate one — fall back only when it says nothing.
+      toast.success('Item removed', result?.message || `"${item.name}" is no longer offered.`);
     } catch (deleteError) {
-      setError(deleteError.message);
+      toast.error('Could not remove item', deleteError?.message);
     }
   };
 
@@ -114,7 +122,6 @@ export default function AdditionalItemsPanel() {
         <Button onClick={openCreate}><Plus size={16} /> Add Item</Button>
       </div>
 
-      {message ? <div className="student-message student-message-success">{message}</div> : null}
       {error && !editing ? <div className="student-message student-message-error">{error}</div> : null}
 
       <div className="admin-meal-table-wrap">

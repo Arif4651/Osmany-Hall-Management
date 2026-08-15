@@ -4,9 +4,11 @@ import Button from '../ui/Button';
 import { DEFAULT_STUDENT_FORM } from '../../types/student.types';
 import StudentFormFields from './StudentFormFields';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreate }) {
   const { user, role } = useAuth();
+  const toast = useToast();
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
   // Determine the locked gender for wing admins (e.g. 'Male' or 'Female')
   const lockedGender = isWingAdmin && user?.wing ? user.wing : null;
@@ -43,6 +45,7 @@ export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreat
     const result = await onCreate(payload);
 
     if (!result.ok) {
+      // Stays in the modal: it pairs with the field errors highlighted below it.
       setErrors(result.validationErrors || {});
       setFeedback({
         type: 'error',
@@ -52,13 +55,22 @@ export default function AddStudentModal({ isOpen, isSubmitting, onClose, onCreat
       return;
     }
 
+    // The form resets so the next student can be added straight away, which would otherwise wipe
+    // the new login details off the screen. They go to a pinned toast instead — same handling as
+    // a password reset, and it survives closing the modal.
     setFormData({ ...DEFAULT_STUDENT_FORM, ...(lockedGender ? { gender: lockedGender } : {}) });
     setErrors({});
-    setFeedback({
-      type: 'success',
-      title: result.notice?.title || 'Student created successfully',
-      lines: result.notice?.lines || ['Student account has been created.'],
-    });
+    setFeedback(null);
+
+    const { defaultLoginId, defaultPassword } = result.credentials;
+    toast.success(
+      `Student created: ${result.student?.studentName || payload.studentName}`,
+      `Username: ${defaultLoginId} · Password: ${defaultPassword} — the student must change it after first login.`,
+      {
+        duration: 0,
+        copyText: `Username: ${defaultLoginId}\nPassword: ${defaultPassword}`,
+      },
+    );
   };
 
   const handleClose = () => {

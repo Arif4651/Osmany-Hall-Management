@@ -5,6 +5,7 @@ import MonthYearPicker from '../financial/MonthYearPicker';
 import { financialService } from '../../services/financialService';
 import { MENU_KEYS } from '../../services/permissionService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const now = new Date();
 
@@ -32,6 +33,7 @@ const markKey = (date, mealPeriod, itemId) => `${date}|${mealPeriod}|${itemId}`;
  */
 export default function AdditionalPreferencesPanel() {
   const { can } = useAuth();
+  const toast = useToast();
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [data, setData] = useState(null);
   const [marks, setMarks] = useState(() => new Set());
@@ -59,7 +61,6 @@ export default function AdditionalPreferencesPanel() {
   const toggle = useCallback(async (date, mealPeriod, item, nextSelected) => {
     const key = markKey(date, mealPeriod, item.itemId);
     setSavingKey(key);
-    setError('');
 
     // Optimistic: a month grid feels unusable if every tick waits on a round-trip. Reverted below
     // if the server refuses.
@@ -74,7 +75,12 @@ export default function AdditionalPreferencesPanel() {
         itemId: item.itemId, date, mealPeriod, selected: nextSelected,
       });
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save your selection.');
+      // The tick was applied optimistically, so a silent revert would look like the click simply
+      // did not register. A toast is the only thing that explains the box springing back.
+      toast.error(
+        'Selection not saved',
+        saveError instanceof Error ? saveError.message : 'Could not save your selection.',
+      );
       setMarks((current) => {
         const next = new Set(current);
         if (nextSelected) next.delete(key); else next.add(key);
@@ -83,7 +89,7 @@ export default function AdditionalPreferencesPanel() {
     } finally {
       setSavingKey('');
     }
-  }, []);
+  }, [toast]);
 
   // Memoised so the totals below don't recompute on every render.
   const items = useMemo(() => data?.items ?? [], [data]);
@@ -127,6 +133,7 @@ export default function AdditionalPreferencesPanel() {
           year={period.year}
           minYear={now.getFullYear() - 1}
           maxYear={now.getFullYear() + 1}
+          allowFuture
           onChange={({ month, year }) => setPeriod({ month, year })}
           label="Month"
         />

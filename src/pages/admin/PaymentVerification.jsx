@@ -9,6 +9,7 @@ import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const monthNames = Array.from({ length: 12 }, (_, index) =>
   new Intl.DateTimeFormat('en', { month: 'short' }).format(new Date(2000, index, 1)));
@@ -17,6 +18,7 @@ export default function PaymentVerification() {
   useDocumentTitle('Payment Verification');
   const { user, role, canChooseFinanceWing, isPermissionsLoading } = useAuth();
   const { invalidate } = useQueryCache();
+  const toast = useToast();
   // Wing-locked unless the server says this role may switch wings on financial screens.
   const isWingAdmin = (role === 'male_wing_admin' || role === 'female_wing_admin') && !canChooseFinanceWing;
 
@@ -37,7 +39,6 @@ export default function PaymentVerification() {
   const [searchQuery, setSearchQuery] = useState('');
   const [reviewing, setReviewing] = useState(null);
   const [approvedAmount, setApprovedAmount] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,20 +76,29 @@ export default function PaymentVerification() {
   }, [refresh]);
 
   const review = async (id, action, amount = null) => {
+    const row = rows.find((item) => item.id === id);
     setSubmitting(true);
-    setMessage('');
     setError('');
     try {
       await adminDataService.reviewPayment(id, action, amount);
-      setMessage(`Payment ${action === 'approve' ? 'approved' : 'rejected'} successfully.`);
-      setError('');
       setReviewing(null);
+      // Names the student and the amount that actually moved, so the admin can confirm they
+      // acted on the row they meant to without hunting for it again in the table.
+      toast.success(
+        action === 'approve' ? 'Payment approved' : 'Payment rejected',
+        action === 'approve'
+          ? `${row?.studentName || 'Student'} · ${formatCurrency(amount ?? row?.submittedAmount ?? 0)} deducted from the due bill.`
+          : `${row?.studentName || 'Student'}'s submission was rejected.`,
+      );
       invalidate('admin-payments-');
       invalidate('admin-billing-combined');
       invalidate('due-rows-');
       await load();
     } catch (reviewError) {
-      setError(reviewError.message);
+      toast.error(
+        action === 'approve' ? 'Could not approve payment' : 'Could not reject payment',
+        reviewError?.message,
+      );
     } finally {
       setSubmitting(false);
     }
@@ -115,7 +125,6 @@ export default function PaymentVerification() {
         <p>Review student payment submissions and update monthly dues atomically.</p>
       </header>
 
-      {message && <div className="student-message student-message-success">{message}</div>}
       {error && <div className="student-message student-message-error">{error}</div>}
 
       <div className="wing-filter-bar">

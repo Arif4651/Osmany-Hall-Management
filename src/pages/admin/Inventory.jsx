@@ -8,6 +8,7 @@ import { money, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
+import { useToast } from '../../context/ToastContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 
 const tabs = [
@@ -286,6 +287,7 @@ export default function Inventory() {
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
 
   const { invalidate } = useQueryCache();
+  const toast = useToast();
 
   const [activeTab, setActiveTab] = useState('in');
   // Wing admins are locked to their wing's gender; super_admin/admin can switch
@@ -309,7 +311,9 @@ export default function Inventory() {
   const [itemModal, setItemModal] = useState(null);
   const [itemForm, setItemForm] = useState(emptyItem);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [message, setMessage] = useState('');
+  // Only blocked submissions of the movement form live here — they name the field to fix, so they
+  // belong beside the form. Everything that actually happened is reported through a toast.
+  const [formError, setFormError] = useState('');
   const [modalError, setModalError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -388,7 +392,10 @@ export default function Inventory() {
       if (historyItem) {
         refreshLedger();
       }
-      setMessage('Transaction updated successfully.');
+      toast.success(
+        'Transaction updated',
+        `${historyItem?.name || 'Item'} · ${editForm.quantity} ${historyItem?.unit || ''} on ${editForm.date}.`,
+      );
     } catch (error) {
       setModalError(error.message || 'Unable to update transaction.');
     } finally {
@@ -398,6 +405,7 @@ export default function Inventory() {
 
   const handleDeleteTransaction = async () => {
     if (!deleteTransaction) return;
+    const removed = deleteTransaction;
     setSaving(true);
     setModalError('');
     try {
@@ -408,7 +416,10 @@ export default function Inventory() {
       if (historyItem) {
         refreshLedger();
       }
-      setMessage('Transaction deleted successfully.');
+      toast.success(
+        'Transaction deleted',
+        `${removed.transactionType === 'in' ? 'Stock-in' : 'Stock-out'} of ${removed.quantity} ${historyItem?.unit || ''} on ${removed.date} was removed.`,
+      );
     } catch (error) {
       setModalError(error.message || 'Unable to delete transaction.');
     } finally {
@@ -602,7 +613,7 @@ export default function Inventory() {
   const switchTab = useCallback((tab) => {
     setActiveTab(tab);
     setMovement(emptyMovement);
-    setMessage('');
+    setFormError('');
   }, []);
 
   // Open history ledger modal and load timeline from backend
@@ -639,20 +650,20 @@ export default function Inventory() {
   const submitMovement = async (event) => {
     event.preventDefault();
     const item = items.find((row) => row.id === movement.itemId);
-    if (!item) return setMessage('Please select an item.');
-    if (money(movement.quantity).lessThanOrEqualTo(0)) return setMessage('Quantity must be greater than zero.');
+    if (!item) return setFormError('Please select an item.');
+    if (money(movement.quantity).lessThanOrEqualTo(0)) return setFormError('Quantity must be greater than zero.');
     // A stock-out is drawn from one batch and costed at that batch's rate, so it is limited by
     // that batch rather than by the item total. To take more, record a second stock-out
     // against another batch.
     if (activeTab === 'out') {
       if (!movement.sourceBatchId) {
-        return setMessage('Select which batch this stock-out is taken from.');
+        return setFormError('Select which batch this stock-out is taken from.');
       }
       if (!selectedBatch) {
-        return setMessage('The selected batch is no longer available. Reselect the item.');
+        return setFormError('The selected batch is no longer available. Reselect the item.');
       }
       if (money(movement.quantity).greaterThan(money(selectedBatch.remainingQuantity))) {
-        return setMessage(
+        return setFormError(
           `${selectedBatch.label} only has ${formatNumber(selectedBatch.remainingQuantity)} ${item.unit}. `
           + 'Record a separate stock-out against another batch for the remainder.',
         );
@@ -661,11 +672,11 @@ export default function Inventory() {
     const isStockInOrNonStock = activeTab === 'in' || activeTab === 'non-stock';
     if (isStockInOrNonStock) {
       if (!movement.totalPrice || money(movement.totalPrice).lessThanOrEqualTo(0)) {
-        return setMessage('Total Price must be greater than zero.');
+        return setFormError('Total Price must be greater than zero.');
       }
     }
     setSaving(true);
-    setMessage('');
+    setFormError('');
     try {
       await adminDataService.createInventoryMovement({
         itemId: item.id,
@@ -681,9 +692,14 @@ export default function Inventory() {
       setMovement(emptyMovement);
       invalidate('inventory-');
       refreshItems();
-      setMessage('Transaction saved successfully.');
+      // The form clears itself on success, so the toast has to carry what was recorded —
+      // otherwise the only evidence of the save is an empty form.
+      toast.success(
+        activeTab === 'in' ? 'Stock-in recorded' : 'Stock-out recorded',
+        `${item.name} · ${movement.quantity} ${item.unit} on ${movement.date}.`,
+      );
     } catch (error) {
-      setMessage(error.message || 'Unable to save transaction.');
+      toast.error('Could not save transaction', error?.message);
     } finally {
       setSaving(false);
     }
@@ -720,7 +736,10 @@ export default function Inventory() {
       setItemModal(null);
       invalidate('inventory-');
       refreshItems();
-      setMessage(itemForm.id ? 'Item updated successfully.' : 'Item created successfully.');
+      toast.success(
+        itemForm.id ? 'Item updated' : 'Item created',
+        `${itemForm.name} · ${itemForm.category} · measured in ${itemForm.unit}.`,
+      );
     } catch (error) {
       setModalError(error.message || 'Unable to save item.');
     } finally {
@@ -735,15 +754,21 @@ export default function Inventory() {
 
   const deleteItem = async () => {
     if (!deleteTarget?.item) return;
+    const { item, force } = deleteTarget;
     try {
       setSaving(true);
       setModalError('');
-      if (deleteTarget.force) await adminDataService.forceDeleteInventoryItem(deleteTarget.item.id);
-      else await adminDataService.deleteInventoryItem(deleteTarget.item.id);
+      if (force) await adminDataService.forceDeleteInventoryItem(item.id);
+      else await adminDataService.deleteInventoryItem(item.id);
       setDeleteTarget(null);
       invalidate('inventory-');
       refreshItems();
-      setMessage(deleteTarget.force ? 'Item was permanently deleted.' : 'Item deleted successfully.');
+      toast.success(
+        force ? 'Item permanently deleted' : 'Item deleted',
+        force
+          ? `${item.name} and its entire transaction history were removed.`
+          : `${item.name} was removed from the stock list.`,
+      );
     } catch (error) {
       setModalError(error.message || 'Unable to delete item.');
     } finally {
@@ -792,7 +817,7 @@ export default function Inventory() {
         ))}
       </nav>
 
-      {message && <div className="stock-message">{message}</div>}
+      {formError && <div className="stock-message stock-message-error" role="alert">{formError}</div>}
 
       {activeTab === 'items' ? (
         <section className="stock-items-view">

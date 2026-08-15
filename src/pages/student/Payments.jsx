@@ -7,17 +7,20 @@ import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
+import { useToast } from '../../context/ToastContext';
 
 const now = new Date();
 const months = Array.from({ length: 12 }, (_, index) => ({
   value: index + 1,
   label: new Intl.DateTimeFormat('en', { month: 'long' }).format(new Date(2000, index, 1)),
 }));
-const years = Array.from({ length: 5 }, (_, index) => now.getFullYear() - 2 + index);
+// Payments always settle a period that has already started, so the range ends at the current year.
+const years = Array.from({ length: 3 }, (_, index) => now.getFullYear() - 2 + index);
 
 export default function Payments() {
   useDocumentTitle('Payments');
   const { invalidate } = useQueryCache();
+  const toast = useToast();
 
   const [form, setForm] = useState({
     categoryId: '',
@@ -28,8 +31,7 @@ export default function Payments() {
     transactionId: '',
   });
   
-  const [message, setMessage] = useState('');
-  const [submitError, setSubmitError] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
 
   // Fetch categories with a long TTL (10 minutes)
@@ -62,9 +64,7 @@ export default function Payments() {
   const submit = async (event) => {
     event.preventDefault();
     setSubmitting(true);
-    setSubmitError('');
-    setMessage('');
-    
+    const amount = form.amount;
     try {
       await financialService.submitPayment({
         ...form,
@@ -72,19 +72,23 @@ export default function Payments() {
         charges: moneyInput(form.charges || 0),
       });
       setForm((prev) => ({ ...prev, amount: '', charges: '', transactionId: '' }));
-      setMessage('Payment submitted successfully.');
-      
+
       // Invalidate the cache to force a fresh fetch
       invalidate('my-payments');
       refresh();
+      // The form resets on success, so the confirmation has to restate what was sent.
+      toast.success(
+        'Payment submitted',
+        `${formatCurrency(amount)} for ${months.find((m) => m.value === Number(form.billingMonth))?.label} ${form.billingYear} — awaiting admin verification.`,
+      );
     } catch (err) {
-      setSubmitError(err.message);
+      toast.error('Could not submit payment', err?.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const error = loadError || submitError;
+  const error = loadError;
 
   return (
     <div className="financial-page">
@@ -98,7 +102,6 @@ export default function Payments() {
         </div>
       </header>
 
-      {message && <div className="student-message student-message-success">{message}</div>}
       {error && <div className="student-message student-message-error">{error}</div>}
 
       <form className="financial-card payment-form" onSubmit={submit}>

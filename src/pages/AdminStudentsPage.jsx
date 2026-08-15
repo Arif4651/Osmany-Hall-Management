@@ -18,6 +18,7 @@ import ReactivateStudentModal from '../components/student-management/ReactivateS
 import StudentDetailsDrawer from '../components/student-management/StudentDetailsDrawer';
 import { studentService } from '../services/studentService';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import {
   exportStudentsToCsv,
   exportStudentsToExcel,
@@ -33,8 +34,6 @@ export default function AdminStudentsPage() {
     isSubmitting,
     errorMessage,
     setErrorMessage,
-    successNotice,
-    setSuccessNotice,
 
     filters,
     updateFilter,
@@ -70,6 +69,8 @@ export default function AdminStudentsPage() {
     evaluateAllLifecycles,
     getFilteredStudentsForExport,
   } = useAdminStudentModule();
+
+  const toast = useToast();
 
   // Wing-admin context — drives gender filter visibility and the header badge
   const { user, role } = useAuth();
@@ -168,10 +169,7 @@ export default function AdminStudentsPage() {
     try {
       const rows = await getFilteredStudentsForExport();
       if (!rows.length) {
-        setSuccessNotice({
-          title: 'No data to export',
-          lines: ['There are no students in the current filtered result.'],
-        });
+        toast.info('No data to export', 'There are no students in the current filtered result.');
         return;
       }
 
@@ -187,12 +185,12 @@ export default function AdminStudentsPage() {
         printStudents(rows);
       }
 
-      setSuccessNotice({
-        title: 'Export completed',
-        lines: [`${rows.length} students exported as ${format === 'excel' ? 'XLSX' : format.toUpperCase()}.`],
-      });
+      toast.success(
+        format === 'print' ? 'Print sheet opened' : 'Export completed',
+        `${rows.length} students exported as ${format === 'excel' ? 'XLSX' : format.toUpperCase()}.`,
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to export student list.');
+      toast.error('Export failed', error instanceof Error ? error.message : 'Failed to export student list.');
     } finally {
       setIsExporting(false);
     }
@@ -226,19 +224,6 @@ export default function AdminStudentsPage() {
       />
 
       {errorMessage ? <div className="student-message student-message-error">{errorMessage}</div> : null}
-      {successNotice ? (
-        <div className="student-message student-message-success">
-          <div>
-            <strong>{successNotice.title}</strong>
-            {successNotice.lines?.map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </div>
-          <button type="button" onClick={() => setSuccessNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
 
       <PageSection title="Search and Filters" subtitle="Search by Name, Student ID, Hall ID, Mobile and refine with reusable filters.">
         <div style={{ display: 'grid', gap: '0.8rem' }}>

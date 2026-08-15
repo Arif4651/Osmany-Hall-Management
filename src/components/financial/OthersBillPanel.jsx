@@ -3,6 +3,7 @@ import { Calculator, HandCoins, RefreshCcw, Trash2, TriangleAlert } from 'lucide
 import Button from '../ui/Button';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency } from '../../utils/formatters';
+import { useToast } from '../../context/ToastContext';
 
 /**
  * Pooled monthly bills for optional items, split by consumption.
@@ -11,6 +12,7 @@ import { formatCurrency } from '../../utils/formatters';
  * an amount itself, so what the admin approves is exactly what gets stored.
  */
 export default function OthersBillPanel({ month, year, wing, lockedWing, onGenerated }) {
+  const toast = useToast();
   const [items, setItems] = useState([]);
   const [bills, setBills] = useState([]);
   const [itemId, setItemId] = useState('');
@@ -20,7 +22,6 @@ export default function OthersBillPanel({ month, year, wing, lockedWing, onGener
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
 
   // Generating a bill always targets one concrete wing, independent of the page's "All" filter —
   // a locked admin can only ever target their own wing, mirroring the DSW Subsidy form.
@@ -74,7 +75,6 @@ export default function OthersBillPanel({ month, year, wing, lockedWing, onGener
     setError('');
     try {
       setPreview(await adminDataService.previewOthersBill(request()));
-      setMessage('');
     } catch (previewError) {
       setError(previewError.message);
       setPreview(null);
@@ -94,16 +94,20 @@ export default function OthersBillPanel({ month, year, wing, lockedWing, onGener
 
     setBusy('generate');
     setError('');
+    const total = formatCurrency(amount);
     try {
       await adminDataService.generateOthersBill(request());
-      setMessage(`${selectedItem?.name} bill generated and applied to student bills.`);
       setPreview(null);
       setAmount('');
       setNotes('');
       await load();
       onGenerated?.();
+      toast.success(
+        existing ? 'Others bill regenerated' : 'Others bill generated',
+        `${selectedItem?.name} · ${total} · ${effectiveWing} wing · ${month}/${year} · applied to student bills.`,
+      );
     } catch (generateError) {
-      setError(generateError.message);
+      toast.error('Could not generate bill', generateError?.message);
     } finally {
       setBusy('');
     }
@@ -114,11 +118,14 @@ export default function OthersBillPanel({ month, year, wing, lockedWing, onGener
     setBusy('delete');
     try {
       await adminDataService.deleteOthersBill(bill.id);
-      setMessage('Others bill deleted and bills recalculated.');
       await load();
       onGenerated?.();
+      toast.success(
+        'Others bill deleted',
+        `${bill.itemName} · ${bill.month}/${bill.year} · student bills were recalculated without it.`,
+      );
     } catch (deleteError) {
-      setError(deleteError.message);
+      toast.error('Could not delete bill', deleteError?.message);
     } finally {
       setBusy('');
     }
@@ -137,7 +144,6 @@ export default function OthersBillPanel({ month, year, wing, lockedWing, onGener
         </p>
       </div>
 
-      {message ? <div className="student-message student-message-success">{message}</div> : null}
       {error ? <div className="student-message student-message-error">{error}</div> : null}
 
       {!items.length ? (

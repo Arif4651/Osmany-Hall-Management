@@ -3,6 +3,7 @@ import { Megaphone, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, LoaderCircl
 import { useAuth } from '../../context/AuthContext';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
+import { useToast } from '../../context/ToastContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { noticeService } from '../../services/noticeService';
 import Button from '../../components/ui/Button';
@@ -14,6 +15,7 @@ export default function AdminNoticeBoard() {
   useDocumentTitle('Notice Board');
   const { user, role } = useAuth();
   const { invalidate } = useQueryCache();
+  const toast = useToast();
 
   const isSuperAdmin = role === 'super_admin' || role === 'admin';
   const isMaleWingAdmin = role === 'male_wing_admin';
@@ -131,6 +133,8 @@ export default function AdminNoticeBoard() {
       return;
     }
 
+    const wasEdit = Boolean(editId);
+    const title = formData.title.trim();
     setIsSubmitting(true);
     setError('');
     try {
@@ -142,8 +146,13 @@ export default function AdminNoticeBoard() {
       handleCloseForm();
       invalidate('notices-list');
       refresh();
+      // Names the audience too: posting to the wrong wing is the mistake worth catching here.
+      toast.success(
+        wasEdit ? 'Notice updated' : 'Notice published',
+        `"${title}" · visible to ${formData.targetWing === 'All' ? 'both wings' : `${formData.targetWing} wing`}.`,
+      );
     } catch (err) {
-      setError(err.message || 'Failed to post notice.');
+      toast.error(wasEdit ? 'Could not update notice' : 'Could not publish notice', err?.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -151,12 +160,14 @@ export default function AdminNoticeBoard() {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this notice?')) return;
+    const removed = notices.find((notice) => notice.id === id);
     try {
       await noticeService.deleteNotice(id);
       invalidate('notices-list');
       refresh();
+      toast.success('Notice deleted', removed?.title ? `"${removed.title}" was removed.` : undefined);
     } catch (err) {
-      setError(err.message || 'Failed to delete notice.');
+      toast.error('Could not delete notice', err?.message);
     }
   };
 

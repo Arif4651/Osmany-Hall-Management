@@ -57,7 +57,7 @@ export default function DailyCost() {
   );
   const availableYears = useMemo(() => {
     const years = [];
-    for (let year = now.getFullYear() - 3; year <= now.getFullYear() + 3; year += 1) {
+    for (let year = now.getFullYear() - 3; year <= now.getFullYear(); year += 1) {
       years.push(year);
     }
     return years;

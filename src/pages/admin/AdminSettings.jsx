@@ -6,6 +6,7 @@ import RolePermissionMatrix from '../../components/permissions/RolePermissionMat
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const emptyForm = {
   fullName: '', email: '', userName: '', role: 'male_wing_admin', wing: 'Male',
@@ -15,11 +16,11 @@ const emptyForm = {
 export default function AdminSettings() {
   useDocumentTitle('Admin Settings');
   const { isSuperAdmin } = useAuth();
+  const toast = useToast();
   const [tab, setTab] = useState('accounts');
   const [admins, setAdmins] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -39,12 +40,16 @@ export default function AdminSettings() {
     event.preventDefault();
     setSaving(true);
     setError('');
+    const isNew = editing === 'new';
     try {
-      if (editing === 'new') await adminDataService.createAdminAccount(form);
+      if (isNew) await adminDataService.createAdminAccount(form);
       else await adminDataService.updateAdminAccount(editing, form);
       setEditing(null);
-      setMessage('Administrator account saved successfully.');
       await load();
+      toast.success(
+        isNew ? 'Administrator account created' : 'Administrator account updated',
+        `${form.fullName} · ${form.designation}.`,
+      );
     } catch (saveError) { setError(saveError.message); }
     finally { setSaving(false); }
   };
@@ -85,7 +90,6 @@ export default function AdminSettings() {
 
       {tab === 'permissions' && isSuperAdmin ? null : (
       <>
-      {message ? <div className="student-message student-message-success">{message}</div> : null}
       {error && !editing ? <div className="student-message student-message-error">{error}</div> : null}
 
       <section className="settings-summary-grid">

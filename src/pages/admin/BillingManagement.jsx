@@ -15,6 +15,7 @@ import { MENU_KEYS } from '../../services/permissionService';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const now = new Date();
 const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All' };
@@ -34,6 +35,7 @@ export default function BillingManagement() {
   const canSeeOthersBill = can(MENU_KEYS.adminOthersBill, 'view');
   const headers = canSeeOthersBill ? [...baseHeaders, 'Others Bill', ...tailHeaders] : [...baseHeaders, ...tailHeaders];
   const { invalidate } = useQueryCache();
+  const toast = useToast();
   // Bill Management is wing-locked for every wing admin, regardless of cross-wing finance access
   // (that access still applies on Payment Verification). Only a genuinely wing-less role
   // (admin/super_admin, no user.wing) gets to choose a wing here.
@@ -58,10 +60,11 @@ export default function BillingManagement() {
   }));
   const [confirmSubsidyOpen, setConfirmSubsidyOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('service');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [savingService, setSavingService] = useState(false);
   const [savingSubsidy, setSavingSubsidy] = useState(false);
+  const [deletingSubsidyId, setDeletingSubsidyId] = useState(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   useEffect(() => {
     if (lockedWing) {
@@ -153,7 +156,6 @@ export default function BillingManagement() {
   const deleteServiceBill = async () => {
     if (!window.confirm(`Are you sure you want to delete the ${serviceWing} wing service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
     setSavingService(true);
-    setMessage("Deleting service bill, please wait...");
     setError("");
     try {
       await adminDataService.deleteServiceBill({
@@ -161,15 +163,16 @@ export default function BillingManagement() {
         year: parseInt(filters.year, 10),
         wing: serviceWing,
       });
-      setMessage('Service bill deleted successfully and bills recalculated.');
-      setError('');
       setServiceAmount('');
       setHasServiceBill(false);
       invalidate('admin-billing-combined');
       await load();
+      toast.success(
+        'Service bill deleted',
+        `${serviceWing} wing · ${filters.month}/${filters.year} · all bills for the month were recalculated.`,
+      );
     } catch (err) {
-      setError(err.message);
-      setMessage("");
+      toast.error('Could not delete service bill', err?.message);
     } finally {
       setSavingService(false);
     }
@@ -177,17 +180,23 @@ export default function BillingManagement() {
 
   const deleteSubsidy = async (id) => {
     if (!window.confirm("Are you sure you want to delete this DSW subsidy? This will recalculate all affected student bills.")) return;
-    setMessage("Deleting DSW subsidy, please wait...");
+    const removed = dswSubsidies.find((subsidy) => subsidy.id === id);
+    setDeletingSubsidyId(id);
     setError("");
     try {
       await adminDataService.deleteDswSubsidy(id);
-      setMessage("DSW subsidy deleted successfully and bills recalculated.");
-      setError("");
       invalidate('admin-billing-combined');
       await load();
+      toast.success(
+        'DSW subsidy deleted',
+        removed
+          ? `${formatCurrency(removed.subsidyAmount)} on ${removed.date} · affected bills were recalculated.`
+          : 'Affected student bills were recalculated.',
+      );
     } catch (err) {
-      setError(err.message);
-      setMessage("");
+      toast.error('Could not delete subsidy', err?.message);
+    } finally {
+      setDeletingSubsidyId(null);
     }
   };
 
@@ -221,13 +230,15 @@ export default function BillingManagement() {
         mealPeriod: editSubsidyForm.mealPeriod,
         notes: editSubsidyForm.notes.trim() || null,
       });
-      setMessage('DSW subsidy updated successfully and bills recalculated.');
-      setError('');
       setEditingSubsidy(null);
       invalidate('admin-billing-combined');
       await load();
+      toast.success(
+        'DSW subsidy updated',
+        `${formatCurrency(editSubsidyForm.subsidyAmount)} · ${editSubsidyForm.date} · ${editSubsidyForm.mealPeriod} · bills recalculated.`,
+      );
     } catch (err) {
-      setError(err.message);
+      toast.error('Could not update subsidy', err?.message);
     } finally {
       setSavingEditSubsidy(false);
     }
@@ -253,6 +264,7 @@ export default function BillingManagement() {
     const book = utils.book_new();
     utils.book_append_sheet(book, sheet, 'Bills');
     writeFile(book, `bills-${filters.year}-${filters.month}.csv`, { bookType: 'csv' });
+    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.csv`);
   };
 
   const exportExcel = () => {
@@ -260,6 +272,7 @@ export default function BillingManagement() {
     const book = utils.book_new();
     utils.book_append_sheet(book, sheet, 'Bills');
     writeFile(book, `bills-${filters.year}-${filters.month}.xlsx`);
+    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.xlsx`);
   };
 
   const exportPdf = () => {
@@ -281,6 +294,7 @@ export default function BillingManagement() {
       ]),
     });
     doc.save(`bills-${filters.year}-${filters.month}.pdf`);
+    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.pdf`);
   };
 
   const saveService = async (event) => {
@@ -293,12 +307,14 @@ export default function BillingManagement() {
         amountPerStudent: moneyInput(serviceAmount),
         wing: serviceWing,
       });
-      setMessage('Service bill saved and bills recalculated.');
-      setError('');
       invalidate('admin-billing-combined');
       await load();
+      toast.success(
+        'Service bill saved',
+        `${formatCurrency(serviceAmount)} per student · ${serviceWing} wing · ${filters.month}/${filters.year}.`,
+      );
     } catch (saveError) {
-      setError(saveError.message);
+      toast.error('Could not save service bill', saveError?.message);
     } finally {
       setSavingService(false);
     }
@@ -315,7 +331,7 @@ export default function BillingManagement() {
   const submitSubsidy = async () => {
     const validationError = validateSubsidyForm();
     if (validationError) {
-      setError(validationError);
+      toast.error('Check the subsidy details', validationError);
       setConfirmSubsidyOpen(false);
       return;
     }
@@ -329,31 +345,36 @@ export default function BillingManagement() {
         mealPeriod: subsidyForm.mealPeriod,
         notes: subsidyForm.notes.trim() || null,
       });
+      const applied = { ...subsidyForm };
       setConfirmSubsidyOpen(false);
       setSubsidyForm({
         ...emptySubsidyForm,
         wing: lockedWing || subsidyForm.wing,
       });
-      setMessage('DSW subsidy applied successfully and affected bills were recalculated.');
-      setError('');
       invalidate('admin-billing-combined');
       await load();
+      toast.success(
+        'DSW subsidy applied',
+        `${formatCurrency(applied.subsidyAmount)} · ${applied.wing} wing · ${applied.date} ${applied.mealPeriod} · affected bills recalculated.`,
+      );
     } catch (saveError) {
-      setError(saveError.message);
+      toast.error('Could not apply subsidy', saveError?.message);
     } finally {
       setSavingSubsidy(false);
     }
   };
 
   const recalculateMonth = async () => {
+    setIsRecalculating(true);
     try {
       await adminDataService.recalculateBillingMonth({ month: Number(filters.month), year: Number(filters.year) });
-      setMessage('Billing month recalculated successfully.');
-      setError('');
       invalidate('admin-billing-combined');
       await load();
+      toast.success('Billing month recalculated', `All bills for ${filters.month}/${filters.year} were rebuilt.`);
     } catch (recalcError) {
-      setError(recalcError.message);
+      toast.error('Recalculation failed', recalcError?.message);
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -364,7 +385,6 @@ export default function BillingManagement() {
         <h1>Bill Management</h1>
         <p>Monthly bills calculated from stock-out transactions, subsidy adjustments, and historical meal participation.</p>
       </header>
-      {message && <div className="student-message student-message-success">{message}</div>}
       {error && <div className="student-message student-message-error">{error}</div>}
 
       <section className="financial-card filter-row">
@@ -372,14 +392,16 @@ export default function BillingManagement() {
           month={Number(filters.month)}
           year={Number(filters.year)}
           minYear={now.getFullYear() - 3}
-          maxYear={now.getFullYear() + 3}
+          maxYear={now.getFullYear()}
           onChange={({ month, year }) => setFilters({ ...filters, month, year })}
           label="Billing period"
         />
         <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option></select></label>
         <label>Wing<select value={lockedWing || filters.gender} disabled={Boolean(lockedWing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!lockedWing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
         <button className="primary-action" onClick={load} disabled={loading}>Generate</button>
-        <button type="button" className="btn btn-secondary" onClick={recalculateMonth} disabled={loading}><RefreshCcw size={15} /> Recalculate</button>
+        <button type="button" className="btn btn-secondary" onClick={recalculateMonth} disabled={loading || isRecalculating}>
+          <RefreshCcw size={15} /> {isRecalculating ? 'Recalculating…' : 'Recalculate'}
+        </button>
       </section>
 
       <div className="billing-management-layout is-tabbed-card" style={{ gridTemplateColumns: 'minmax(0, 1fr)', width: '100%', maxWidth: '800px', margin: '0 auto 1.5rem' }}>
@@ -598,8 +620,9 @@ export default function BillingManagement() {
                                   className="danger-action"
                                   style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', borderRadius: '4px', height: 'auto', minHeight: '0' }}
                                   onClick={() => deleteSubsidy(sub.id)}
+                                  disabled={deletingSubsidyId === sub.id}
                                 >
-                                  Delete
+                                  {deletingSubsidyId === sub.id ? 'Deleting…' : 'Delete'}
                                 </button>
                               </div>
                             </td>

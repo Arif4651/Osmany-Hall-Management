@@ -1,11 +1,12 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FileSpreadsheet, FileText, Printer } from 'lucide-react';
+import { FileSpreadsheet, FileText, Printer, AlertCircle, ArrowRight } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
+import { useToast } from '../../context/ToastContext';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
@@ -16,10 +17,14 @@ import { useAuth } from '../../context/AuthContext';
 
 const now = new Date();
 
+const monthLabel = ({ month, year }) =>
+  new Intl.DateTimeFormat('en-BD', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+
 export default function DueBill() {
   useDocumentTitle('Due Bill');
   const { user } = useAuth();
   const { invalidate } = useQueryCache();
+  const toast = useToast();
   // Due Bill is always wing-locked for a wing admin, regardless of cross-wing finance access
   // (that access still applies on Payment Verification). Only a wing-less admin/super_admin picks.
   const isWingLocked = Boolean(user?.wing);
@@ -27,8 +32,11 @@ export default function DueBill() {
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [editing, setEditing] = useState(null);
   const [adjustment, setAdjustment] = useState({ amount: '', note: '' });
-  const [message, setMessage] = useState('');
-  const [submitError, setSubmitError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  // A save failure belongs inside the modal, beside the field that caused it — the modal covers a
+  // page-level banner, so an error reported up there is invisible until the admin closes the form.
+  const [modalError, setModalError] = useState('');
+  const [highlightedId, setHighlightedId] = useState(null);
 
   // Filter States
   const [filterAmount, setFilterAmount] = useState('');
@@ -48,30 +56,68 @@ export default function DueBill() {
     { ttl: 30_000 }
   );
 
-  const error = loadError || submitError;
-
   const load = useCallback(async () => {
     refresh();
   }, [refresh]);
 
+  const openOverride = (row) => {
+    setEditing(row);
+    setAdjustment({ amount: String(row.dueBill ?? 0), note: '' });
+    setModalError('');
+  };
+
+  const closeOverride = () => {
+    if (isSaving) return;
+    setEditing(null);
+    setModalError('');
+  };
+
+  const parsedAmount = Number(adjustment.amount);
+  const hasValidAmount = adjustment.amount !== '' && Number.isFinite(parsedAmount) && parsedAmount >= 0;
+  const amountChanged = hasValidAmount && Number(editing?.dueBill ?? 0) !== parsedAmount;
+
+  // Clear the row highlight once it has served its purpose, so it does not linger across
+  // period switches or a later unrelated render.
+  useEffect(() => {
+    if (!highlightedId) return undefined;
+    const timer = setTimeout(() => setHighlightedId(null), 2600);
+    return () => clearTimeout(timer);
+  }, [highlightedId]);
+
   const saveAdjustment = async () => {
-    setSubmitError('');
-    setMessage('');
+    const student = editing;
+    if (!student) return;
+
+    if (!hasValidAmount) {
+      setModalError('Enter a due amount of 0 or more before confirming.');
+      return;
+    }
+
+    setModalError('');
+    setIsSaving(true);
     try {
       await adminDataService.saveDueAdjustment({
-        studentId: editing.studentId,
+        studentId: student.studentId,
         billingMonth: period.month,
         billingYear: period.year,
-        adjustedAmount: moneyInput(adjustment.amount),
+        adjustedAmount: moneyInput(parsedAmount),
         note: adjustment.note,
       });
       setEditing(null);
-      setMessage('Due bill override saved.');
+      setHighlightedId(student.studentId);
+      // States the actual before/after figures: "saved" alone leaves the admin checking the table
+      // to find out whether the number they typed is the number that took effect.
+      toast.success(
+        `Due updated for ${student.studentName}`,
+        `${formatCurrency(student.dueBill)} → ${formatCurrency(parsedAmount)} · ${monthLabel(period)}`,
+      );
       invalidate('due-rows-');
       invalidate('admin-billing-combined');
       await load();
     } catch (saveError) {
-      setSubmitError(saveError.message);
+      setModalError(saveError?.message || 'Could not save the override. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -106,6 +152,7 @@ export default function DueBill() {
     const book = utils.book_new();
     utils.book_append_sheet(book, utils.json_to_sheet(flatRows()), 'Due Bill');
     writeFile(book, `due-bill-${period.year}-${period.month}.xlsx`);
+    toast.success('Due bill exported', `${filteredRows.length} students · due-bill-${period.year}-${period.month}.xlsx`);
   };
 
   const exportPdf = () => {
@@ -118,6 +165,7 @@ export default function DueBill() {
       body: data.map(Object.values)
     });
     doc.save(`due-bill-${period.year}-${period.month}.pdf`);
+    toast.success('Due bill exported', `${filteredRows.length} students · due-bill-${period.year}-${period.month}.pdf`);
   };
 
   const handlePrint = () => {
@@ -176,6 +224,7 @@ export default function DueBill() {
     `;
     printWindow.document.write(tableHtml);
     printWindow.document.close();
+    toast.success('Print sheet opened', `${filteredRows.length} students · ${monthLabel(period)}`);
   };
 
   return (
@@ -216,15 +265,14 @@ export default function DueBill() {
         </div>
       </div>
 
-      {message && <div className="student-message student-message-success">{message}</div>}
-      {error && <div className="student-message student-message-error">{error}</div>}
-      
+      {loadError && <div className="student-message student-message-error">{loadError}</div>}
+
       <div className="period-picker-row">
         <MonthYearPicker
           month={period.month}
           year={period.year}
           minYear={now.getFullYear() - 3}
-          maxYear={now.getFullYear() + 3}
+          maxYear={now.getFullYear()}
           onChange={setPeriod}
           label="Billing period"
         />
@@ -382,7 +430,11 @@ export default function DueBill() {
                 </tr>
               ) : (
                 filteredRows.map((row) => (
-                  <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <tr
+                    key={row.studentId}
+                    className={highlightedId === row.studentId ? 'due-row-updated' : undefined}
+                    style={{ borderBottom: '1px solid var(--border)' }}
+                  >
                     <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>
                       {row.studentName}
                     </td>
@@ -417,10 +469,7 @@ export default function DueBill() {
                     </td>
                     <td className="due-action-cell" style={{ padding: '0.75rem' }}>
                       <button
-                        onClick={() => {
-                          setEditing(row);
-                          setAdjustment({ amount: row.dueBill, note: '' });
-                        }}
+                        onClick={() => openOverride(row)}
                         style={{
                           padding: '0.35rem 0.65rem',
                           fontSize: '0.8rem',
@@ -455,27 +504,67 @@ export default function DueBill() {
         )}
       </section>
 
-      <Modal isOpen={!!editing} onClose={() => setEditing(null)} title={`Override Due: ${editing?.studentName || ''}`}>
-        <div className="form-grid">
-          <p>Current calculated due: <strong>{formatCurrency(editing?.dueBill || 0)}</strong></p>
-          <label className="field-control">
-            <span>New Amount</span>
-            <input
-              type="number"
-              min="0"
-              step="0.0001"
-              value={adjustment.amount}
-              onChange={(e) => setAdjustment({ ...adjustment, amount: e.target.value })}
-            />
-          </label>
-          <label className="field-control">
-            <span>Note</span>
-            <textarea
-              value={adjustment.note}
-              onChange={(e) => setAdjustment({ ...adjustment, note: e.target.value })}
-            />
-          </label>
-          <Button onClick={saveAdjustment}>Confirm Override</Button>
+      <Modal
+        isOpen={!!editing}
+        onClose={closeOverride}
+        title={`Override Due: ${editing?.studentName || ''}`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={closeOverride} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button onClick={saveAdjustment} disabled={isSaving || !hasValidAmount}>
+              {isSaving ? 'Saving…' : 'Confirm Override'}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: '0.9rem' }}>
+          {modalError && (
+            <div className="modal-inline-error" role="alert">
+              <AlertCircle size={16} />
+              <span>{modalError}</span>
+            </div>
+          )}
+
+          <div className="override-preview">
+            <span className="override-preview-label">
+              {editing?.studentCode} · {monthLabel(period)}
+            </span>
+            <span className="override-preview-from">{formatCurrency(editing?.dueBill || 0)}</span>
+            <ArrowRight size={15} aria-hidden="true" style={{ color: 'var(--muted)' }} />
+            <span className="override-preview-to">
+              {hasValidAmount ? formatCurrency(parsedAmount) : '—'}
+            </span>
+            {!amountChanged && hasValidAmount && (
+              <span className="override-preview-label">(no change to the current amount)</span>
+            )}
+          </div>
+
+          <div className="form-grid">
+            <label className="field-control">
+              <span>New Amount</span>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={adjustment.amount}
+                disabled={isSaving}
+                onChange={(e) => {
+                  setAdjustment({ ...adjustment, amount: e.target.value });
+                  setModalError('');
+                }}
+              />
+            </label>
+            <label className="field-control">
+              <span>Note</span>
+              <textarea
+                value={adjustment.note}
+                disabled={isSaving}
+                onChange={(e) => setAdjustment({ ...adjustment, note: e.target.value })}
+              />
+            </label>
+          </div>
         </div>
       </Modal>
     </div>

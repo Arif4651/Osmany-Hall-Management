@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import { permissionService } from '../../services/permissionService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const ACTIONS = [
   { key: 'canView', label: 'View' },
@@ -48,6 +49,7 @@ function ancestorsOf(nodes, key, trail = []) {
 
 export default function RolePermissionMatrix() {
   const { refreshPermissions, role: myRole } = useAuth();
+  const toast = useToast();
 
   const [roles, setRoles] = useState([]);
   const [selectedRole, setSelectedRole] = useState('');
@@ -57,7 +59,6 @@ export default function RolePermissionMatrix() {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
@@ -79,7 +80,6 @@ export default function RolePermissionMatrix() {
   const loadMatrix = useCallback(async (role) => {
     if (!role) return;
     setLoading(true);
-    setMessage('');
     try {
       const result = await permissionService.getRoleMatrix(role);
       setMatrix(result);
@@ -125,7 +125,6 @@ export default function RolePermissionMatrix() {
       }
       return next;
     });
-    setMessage('');
   }, []);
 
   /**
@@ -177,12 +176,15 @@ export default function RolePermissionMatrix() {
         canDelete: Boolean(grants[row.key]?.canDelete),
       }));
       await permissionService.saveRoleMatrix(selectedRole, payload);
-      setMessage(`Permissions saved for ${matrix?.roleLabel ?? selectedRole}.`);
       // If the super admin just edited their own role, their nav must reflect it immediately.
       if (selectedRole === myRole) await refreshPermissions();
       await loadMatrix(selectedRole);
+      toast.success(
+        'Permissions saved',
+        `${matrix?.roleLabel ?? selectedRole} · ${payload.filter((row) => row.canView || row.canCreate || row.canEdit || row.canDelete).length} of ${payload.length} menus granted.`,
+      );
     } catch (saveError) {
-      setError(saveError.message);
+      toast.error('Could not save permissions', saveError?.message);
     } finally {
       setSaving(false);
     }
@@ -198,9 +200,9 @@ export default function RolePermissionMatrix() {
       setRoleForm({ key: '', label: '', area: 'admin' });
       await loadRoles();
       setSelectedRole(roleForm.key.trim().toLowerCase());
-      setMessage('Role created. Assign its permissions below.');
+      toast.success('Role created', `${roleForm.label || roleForm.key} — assign its permissions below.`);
     } catch (createError) {
-      setError(createError.message);
+      toast.error('Could not create role', createError?.message);
     } finally {
       setSaving(false);
     }
@@ -215,10 +217,9 @@ export default function RolePermissionMatrix() {
       await permissionService.deleteRole(selectedRole);
       setSelectedRole('');
       await loadRoles();
-      setMessage('Role deleted.');
-      setError('');
+      toast.success('Role deleted', `"${current.label}" was removed.`);
     } catch (deleteError) {
-      setError(deleteError.message);
+      toast.error('Could not delete role', deleteError?.message);
     } finally {
       setSaving(false);
     }
@@ -245,7 +246,6 @@ export default function RolePermissionMatrix() {
         </div>
       </header>
 
-      {message ? <div className="student-message student-message-success">{message}</div> : null}
       {error ? <div className="student-message student-message-error">{error}</div> : null}
 
       <label className="role-select-field">

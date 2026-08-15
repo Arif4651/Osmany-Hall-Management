@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_STUDENT_FILTERS } from '../types/student.types';
 import { summarizeBulkSelection } from '../utils/bulkSelectionHelpers';
-import { getCredentialNotice } from '../utils/credentialHelpers';
+import { generateInitialCredentials } from '../utils/credentialHelpers';
 import { getNextLevel } from '../utils/studentHelpers';
 import { studentService } from '../services/studentService';
 import { queryCache } from '../services/queryCache';
+import { useToast } from '../context/ToastContext';
 
 const DEFAULT_PAGE_SIZE = 10;
 
 export default function useAdminStudentModule() {
+  const toast = useToast();
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Load failures only. An action that fails reports through a toast instead, so a stale banner
+  // never outlives the operation that produced it.
   const [errorMessage, setErrorMessage] = useState('');
-  const [successNotice, setSuccessNotice] = useState(null);
 
   const [filters, setFilters] = useState(DEFAULT_STUDENT_FILTERS);
   const [page, setPage] = useState(1);
@@ -117,10 +120,9 @@ export default function useAdminStudentModule() {
     setSelectedIds([]);
   }, []);
 
-  const withSubmitState = useCallback(async (fn) => {
+  const withSubmitState = useCallback(async (fn, failureTitle = 'Action failed') => {
     setIsSubmitting(true);
     setErrorMessage('');
-    setSuccessNotice(null);
 
     try {
       await fn();
@@ -128,7 +130,7 @@ export default function useAdminStudentModule() {
       return { ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Operation failed.';
-      setErrorMessage(message);
+      toast.error(failureTitle, message);
       return {
         ok: false,
         message,
@@ -137,19 +139,22 @@ export default function useAdminStudentModule() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadStudents]);
+  }, [loadStudents, toast]);
 
   const createStudent = useCallback(async (payload) => {
     setIsSubmitting(true);
     setErrorMessage('');
-    setSuccessNotice(null);
 
     try {
       const created = await studentService.createStudent(payload);
       await Promise.all([loadStudents(), loadFilterOptions()]);
+      // The credentials come from the id the server actually assigned, never from the submitted
+      // form — those can differ, and handing over a password that does not work is worse than
+      // handing over none.
       return {
         ok: true,
-        notice: getCredentialNotice(created.studentId),
+        student: created,
+        credentials: generateInitialCredentials(created.studentId),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Operation failed.';
@@ -163,51 +168,67 @@ export default function useAdminStudentModule() {
     }
   }, [loadStudents, loadFilterOptions]);
 
+  // Every mutation names the student it touched: these actions fire from a row menu, so a bare
+  // "saved" leaves the admin unsure which row the confirmation belongs to.
+  const nameOf = useCallback(
+    (id) => students.find((student) => student.id === id)?.studentName || 'Student',
+    [students],
+  );
+
   const updateStudent = useCallback((id, payload) => {
     return withSubmitState(async () => {
+      const name = nameOf(id);
       await studentService.updateStudent(id, payload);
-      setSuccessNotice({ title: 'Student updated successfully', lines: ['Student information has been saved.'] });
-    });
-  }, [withSubmitState]);
+      toast.success('Student updated', `${name}'s information has been saved.`);
+    }, 'Could not update student');
+  }, [withSubmitState, toast, nameOf]);
 
   const markStudentInactive = useCallback((id) => {
     return withSubmitState(async () => {
+      const name = nameOf(id);
       await studentService.deleteStudent(id);
-      setSuccessNotice({ title: 'Student moved to inactive', lines: ['The student remains in records for audit and reactivation.'] });
-    });
-  }, [withSubmitState]);
+      toast.success('Student moved to inactive', `${name} remains in records for audit and reactivation.`);
+    }, 'Could not deactivate student');
+  }, [withSubmitState, toast, nameOf]);
 
   const deleteStudentPermanently = useCallback((id, force = false) => {
     return withSubmitState(async () => {
+      const name = nameOf(id);
       await studentService.deleteStudentPermanently(id, force);
-      setSuccessNotice({ title: 'Record permanently deleted', lines: ['The student data has been removed from the active store.'] });
-    });
-  }, [withSubmitState]);
+      toast.success('Record permanently deleted', `${name}'s data was removed from the active store.`);
+    }, 'Could not delete student');
+  }, [withSubmitState, toast, nameOf]);
 
   const resetStudentPassword = useCallback((id) => {
     return withSubmitState(async () => {
+      const name = nameOf(id);
       const credentials = await studentService.resetStudentPassword(id);
-      setSuccessNotice({
-        title: 'Password reset completed',
-        lines: [
-          `Default username: ${credentials.defaultLoginId}`,
-          `Default password: ${credentials.defaultPassword}`,
-          'Student must change password after login.',
-        ],
-      });
-    });
-  }, [withSubmitState]);
+      // Pinned (duration 0) rather than timed: these credentials have to be passed on to the
+      // student, and one that vanished on a timer would be gone for good — the reset would have
+      // to be run again to see it. Dismissed by hand, with the details one click from the
+      // clipboard.
+      toast.success(
+        `Password reset for ${name}`,
+        `Username: ${credentials.defaultLoginId} · Password: ${credentials.defaultPassword} — the student must change it after logging in.`,
+        {
+          duration: 0,
+          copyText: `Username: ${credentials.defaultLoginId}\nPassword: ${credentials.defaultPassword}`,
+        },
+      );
+    }, 'Could not reset password');
+  }, [withSubmitState, nameOf, toast]);
 
   const reactivateStudent = useCallback((id, payload) => {
     return withSubmitState(async () => {
+      const name = nameOf(id);
       await studentService.bulkReactivateStudents({
         filters,
         selectedStudentIds: [id],
         ...payload,
       });
-      setSuccessNotice({ title: 'Student reactivated', lines: ['Login access restored and validity updated.'] });
-    });
-  }, [withSubmitState, filters]);
+      toast.success('Student reactivated', `${name}'s login access was restored and validity updated.`);
+    }, 'Could not reactivate student');
+  }, [withSubmitState, filters, toast, nameOf]);
 
   const bulkUpdateStudents = useCallback((updateFields) => {
     return withSubmitState(async () => {
@@ -221,13 +242,10 @@ export default function useAdminStudentModule() {
         updateFields,
       });
 
-      setSuccessNotice({
-        title: 'Bulk update completed',
-        lines: [`${result.updatedCount} students updated.`],
-      });
+      toast.success('Bulk update completed', `${result.updatedCount} students updated.`);
       clearSelection();
-    });
-  }, [withSubmitState, selectedIds, filters, clearSelection]);
+    }, 'Bulk update failed');
+  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
 
   const bulkPromoteStudents = useCallback((targetLevel) => {
     return bulkUpdateStudents({ level: targetLevel });
@@ -250,10 +268,10 @@ export default function useAdminStudentModule() {
         filters,
         selectedStudentIds: selectedIds,
       });
-      setSuccessNotice({ title: 'Archive completed', lines: [`${result.updatedCount} students archived.`] });
+      toast.success('Archive completed', `${result.updatedCount} students archived.`);
       clearSelection();
-    });
-  }, [withSubmitState, selectedIds, filters, clearSelection]);
+    }, 'Bulk archive failed');
+  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
 
   const bulkReactivateStudents = useCallback((payload) => {
     return withSubmitState(async () => {
@@ -263,10 +281,10 @@ export default function useAdminStudentModule() {
         selectedStudentIds: selectedIds,
         ...payload,
       });
-      setSuccessNotice({ title: 'Bulk reactivation completed', lines: [`${result.updatedCount} students reactivated.`] });
+      toast.success('Bulk reactivation completed', `${result.updatedCount} students reactivated.`);
       clearSelection();
-    });
-  }, [withSubmitState, selectedIds, filters, clearSelection]);
+    }, 'Bulk reactivation failed');
+  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
 
   const bulkPermanentDeleteStudents = useCallback((force = false) => {
     return withSubmitState(async () => {
@@ -276,26 +294,21 @@ export default function useAdminStudentModule() {
         selectedStudentIds: selectedIds,
         force,
       });
-      setSuccessNotice({
-        title: 'Permanent deletion completed',
-        lines: [
-          `${result.deletedCount} records permanently deleted.`,
-          result.skippedIds.length ? `${result.skippedIds.length} skipped (not eligible).` : 'No records were skipped.',
-        ],
-      });
+      toast.success(
+        'Permanent deletion completed',
+        `${result.deletedCount} records permanently deleted. `
+        + (result.skippedIds.length ? `${result.skippedIds.length} skipped (not eligible).` : 'No records were skipped.'),
+      );
       clearSelection();
-    });
-  }, [withSubmitState, selectedIds, filters, clearSelection]);
+    }, 'Permanent deletion failed');
+  }, [withSubmitState, selectedIds, filters, clearSelection, toast]);
 
   const evaluateAllLifecycles = useCallback(() => {
     return withSubmitState(async () => {
       await studentService.evaluateAllStudentLifecycles();
-      setSuccessNotice({
-        title: 'Lifecycle evaluation completed',
-        lines: ['Validity and due-based statuses were recalculated.'],
-      });
-    });
-  }, [withSubmitState]);
+      toast.success('Lifecycle evaluation completed', 'Validity and due-based statuses were recalculated.');
+    }, 'Lifecycle evaluation failed');
+  }, [withSubmitState, toast]);
 
   const getFilteredStudentsForExport = useCallback(async () => {
     return studentService.getStudentsForExport({ filters });
@@ -307,8 +320,6 @@ export default function useAdminStudentModule() {
     isSubmitting,
     errorMessage,
     setErrorMessage,
-    successNotice,
-    setSuccessNotice,
 
     filters,
     updateFilter,

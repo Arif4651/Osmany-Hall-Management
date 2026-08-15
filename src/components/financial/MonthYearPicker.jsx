@@ -23,6 +23,7 @@ export default function MonthYearPicker({
   minYear,
   maxYear,
   label = 'Report period',
+  allowFuture = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [viewYear, setViewYear] = useState(year);
@@ -38,7 +39,12 @@ export default function MonthYearPicker({
   // Absolute month index makes the range checks below trivial.
   const asIndex = useCallback((y, m) => (y * 12) + (m - 1), []);
   const minIndex = asIndex(minYear, 1);
-  const maxIndex = asIndex(maxYear, 12);
+  // Periods that have not started yet have nothing to report on, so unless the
+  // caller opts in the range stops at the current month.
+  const maxIndex = allowFuture
+    ? asIndex(maxYear, 12)
+    : Math.min(asIndex(maxYear, 12), asIndex(currentYear, currentMonth));
+  const effectiveMaxYear = allowFuture ? maxYear : Math.min(maxYear, currentYear);
   const selectedIndex = asIndex(year, month);
 
   const close = useCallback(() => {
@@ -65,7 +71,7 @@ export default function MonthYearPicker({
   }, [isOpen, close]);
 
   const openPanel = () => {
-    setViewYear(clamp(year, minYear, maxYear));
+    setViewYear(clamp(year, minYear, effectiveMaxYear));
     setIsOpen(true);
   };
 
@@ -149,7 +155,7 @@ export default function MonthYearPicker({
             <button
               type="button"
               onClick={() => setViewYear((y) => y + 1)}
-              disabled={viewYear >= maxYear}
+              disabled={viewYear >= effectiveMaxYear}
               aria-label="Next year"
             >
               <ChevronRight size={16} />
@@ -160,14 +166,17 @@ export default function MonthYearPicker({
             {MONTHS.map((item) => {
               const isSelected = item.value === month && viewYear === year;
               const isToday = item.value === currentMonth && viewYear === currentYear;
+              const itemIndex = asIndex(viewYear, item.value);
+              const isDisabled = itemIndex < minIndex || itemIndex > maxIndex;
               return (
                 <button
                   key={item.value}
                   type="button"
                   className={`period-picker-month${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`}
                   onClick={() => selectMonth(item.value)}
+                  disabled={isDisabled}
                   aria-pressed={isSelected}
-                  title={`${item.long} ${viewYear}`}
+                  title={isDisabled ? `${item.long} ${viewYear} is not available yet` : `${item.long} ${viewYear}`}
                 >
                   {item.short}
                 </button>

@@ -2646,6 +2646,14 @@ button {
   animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Blocked-submission messages used the success palette, so a rejected form read as
+   a confirmation. They now carry the error palette they always described. */
+.stock-message-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .stock-item-form {
   display: grid;
   gap: 1rem;
@@ -8572,4 +8580,254 @@ button {
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   text-align: center;
+}
+
+/* ------------------------------------------------------------------ *
+ * Toast — corner confirmation for the result of an action (Toast.jsx).
+ * Portalled to <body>, so it stacks above modals and table overflow.
+ * ------------------------------------------------------------------ */
+/* Sits just below the sticky .top-header rather than at the very top edge, so it
+   never covers the search field or Logout while it is on screen. */
+.toast-viewport {
+  position: fixed;
+  right: 1.25rem;
+  top: 4.6rem;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-width: 300px;
+  max-width: min(420px, calc(100vw - 2.5rem));
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+  pointer-events: auto;
+  animation: toastIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.toast-success {
+  border-left-color: #16a34a;
+}
+
+.toast-error {
+  border-left-color: var(--danger, #dc2626);
+}
+
+.toast-info {
+  border-left-color: var(--brand-blue-700, #0070c0);
+}
+
+.toast-success .toast-icon {
+  color: #16a34a;
+}
+
+.toast-error .toast-icon {
+  color: var(--danger, #dc2626);
+}
+
+.toast-info .toast-icon {
+  color: var(--brand-blue-700, #0070c0);
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.toast-body {
+  display: grid;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.toast-description {
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* A pinned toast waits on the reader rather than a timer, so it is drawn a little heavier to
+   signal that it will not clear itself. */
+.toast.is-pinned {
+  border-width: 1px 1px 1px 4px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.24);
+}
+
+.toast-action {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-soft, #f8fafc);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.toast-action:hover {
+  border-color: var(--brand-blue-700, #0070c0);
+  color: var(--brand-blue-700, #0070c0);
+}
+
+.toast-close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.toast-close:hover {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+/* Shows how long is left before the toast retires itself, so a dismissal
+   never reads as the message having vanished unexpectedly. */
+.toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  transform-origin: left;
+  background: currentColor;
+  opacity: 0.35;
+  animation-name: toastProgress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.toast-success .toast-progress {
+  color: #16a34a;
+}
+
+.toast-error .toast-progress {
+  color: var(--danger, #dc2626);
+}
+
+.toast-info .toast-progress {
+  color: var(--brand-blue-700, #0070c0);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toastProgress {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (max-width: 640px) {
+  .toast-viewport {
+    left: 1rem;
+    right: 1rem;
+    top: 4.2rem;
+  }
+
+  .toast {
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast-progress { display: none; }
+}
+
+/* Marks the row an override just changed, so the confirmation in the corner and
+   the new figure in the table are visibly the same event. */
+.due-row-updated > td {
+  animation: dueRowUpdated 2.4s ease-out both;
+}
+
+@keyframes dueRowUpdated {
+  0%, 55% { background: #ecfdf5; }
+  100% { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .due-row-updated > td { animation: none; }
+}
+
+/* Save failures surface inside the override modal, next to the field that caused
+   them, rather than as a banner behind the modal the admin cannot see. */
+.modal-inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.modal-inline-error svg {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+/* Before/after preview in the override modal: states the consequence of the
+   change before it is committed. */
+.override-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 0.9rem;
+}
+
+.override-preview-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.override-preview-from {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.override-preview-to {
+  font-weight: 700;
+  color: var(--brand-blue-700, #1f4da3);
 }

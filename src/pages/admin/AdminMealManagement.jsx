@@ -11,6 +11,7 @@ import { formatCurrency, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
+import { useToast } from '../../context/ToastContext';
 import TableSkeleton from '../../components/ui/TableSkeleton';
 import AdditionalItemsPanel from '../../components/admin/AdditionalItemsPanel';
 import { MENU_KEYS } from '../../services/permissionService';
@@ -83,7 +84,6 @@ export default function AdminMealManagement() {
   const [saving, setSaving] = useState(false);
   const [studentControlSaving, setStudentControlSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [message, setMessage] = useState('');
   const [menuFormError, setMenuFormError] = useState('');
   const [overrideFormError, setOverrideFormError] = useState('');
   const [countDate, setCountDate] = useState(tomorrowLocal());
@@ -102,6 +102,7 @@ export default function AdminMealManagement() {
   const [overrideForm, setOverrideForm] = useState(emptyOverride);
 
   const { invalidate } = useQueryCache();
+  const toast = useToast();
 
   const countsCacheKey = `meal-counts-${countDate}-${selectedWing}`;
   const {
@@ -157,17 +158,16 @@ export default function AdminMealManagement() {
 
   const loadStudentMealControl = useCallback(async (student) => {
     setStudentControlLoading(true);
-    setMessage('');
     try {
       const state = await adminDataService.getStudentMealControl(student.id, countDate, selectedWing);
       setSelectedStudent(student);
       setStudentMealControl(state);
     } catch (error) {
-      setMessage(error.message || 'Unable to load student meal control.');
+      toast.error('Could not load meal control', error?.message || 'Unable to load student meal control.');
     } finally {
       setStudentControlLoading(false);
     }
-  }, [countDate, selectedWing]);
+  }, [countDate, selectedWing, toast]);
 
   useEffect(() => {
     if (activeSection !== 'controls') return undefined;
@@ -182,14 +182,14 @@ export default function AdminMealManagement() {
       try {
         setStudentSearchResults(await adminDataService.searchStudents(term, selectedWing));
       } catch (error) {
-        setMessage(error.message || 'Unable to search students.');
+        toast.error('Student search failed', error?.message || 'Unable to search students.');
       } finally {
         setStudentSearchLoading(false);
       }
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [activeSection, selectedWing, studentSearch]);
+  }, [activeSection, selectedWing, studentSearch, toast]);
 
   useEffect(() => {
     if (!selectedStudent) return;
@@ -224,6 +224,9 @@ export default function AdminMealManagement() {
     try {
       await saveMealConfiguration(formState);
       setMenuModalOpen(false);
+      const day = dayOptions.find((option) => option.id === formState.dayId)?.label;
+      const mealType = mealTypeOptions.find((option) => option.id === formState.mealTypeId)?.label;
+      toast.success('Menu saved', [day, mealType].filter(Boolean).join(' · ') || 'Weekly menu updated.');
     } catch (error) {
       setMenuFormError(error.message || 'Unable to save menu.');
     } finally {
@@ -246,7 +249,6 @@ export default function AdminMealManagement() {
   const saveOverride = async (event) => {
     event.preventDefault();
     setOverrideFormError('');
-    setMessage('');
     setSaving(true);
     try {
       await adminDataService.createGlobalOverride({
@@ -256,7 +258,12 @@ export default function AdminMealManagement() {
       });
       setOverrideModalOpen(false);
       await loadOperations(overrideForm.effectiveFrom);
-      setMessage(`Global ${overrideForm.isOn ? 'ON' : 'OFF'} applied successfully.`);
+      toast.success(
+        `Global ${overrideForm.isOn ? 'ON' : 'OFF'} applied`,
+        `${overrideForm.mealPeriod} · ${overrideForm.effectiveFrom}`
+        + (overrideForm.effectiveTo !== overrideForm.effectiveFrom ? ` → ${overrideForm.effectiveTo}` : '')
+        + ` · ${selectedWing} wing`,
+      );
     } catch (error) {
       setOverrideFormError(error.message || 'Unable to apply global override.');
     } finally {
@@ -269,8 +276,9 @@ export default function AdminMealManagement() {
     try {
       await adminDataService.deleteGlobalOverride(override.id);
       await loadOperations();
+      toast.success('Override removed', `${override.mealPeriod} is back on its normal schedule.`);
     } catch (error) {
-      setMessage(error.message || 'Unable to remove override.');
+      toast.error('Could not remove override', error?.message);
     }
   };
 
@@ -278,7 +286,6 @@ export default function AdminMealManagement() {
     if (!studentMealControl) return;
     const meal = studentMealControl.meals.find((entry) => entry.mealPeriod === mealPeriod);
     setStudentControlSaving(true);
-    setMessage('');
     try {
       const updated = await adminDataService.saveStudentMealControlStatus({
         studentRecordId: studentMealControl.studentRecordId,
@@ -290,9 +297,12 @@ export default function AdminMealManagement() {
       });
       setStudentMealControl(updated);
       syncAfterStudentMealChange();
-      setMessage(`${updated.name} meal was turned ${isOn ? 'ON' : 'OFF'} for ${mealPeriod}.`);
+      toast.success(
+        `${mealPeriod} turned ${isOn ? 'ON' : 'OFF'}`,
+        `${updated.name} · effective ${countDate}.`,
+      );
     } catch (error) {
-      setMessage(error.message || 'Unable to update this student meal.');
+      toast.error('Could not update meal', error?.message || 'Unable to update this student meal.');
     } finally {
       setStudentControlSaving(false);
     }
@@ -304,7 +314,6 @@ export default function AdminMealManagement() {
     if (!meal) return;
 
     setStudentControlSaving(true);
-    setMessage('');
     try {
       const updated = await adminDataService.saveStudentMealControlStatus({
         studentRecordId: studentMealControl.studentRecordId,
@@ -316,9 +325,9 @@ export default function AdminMealManagement() {
       });
       setStudentMealControl(updated);
       syncAfterStudentMealChange();
-      setMessage(`${updated.name} optional choice was updated for ${mealPeriod}.`);
+      toast.success('Optional choice updated', `${updated.name} · ${mealPeriod} · effective ${countDate}.`);
     } catch (error) {
-      setMessage(error.message || 'Unable to update optional choice.');
+      toast.error('Could not update optional choice', error?.message);
     } finally {
       setStudentControlSaving(false);
     }
@@ -327,7 +336,6 @@ export default function AdminMealManagement() {
   const downloadMealRoutine = async () => {
     if (!menuRows.length || isDownloading) return;
     setIsDownloading(true);
-    setMessage('');
 
     const report = document.createElement('section');
     report.style.cssText = [
@@ -459,8 +467,9 @@ export default function AdminMealManagement() {
 
       doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, imageWidth, imageHeight, undefined, 'FAST');
       doc.save(`weekly-meal-routine-${todayLocal()}.pdf`);
+      toast.success('Meal routine downloaded', `weekly-meal-routine-${todayLocal()}.pdf`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to download the meal routine.');
+      toast.error('Download failed', error instanceof Error ? error.message : 'Unable to download the meal routine.');
     } finally {
       report.remove();
       setIsDownloading(false);
@@ -499,7 +508,7 @@ export default function AdminMealManagement() {
         <span>Menus and daily counts below apply only to {selectedWing.toLowerCase()} students.</span>
       </div>
 
-      {(errorMessage || message) && <div className="admin-meal-message">{errorMessage || message}</div>}
+      {errorMessage && <div className="admin-meal-message">{errorMessage}</div>}
 
       <nav className="admin-meal-tabs">
         <button type="button" className={activeSection === 'menu' ? 'is-active' : ''} onClick={() => setActiveSection('menu')}>Weekly Menu</button>

@@ -63,7 +63,7 @@ export default function Billing() {
           month={period.month}
           year={period.year}
           minYear={now.getFullYear() - 3}
-          maxYear={now.getFullYear() + 3}
+          maxYear={now.getFullYear()}
           onChange={setPeriod}
           label="Billing period"
         />

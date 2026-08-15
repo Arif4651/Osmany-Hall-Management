@@ -6,6 +6,7 @@ import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDo
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { todayLocal } from '../../utils/formatters';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { queryCache } from '../../services/queryCache';
@@ -42,6 +43,7 @@ const MealIndicator = ({ label, isOn }) => (
 export default function MealSheet() {
   useDocumentTitle('Meal Sheet');
   const { user, role, can } = useAuth();
+  const toast = useToast();
   const isWingAdmin = role === 'male_wing_admin' || role === 'female_wing_admin';
   // Hidden for a role without this grant, same as the panels on Meal Management and Bill
   // Management — currently the male wing admin by default.
@@ -206,6 +208,7 @@ export default function MealSheet() {
     const book = utils.book_new();
     utils.book_append_sheet(book, utils.json_to_sheet(flatRows()), 'Meal Sheet');
     writeFile(book, `meal-sheet-${date}.xlsx`);
+    toast.success('Meal sheet exported', `${filteredRows.length} rows · meal-sheet-${date}.xlsx`);
   };
 
   const exportCsv = () => {
@@ -233,6 +236,7 @@ export default function MealSheet() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    toast.success('Meal sheet exported', `${filteredRows.length} rows · meal-sheet-${date}.csv`);
   };
 
   const exportPdf = () => {
@@ -316,6 +320,7 @@ export default function MealSheet() {
     });
 
     doc.save(`meal-sheet-${date}.pdf`);
+    toast.success('Meal sheet exported', `${filteredRows.length} rows · meal-sheet-${date}.pdf`);
   };
 
   const handlePrint = () => {
