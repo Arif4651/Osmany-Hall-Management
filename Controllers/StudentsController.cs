@@ -205,6 +205,7 @@ public sealed class StudentsController(
         await RemoveLoginAccountsAsync([student.Id], cancellationToken);
         db.Students.Remove(student);
         await db.SaveChangesAsync(cancellationToken);
+        await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
         return new BulkStudentResponse(0, [], 1, [id], []);
     }
 
@@ -276,6 +277,7 @@ public sealed class StudentsController(
 
         db.Students.RemoveRange(eligible);
         await db.SaveChangesAsync(cancellationToken);
+        if (eligible.Count > 0) await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
 
         return new BulkStudentResponse(0, [], eligible.Count, eligible.Select(x => x.Id).ToList(), skipped);
     }
@@ -503,6 +505,22 @@ public sealed class StudentsController(
             .ToListAsync(cancellationToken);
 
         db.Users.RemoveRange(accounts);
+    }
+
+    /// <summary>
+    /// Removes DswSubsidy summary rows left behind once every student in their distribution has
+    /// been permanently deleted. Distributions cascade-delete with the student, but the parent
+    /// row's EligibleStudentCount/PerStudentSubsidy/SubsidyAmount is a frozen snapshot with no FK
+    /// back to Student — without this it sits forever showing a headcount that no longer exists,
+    /// which is exactly the stale "12 eligible students" an admin would otherwise keep seeing
+    /// after every one of those students was deleted.
+    /// </summary>
+    private async Task CleanUpOrphanedDswSubsidiesAsync(CancellationToken cancellationToken)
+    {
+        var orphaned = await db.DswSubsidies.Where(x => !x.Distributions.Any()).ToListAsync(cancellationToken);
+        if (orphaned.Count == 0) return;
+        db.DswSubsidies.RemoveRange(orphaned);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static bool IsAll(string? value) => string.IsNullOrWhiteSpace(value) || value == "all";
