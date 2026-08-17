@@ -82,7 +82,12 @@ public sealed record MealSheetRowDto(
     string? DinnerOptionName,
     int BreakfastGuestCount,
     int LunchGuestCount,
-    int DinnerGuestCount);
+    int DinnerGuestCount,
+    // Lets the admin Meal Sheet remove an individual guest meal request (e.g. once a student can
+    // no longer remove it themselves past the booking cutoff) without a separate lookup call.
+    Guid? BreakfastGuestMealId = null,
+    Guid? LunchGuestMealId = null,
+    Guid? DinnerGuestMealId = null);
 
 /// <summary>See <see cref="MealCountsForDateDto.IsAvailable"/> — same meaning here.</summary>
 public sealed record MealSheetDto(

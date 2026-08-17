@@ -741,6 +741,33 @@ public sealed class MealsController(
         var entity = await db.GuestMealRequests
             .FirstOrDefaultAsync(x => x.Id == id && x.StudentId == studentId, cancellationToken);
         if (entity is null) return NotFound();
+
+        // Once the booking cutoff for a date has passed, the mess may already be counting on it —
+        // a student pulling the request out from under that would silently zero a bill the hall
+        // has already acted on. Past this point only an admin (DeleteGuestMealAsAdmin) can remove it.
+        var earliest = await GetEarliestStudentChangeDateAsync(cancellationToken);
+        if (entity.Date < earliest)
+        {
+            return BadRequest(new
+            {
+                message = $"This guest meal request is past the {earliest:yyyy-MM-dd} cutoff and can no longer be removed. Contact the hall admin to update it.",
+            });
+        }
+
+        db.GuestMealRequests.Remove(entity);
+        await db.SaveChangesAsync(cancellationToken);
+        await billing.RecalculateForwardAsync(entity.Date.Month, entity.Date.Year, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("admin/guest-meals/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Delete)]
+    public async Task<IActionResult> DeleteGuestMealAsAdmin(Guid id, CancellationToken cancellationToken)
+    {
+        // Admin override of DeleteMyGuestMeal: intentionally skips the cutoff check above, since
+        // this is exactly the escape hatch students are pointed to once that cutoff has passed.
+        var entity = await db.GuestMealRequests.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
         db.GuestMealRequests.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
         await billing.RecalculateForwardAsync(entity.Date.Month, entity.Date.Year, cancellationToken);
@@ -818,6 +845,7 @@ public sealed class MealsController(
                 .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= target && x.EffectiveTo >= target)
                 .ToListAsync(cancellationToken);
             var guestMealsByStudentAndPeriod = guestMeals.ToDictionary(x => (x.StudentId, x.MealPeriod), x => x.GuestCount);
+            var guestMealIdsByStudentAndPeriod = guestMeals.ToDictionary(x => (x.StudentId, x.MealPeriod), x => x.Id);
             var preferencesByStudentAndPeriod = preferences
                 .GroupBy(x => (x.StudentId, x.MealPeriod))
                 .ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.EffectiveFrom).First());
@@ -831,6 +859,10 @@ public sealed class MealsController(
                 var bGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "breakfast"));
                 var lGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "lunch"));
                 var dGuest = guestMealsByStudentAndPeriod.GetValueOrDefault((student.Id, "dinner"));
+
+                var bGuestId = guestMealIdsByStudentAndPeriod.TryGetValue((student.Id, "breakfast"), out var bId) ? bId : (Guid?)null;
+                var lGuestId = guestMealIdsByStudentAndPeriod.TryGetValue((student.Id, "lunch"), out var lId) ? lId : (Guid?)null;
+                var dGuestId = guestMealIdsByStudentAndPeriod.TryGetValue((student.Id, "dinner"), out var dId) ? dId : (Guid?)null;
 
                 var bPreference = preferencesByStudentAndPeriod.GetValueOrDefault((student.Id, "breakfast"));
                 var lPreference = preferencesByStudentAndPeriod.GetValueOrDefault((student.Id, "lunch"));
@@ -850,7 +882,10 @@ public sealed class MealsController(
                     optionNames.GetValueOrDefault(dPreference?.OptionItemId ?? Guid.Empty),
                     bGuest,
                     lGuest,
-                    dGuest
+                    dGuest,
+                    bGuestId,
+                    lGuestId,
+                    dGuestId
                 ));
             }
         }
