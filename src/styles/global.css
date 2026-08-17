@@ -736,6 +736,10 @@ button {
   grid-template-columns: 1.38fr 1fr;
 }
 
+.meal-management-grid {
+  align-items: start;
+}
+
 .stack-list {
   display: grid;
   gap: 0.7rem;
@@ -2859,6 +2863,7 @@ button {
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(4px);
+  animation: modalOverlayIn 0.2s ease both;
 }
 
 .modal-content {
@@ -2871,6 +2876,21 @@ button {
   flex-direction: column;
   box-shadow: var(--shadow);
   overflow: hidden;
+  animation: modalContentIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes modalOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalContentIn {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay, .modal-content { animation: none; }
 }
 
 .modal-header {
@@ -4824,32 +4844,34 @@ button {
 }
 
 .financial-page .meal-sheet-table {
-  min-width: 860px;
+  /* Widened (from 860px) so the guest-meal column below has room for three unwrapped
+     B/L/D · remove chips on the same line — narrower viewports scroll .table-wrap instead. */
+  min-width: 1000px;
   table-layout: fixed;
 }
 
 .meal-sheet-table .meal-sheet-col-hall {
-  width: 13%;
+  width: 12%;
 }
 
 .meal-sheet-table .meal-sheet-col-student {
-  width: 17%;
+  width: 15%;
 }
 
 .meal-sheet-table .meal-sheet-col-name {
-  width: 24%;
+  width: 21%;
 }
 
 .meal-sheet-table .meal-sheet-col-room {
-  width: 12%;
+  width: 10%;
 }
 
 .meal-sheet-table .meal-sheet-col-meals {
-  width: 22%;
+  width: 20%;
 }
 
 .meal-sheet-table .meal-sheet-col-guest {
-  width: 12%;
+  width: 22%;
 }
 
 .meal-sheet-table thead {
@@ -5792,7 +5814,34 @@ button {
 
 .guest-meal-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: .65rem;
+}
+
+.guest-meal-list .guest-meal-empty {
+  grid-column: 1 / -1;
+}
+
+.guest-meal-list.is-expanded {
+  max-height: 460px;
+  overflow-y: auto;
+  padding-right: .35rem;
+}
+
+.guest-meal-list-toggle {
+  width: 100%;
+  border: 1px dashed var(--border);
+  border-radius: .6rem;
+  padding: .5rem;
+  background: #f9fbff;
+  color: #303090;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.guest-meal-list-toggle:hover {
+  background: #eef2ff;
 }
 
 .guest-meal-request {
@@ -5859,6 +5908,12 @@ button {
   color: #d92d20;
 }
 
+.guest-meal-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: .6;
+}
+
 @media (max-width: 760px) {
   .meal-update-status {
     width: 100%;
@@ -5866,6 +5921,10 @@ button {
   }
 
   .guest-meal-form {
+    grid-template-columns: 1fr;
+  }
+
+  .guest-meal-list {
     grid-template-columns: 1fr;
   }
 

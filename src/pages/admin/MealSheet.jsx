@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download, X, TriangleAlert } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
@@ -12,6 +12,8 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { queryCache } from '../../services/queryCache';
 import TableSkeleton from '../../components/ui/TableSkeleton';
 import AdditionalItemsSheet from '../../components/admin/AdditionalItemsSheet';
+import Modal from '../../components/ui/Modal';
+import Button from '../../components/ui/Button';
 import { MENU_KEYS } from '../../services/permissionService';
 
 
@@ -37,6 +39,49 @@ const MealIndicator = ({ label, isOn }) => (
     }}
   >
     {label}
+  </span>
+);
+
+// A single B/L/D guest meal booking, with an admin-only remove button — this is the escape hatch
+// for a booking a student can no longer remove themselves once their own cutoff has passed.
+const GuestMealChip = ({ label, count, id, periodLabel, studentName, onRemove }) => (
+  <span
+    style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '0.35rem',
+      background: '#fef3c7',
+      color: '#d97706',
+      padding: '0.2rem 0.35rem 0.2rem 0.55rem',
+      borderRadius: '6px',
+      fontSize: '0.8rem',
+      fontWeight: '600',
+      border: '1px solid #fde68a',
+    }}
+  >
+    {label}: {count}
+    {id ? (
+      <button
+        type="button"
+        onClick={() => onRemove(id, studentName, `${periodLabel} · ${count} guest${count === 1 ? '' : 's'}`)}
+        title={`Remove ${periodLabel} guest meal`}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '1rem',
+          height: '1rem',
+          padding: 0,
+          border: 0,
+          borderRadius: '50%',
+          background: 'transparent',
+          color: '#b45309',
+          cursor: 'pointer',
+        }}
+      >
+        <X size={11} />
+      </button>
+    ) : null}
   </span>
 );
 
@@ -114,9 +159,43 @@ export default function MealSheet() {
     data,
     isLoading: loading,
     error: fetchError,
+    refresh,
   } = useCachedFetch(cacheKey, fetcher, { ttl: 30_000 });
 
   const error = fetchError || '';
+
+  // Holds the chip currently pending confirmation, e.g. { id, studentName, label }. Driving the
+  // remove-confirm dialog off state (rather than window.confirm) is what lets it be styled and
+  // animated like the rest of the app instead of the browser's native prompt.
+  const [pendingRemoval, setPendingRemoval] = useState(null);
+  const [isRemoving, setIsRemoving] = useState(false);
+
+  const requestRemoveGuestMeal = useCallback((id, studentName, label) => {
+    setPendingRemoval({ id, studentName, label });
+  }, []);
+
+  const cancelRemoveGuestMeal = useCallback(() => {
+    if (isRemoving) return;
+    setPendingRemoval(null);
+  }, [isRemoving]);
+
+  const confirmRemoveGuestMeal = useCallback(async () => {
+    if (!pendingRemoval) return;
+    setIsRemoving(true);
+    try {
+      await adminDataService.deleteGuestMealAsAdmin(pendingRemoval.id);
+      toast.success('Guest meal removed', `${pendingRemoval.label} was removed and the bill was recalculated.`);
+      // The "All" gender view fetches and caches Male/Female separately from the merged key
+      // `refresh()` targets, so a plain refresh would still serve the stale sub-cache.
+      queryCache.invalidate('mealsheet-');
+      refresh();
+      setPendingRemoval(null);
+    } catch (err) {
+      toast.error('Could not remove guest meal', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setIsRemoving(false);
+    }
+  }, [pendingRemoval, refresh, toast]);
 
   useEffect(() => {
     setPage(1);
@@ -666,17 +745,38 @@ export default function MealSheet() {
                       </td>
                       <td>
                         {formatGuestMeal(row) ? (
-                          <span style={{
-                            background: '#fef3c7',
-                            color: '#d97706',
-                            padding: '0.25rem 0.5rem',
-                            borderRadius: '6px',
-                            fontSize: '0.8rem',
-                            fontWeight: '600',
-                            border: '1px solid #fde68a'
-                          }}>
-                            {formatGuestMeal(row)}
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: '0.3rem', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                            {row.breakfastGuestCount > 0 ? (
+                              <GuestMealChip
+                                label="B"
+                                count={row.breakfastGuestCount}
+                                id={row.breakfastGuestMealId}
+                                periodLabel="Breakfast"
+                                studentName={row.name}
+                                onRemove={requestRemoveGuestMeal}
+                              />
+                            ) : null}
+                            {row.lunchGuestCount > 0 ? (
+                              <GuestMealChip
+                                label="L"
+                                count={row.lunchGuestCount}
+                                id={row.lunchGuestMealId}
+                                periodLabel="Lunch"
+                                studentName={row.name}
+                                onRemove={requestRemoveGuestMeal}
+                              />
+                            ) : null}
+                            {row.dinnerGuestCount > 0 ? (
+                              <GuestMealChip
+                                label="D"
+                                count={row.dinnerGuestCount}
+                                id={row.dinnerGuestMealId}
+                                periodLabel="Dinner"
+                                studentName={row.name}
+                                onRemove={requestRemoveGuestMeal}
+                              />
+                            ) : null}
+                          </div>
                         ) : (
                           <span style={{ color: 'var(--muted)' }}>-</span>
                         )}
@@ -783,6 +883,49 @@ export default function MealSheet() {
       </>
       )}
       </div>
+
+      <Modal
+        isOpen={!!pendingRemoval}
+        onClose={cancelRemoveGuestMeal}
+        title="Remove Guest Meal"
+        actions={(
+          <>
+            <Button variant="secondary" onClick={cancelRemoveGuestMeal} disabled={isRemoving}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={confirmRemoveGuestMeal} disabled={isRemoving}>
+              {isRemoving ? 'Removing...' : 'Remove Booking'}
+            </Button>
+          </>
+        )}
+      >
+        {pendingRemoval ? (
+          <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+            <span
+              style={{
+                display: 'grid',
+                placeItems: 'center',
+                flexShrink: 0,
+                width: '2.4rem',
+                height: '2.4rem',
+                borderRadius: '50%',
+                background: '#fef2f2',
+                color: 'var(--danger, #dc2626)',
+              }}
+            >
+              <TriangleAlert size={20} />
+            </span>
+            <div style={{ display: 'grid', gap: '0.3rem' }}>
+              <p style={{ margin: 0 }}>
+                Remove <strong>{pendingRemoval.label}</strong> for <strong>{pendingRemoval.studentName}</strong>?
+              </p>
+              <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
+                The student&apos;s bill for this month will be recalculated immediately. This cannot be undone.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

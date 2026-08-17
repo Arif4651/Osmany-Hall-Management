@@ -8,6 +8,7 @@ import Button from '../../components/ui/Button';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import useStudentMealModule from '../../hooks/useStudentMealModule';
 import AdditionalPreferencesPanel from '../../components/student/AdditionalPreferencesPanel';
+import { useToast } from '../../context/ToastContext';
 import { financialService } from '../../services/financialService';
 import { formatCutoffTimeLabel } from '../../constants/mealConfig';
 import { formatDate } from '../../utils/formatters';
@@ -153,7 +154,7 @@ const MealPreferenceSection = memo(function MealPreferenceSection({
   );
 });
 
-const GuestMealRequest = memo(function GuestMealRequest({ request, mealLabel, onEdit, onDelete }) {
+const GuestMealRequest = memo(function GuestMealRequest({ request, mealLabel, isLocked, onEdit, onDelete }) {
   const requestDate = useMemo(() => new Date(`${request.date}T00:00:00`), [request.date]);
   const monthLabel = useMemo(
     () => requestDate.toLocaleDateString('en-BD', { month: 'short' }),
@@ -179,32 +180,42 @@ const GuestMealRequest = memo(function GuestMealRequest({ request, mealLabel, on
         <span>{request.guestCount} guest{request.guestCount === 1 ? '' : 's'} · {formatDate(request.date)}</span>
       </div>
       <div className="guest-meal-actions">
-        <button type="button" onClick={handleEdit}>Edit</button>
-        <button type="button" className="is-delete" onClick={handleDelete}>Remove</button>
+        <button
+          type="button"
+          onClick={handleEdit}
+          disabled={isLocked}
+          title={isLocked ? 'Cutoff has passed for this request. Contact the hall admin to update it.' : undefined}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="is-delete"
+          onClick={handleDelete}
+          disabled={isLocked}
+          title={isLocked ? 'Cutoff has passed for this request. Contact the hall admin to remove it.' : undefined}
+        >
+          Remove
+        </button>
       </div>
     </article>
   );
 });
+
+const GUEST_MEAL_COLLAPSED_COUNT = 4;
 
 const GuestMealPanel = memo(function GuestMealPanel({
   cutoffLabel,
   countdownLabel,
   earliestGuestDate,
   guestForm,
-  guestMonth,
-  guestYear,
-  guestMeals,
   guestFeedback,
   isCutoffPassed,
-  isGuestLoading,
   isGuestSaving,
   mealTypes,
-  mealTypeMap,
   onDismissFeedback,
   onFieldChange,
   onSubmit,
-  onEdit,
-  onDelete,
 }) {
   const handleDateChange = useCallback((event) => {
     onFieldChange('date', event.target.value);
@@ -270,30 +281,75 @@ const GuestMealPanel = memo(function GuestMealPanel({
         </form>
 
         <ActionFeedback feedback={guestFeedback} onClose={onDismissFeedback} />
+      </Card>
+    </PageSection>
+  );
+});
 
+const SavedRequestsSection = memo(function SavedRequestsSection({
+  guestMonth,
+  guestYear,
+  guestMeals,
+  isGuestLoading,
+  mealTypeMap,
+  earliestGuestDate,
+  onEdit,
+  onDelete,
+}) {
+  const [isRequestListExpanded, setIsRequestListExpanded] = useState(false);
+
+  useEffect(() => {
+    if (guestMeals.length <= GUEST_MEAL_COLLAPSED_COUNT) {
+      setIsRequestListExpanded(false);
+    }
+  }, [guestMeals.length]);
+
+  const hasMoreGuestMeals = guestMeals.length > GUEST_MEAL_COLLAPSED_COUNT;
+  const visibleGuestMeals = isRequestListExpanded
+    ? guestMeals
+    : guestMeals.slice(0, GUEST_MEAL_COLLAPSED_COUNT);
+
+  const handleToggleExpanded = useCallback(() => {
+    setIsRequestListExpanded((current) => !current);
+  }, []);
+
+  return (
+    <PageSection className="saved-requests-section">
+      <Card className="guest-meal-card">
         <div className="guest-meal-list-header">
           <div>
-            <strong>Saved Requests</strong>
+            <strong>My Guest Meals</strong>
             <small>{guestMonth}/{guestYear}</small>
           </div>
           <span>{guestMeals.length} request{guestMeals.length === 1 ? '' : 's'}</span>
         </div>
 
-        <div className="guest-meal-list">
+        <div className={`guest-meal-list ${isRequestListExpanded ? 'is-expanded' : ''}`}>
           {isGuestLoading ? <p className="guest-meal-empty">Loading guest meals...</p> : null}
           {!isGuestLoading && guestMeals.length === 0 ? (
             <p className="guest-meal-empty">No guest meals booked for this month.</p>
           ) : null}
-          {!isGuestLoading && guestMeals.map((request) => (
+          {!isGuestLoading && visibleGuestMeals.map((request) => (
             <GuestMealRequest
               key={request.id}
               request={request}
               mealLabel={mealTypeMap[request.mealPeriod]?.label || request.mealPeriod}
+              isLocked={request.date < earliestGuestDate}
               onEdit={onEdit}
               onDelete={onDelete}
             />
           ))}
         </div>
+
+        {!isGuestLoading && hasMoreGuestMeals ? (
+          <button
+            type="button"
+            className="guest-meal-list-toggle"
+            onClick={handleToggleExpanded}
+          >
+            {isRequestListExpanded ? 'View Less' : `View More (${guestMeals.length - GUEST_MEAL_COLLAPSED_COUNT} more)`}
+          </button>
+        ) : null}
       </Card>
     </PageSection>
   );
@@ -302,6 +358,7 @@ const GuestMealPanel = memo(function GuestMealPanel({
 export default function MealManagement() {
   useDocumentTitle('Meal Management');
   const { user } = useAuth();
+  const toast = useToast();
 
   const {
     isLoading,
@@ -324,20 +381,14 @@ export default function MealManagement() {
   const [preferenceFeedback, setPreferenceFeedback] = useState(null);
   const [guestForm, setGuestForm] = useState({ date: '', mealPeriod: '', guestCount: 1 });
   const [guestActionError, setGuestActionError] = useState('');
-  const [guestMessage, setGuestMessage] = useState('');
   const [isGuestSaving, setIsGuestSaving] = useState(false);
+  const [isGuestEditing, setIsGuestEditing] = useState(false);
 
   useEffect(() => {
     if (!preferenceFeedback || preferenceFeedback.type === 'error') return undefined;
     const timeoutId = window.setTimeout(() => setPreferenceFeedback(null), 4500);
     return () => window.clearTimeout(timeoutId);
   }, [preferenceFeedback]);
-
-  useEffect(() => {
-    if (!guestMessage) return undefined;
-    const timeoutId = window.setTimeout(() => setGuestMessage(''), 4500);
-    return () => window.clearTimeout(timeoutId);
-  }, [guestMessage]);
 
   const cutoffLabel = formatCutoffTimeLabel(cutoffTime);
   const earliestGuestDate = useMemo(() => getEarliestGuestDate(isCutoffPassed), [isCutoffPassed]);
@@ -417,7 +468,6 @@ export default function MealManagement() {
 
   const handleDismissGuestFeedback = useCallback(() => {
     setGuestError('');
-    setGuestMessage('');
   }, [setGuestError]);
 
   const preferenceNotice = useMemo(() => preferenceFeedback || (errorMessage ? {
@@ -435,16 +485,8 @@ export default function MealManagement() {
       };
     }
 
-    if (guestMessage) {
-      return {
-        type: 'success',
-        title: 'Action completed',
-        message: guestMessage,
-      };
-    }
-
     return null;
-  }, [guestError, guestMessage]);
+  }, [guestError]);
 
   const handleSave = useCallback(async () => {
     setPreferenceFeedback(null);
@@ -519,7 +561,6 @@ export default function MealManagement() {
   const handleGuestSubmit = useCallback(async (event) => {
     event.preventDefault();
     setGuestError('');
-    setGuestMessage('');
 
     // Validation for guest meal options
     const guestOptions = getGuestMealOptions(guestForm.date, guestForm.mealPeriod);
@@ -539,14 +580,18 @@ export default function MealManagement() {
         mealPeriod: guestForm.mealPeriod,
         guestCount: Number(guestForm.guestCount),
       });
-      setGuestMessage('Guest meal request saved successfully.');
+      toast.success(
+        'Action completed',
+        isGuestEditing ? 'Guest meal request updated successfully.' : 'Guest meal request saved successfully.',
+      );
+      setIsGuestEditing(false);
       await loadGuestMeals();
     } catch (error) {
       setGuestError(error instanceof Error ? error.message : 'Failed to save guest meal.');
     } finally {
       setIsGuestSaving(false);
     }
-  }, [getGuestMealOptions, guestForm, loadGuestMeals, mealTypeMap, preferences, setGuestError]);
+  }, [getGuestMealOptions, guestForm, isGuestEditing, loadGuestMeals, mealTypeMap, preferences, setGuestError, toast]);
 
   const editGuestMeal = useCallback((request) => {
     setGuestForm({
@@ -554,20 +599,20 @@ export default function MealManagement() {
       mealPeriod: request.mealPeriod,
       guestCount: request.guestCount,
     });
-    setGuestMessage('Request loaded. Update the details and save again.');
-  }, []);
+    setIsGuestEditing(true);
+    toast.info('Request loaded', 'Update the details and save again.');
+  }, [toast]);
 
   const deleteGuestMeal = useCallback(async (id) => {
     setGuestError('');
-    setGuestMessage('');
     try {
       await financialService.deleteGuestMeal(id);
-      setGuestMessage('Guest meal request removed.');
+      toast.success('Action completed', 'Guest meal request removed successfully.');
       await loadGuestMeals();
     } catch (error) {
       setGuestError(error instanceof Error ? error.message : 'Failed to remove guest meal.');
     }
-  }, [loadGuestMeals, setGuestError]);
+  }, [loadGuestMeals, setGuestError, toast]);
 
   return (
     <div>
@@ -589,7 +634,7 @@ export default function MealManagement() {
         )}
       />
 
-      <section className="two-col-grid">
+      <section className="two-col-grid meal-management-grid">
         <MealPreferenceSection
           title={`Applied for ${tomorrowMenu?.label || 'tomorrow'}`}
           feedback={preferenceNotice}
@@ -611,22 +656,26 @@ export default function MealManagement() {
           countdownLabel={countdownLabel}
           earliestGuestDate={earliestGuestDate}
           guestForm={guestForm}
-          guestMonth={guestMonth}
-          guestYear={guestYear}
-          guestMeals={guestMeals}
           guestFeedback={guestNotice}
           isCutoffPassed={isCutoffPassed}
-          isGuestLoading={isGuestLoading}
           isGuestSaving={isGuestSaving}
           mealTypes={mealTypes}
-          mealTypeMap={mealTypeMap}
           onDismissFeedback={handleDismissGuestFeedback}
           onFieldChange={handleGuestFieldChange}
           onSubmit={handleGuestSubmit}
-          onEdit={editGuestMeal}
-          onDelete={deleteGuestMeal}
         />
       </section>
+
+      <SavedRequestsSection
+        guestMonth={guestMonth}
+        guestYear={guestYear}
+        guestMeals={guestMeals}
+        isGuestLoading={isGuestLoading}
+        mealTypeMap={mealTypeMap}
+        earliestGuestDate={earliestGuestDate}
+        onEdit={editGuestMeal}
+        onDelete={deleteGuestMeal}
+      />
 
       {/* Per-date extras (tea and similar). Shows a full month so a student can mark many dates
           at once; the cutoff that gates each row comes from the server with the month. */}

@@ -58,6 +58,9 @@ export const adminDataService = {
   getStudentMealControl: async (studentRecordId, date, wing) => apiRequest(`/meals/student-controls/${studentRecordId}${toQueryString({ date, wing })}`),
   saveStudentMealControlStatus: async (payload) => apiRequest('/meals/student-controls/status', { method: 'PUT', body: JSON.stringify(payload) }),
   getMealSheet: async (date, wing) => apiRequest(`/meals/sheet${toQueryString({ date, wing })}`),
+  // Admin override for a guest meal request a student can no longer remove themselves
+  // (past their own cutoff) — see MealsController.DeleteGuestMealAsAdmin.
+  deleteGuestMealAsAdmin: async (id) => apiRequest(`/meals/admin/guest-meals/${id}`, { method: 'DELETE' }),
   getAdminAccounts: async () => apiRequest('/admin-settings/admins'),
   createAdminAccount: async (payload) => apiRequest('/admin-settings/admins', { method: 'POST', body: JSON.stringify(payload) }),
   updateAdminAccount: async (id, payload) => apiRequest(`/admin-settings/admins/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
