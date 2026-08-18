@@ -74,6 +74,7 @@ public sealed record MealSheetRowDto(
     string Name,
     string Room,
     string Gender,
+    string HallName,
     bool BreakfastOn,
     bool LunchOn,
     bool DinnerOn,

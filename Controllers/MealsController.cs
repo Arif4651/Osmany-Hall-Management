@@ -801,6 +801,7 @@ public sealed class MealsController(
                     student.StudentName,
                     student.RoomNo,
                     student.Gender,
+                    student.HallName,
                     false, // BreakfastOn
                     false, // LunchOn
                     false, // DinnerOn
@@ -874,6 +875,7 @@ public sealed class MealsController(
                     student.StudentName,
                     student.RoomNo,
                     student.Gender,
+                    student.HallName,
                     bOn,
                     lOn,
                     dOn,
