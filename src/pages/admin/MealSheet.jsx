@@ -15,6 +15,7 @@ import AdditionalItemsSheet from '../../components/admin/AdditionalItemsSheet';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
 import { MENU_KEYS } from '../../services/permissionService';
+import { HALL_NAMES } from '../../types/student.types';
 
 
 const defaultMealSheetDate = todayLocal();
@@ -105,6 +106,10 @@ export default function MealSheet() {
     if (role === 'female_wing_admin') return 'Female';
     return 'All';
   });
+  // 'All' unless the wing currently on screen actually spans more than one hall — Osmany
+  // Hall-Female is the only female hall, but the male wing also covers Extension-D and
+  // Student Run Hostel, so this filter only earns its keep there.
+  const [hallFilter, setHallFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -199,7 +204,26 @@ export default function MealSheet() {
 
   useEffect(() => {
     setPage(1);
-  }, [date, genderFilter]);
+  }, [date, genderFilter, hallFilter]);
+
+  // Static list of halls relevant to the current gender scope, not derived from whichever
+  // students happen to be on the roster today — Osmany Hall-Male, Extension-D and Student Run
+  // Hostel should all be selectable even if one of them currently has zero students on this
+  // date, so the admin can see that "0 students" for themselves rather than the option just
+  // being missing. Only Osmany Hall-Female is excluded, since that's the sole female hall.
+  const availableHalls = useMemo(() => {
+    const scopeGender = isWingAdmin ? (user?.wing || 'Male') : genderFilter;
+    if (scopeGender === 'Female') return [];
+    return HALL_NAMES.filter((h) => h !== 'Osmany Hall-Female');
+  }, [isWingAdmin, user?.wing, genderFilter]);
+
+  // Reset back to "All Halls" once the selected hall no longer applies to what's on screen —
+  // e.g. switching the gender dropdown away from Male drops Extension-D/Student Run Hostel.
+  useEffect(() => {
+    if (hallFilter !== 'All' && !availableHalls.includes(hallFilter)) {
+      setHallFilter('All');
+    }
+  }, [availableHalls, hallFilter]);
 
   const formatGuestMeal = (row) => {
     const parts = [];
@@ -217,6 +241,11 @@ export default function MealSheet() {
     // Filter by gender
     if (genderFilter !== 'All') {
       list = list.filter(r => r.gender?.toLowerCase() === genderFilter.toLowerCase());
+    }
+
+    // Filter by hall
+    if (hallFilter !== 'All') {
+      list = list.filter(r => r.hallName === hallFilter);
     }
 
     // Filter by search query
@@ -251,7 +280,28 @@ export default function MealSheet() {
     });
 
     return list;
-  }, [data, genderFilter, searchQuery, sortField, sortAsc]);
+  }, [data, genderFilter, hallFilter, searchQuery, sortField, sortAsc]);
+
+  // Badge totals (B/L/D/students) scoped to gender + hall, but not the free-text search — same
+  // scope the backend aggregate used to cover on its own before the hall filter existed.
+  const scopedStats = useMemo(() => {
+    if (!data || !data.rows) {
+      return { totalStudents: 0, breakfastCount: 0, lunchCount: 0, dinnerCount: 0 };
+    }
+    let list = data.rows;
+    if (genderFilter !== 'All') {
+      list = list.filter(r => r.gender?.toLowerCase() === genderFilter.toLowerCase());
+    }
+    if (hallFilter !== 'All') {
+      list = list.filter(r => r.hallName === hallFilter);
+    }
+    return {
+      totalStudents: list.length,
+      breakfastCount: list.filter(r => r.breakfastOn).length,
+      lunchCount: list.filter(r => r.lunchOn).length,
+      dinnerCount: list.filter(r => r.dinnerOn).length,
+    };
+  }, [data, genderFilter, hallFilter]);
 
   // Pagination
   const paginatedRows = useMemo(() => {
@@ -546,16 +596,16 @@ export default function MealSheet() {
         {/* Aggregated totals */}
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ background: '#eef2ff', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#3730a3', fontSize: '0.85rem', fontWeight: 'bold' }}>
-            B <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{data?.breakfastCount ?? 0}</span>
+            B <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.breakfastCount}</span>
           </span>
           <span style={{ background: '#ecfdf5', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#065f46', fontSize: '0.85rem', fontWeight: 'bold' }}>
-            L <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{data?.lunchCount ?? 0}</span>
+            L <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.lunchCount}</span>
           </span>
           <span style={{ background: '#fffbeb', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#92400e', fontSize: '0.85rem', fontWeight: 'bold' }}>
-            D <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{data?.dinnerCount ?? 0}</span>
+            D <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.dinnerCount}</span>
           </span>
           <span style={{ color: 'var(--muted)', fontSize: '0.85rem', fontWeight: '600', marginLeft: '0.5rem' }}>
-            {data?.totalStudents ?? 0} students
+            {scopedStats.totalStudents} students
           </span>
         </div>
 
@@ -599,6 +649,34 @@ export default function MealSheet() {
               <option value="Female">Female</option>
             </select>
           )}
+
+          {/* Only worth showing once the current gender scope actually spans more than one hall
+              — Osmany Hall-Female never does, the male wing (Osmany Hall-Male, Extension-D,
+              Student Run Hostel) always does. */}
+          {availableHalls.length > 1 ? (
+            <select
+              value={hallFilter}
+              onChange={(e) => {
+                setHallFilter(e.target.value);
+                setPage(1);
+              }}
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                background: '#ffffff',
+                color: 'var(--text)',
+                fontSize: '0.9rem',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="All">All Halls</option>
+              {availableHalls.map((hall) => (
+                <option key={hall} value={hall}>{hall}</option>
+              ))}
+            </select>
+          ) : null}
 
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <Search size={16} style={{ position: 'absolute', left: '0.75rem', color: 'var(--muted)' }} />
