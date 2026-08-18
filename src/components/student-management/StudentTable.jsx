@@ -7,7 +7,7 @@ import StudentActionMenu from './StudentActionMenu';
 const COLUMNS = [
   { key: 'studentName', label: 'Student Name', cellClass: 'cell-name' },
   { key: 'studentId', label: 'Student ID', cellClass: 'cell-mono' },
-  { key: 'rollNumber', label: 'Roll', cellClass: 'cell-strong' },
+ // { key: 'rollNumber', label: 'Roll', cellClass: 'cell-strong' },
   { key: 'gender', label: 'Gender' },
   { key: 'department', label: 'Department', cellClass: 'cell-muted' },
   { key: 'hallId', label: 'Hall ID', cellClass: 'cell-muted cell-small' },
