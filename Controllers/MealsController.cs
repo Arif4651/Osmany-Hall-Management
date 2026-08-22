@@ -40,14 +40,14 @@ public sealed class MealsController(
                         config.MealType!.Code,
                         config.Items
                             .Where(item => !item.IsOptional)
-                            .Select(item => new MealItemDto(item.InventoryItemId ?? item.Id, item.Name, item.Cost))
+                            .Select(item => new MealItemDto(item.InventoryItemId ?? item.Id, item.Name, item.Cost, item.InventoryItemId))
                             .ToList(),
                         config.Items
                             .Where(item => item.IsOptional
                                 && item.InventoryItem != null
                                 && item.InventoryItem.Category == "Options"
                                 && !item.InventoryItem.IsDeleted)
-                            .Select(item => new MealItemDto(item.InventoryItemId!.Value, item.Name, item.Cost))
+                            .Select(item => new MealItemDto(item.InventoryItemId!.Value, item.Name, item.Cost, item.InventoryItemId))
                             .ToList(),
                         config.Status))
                     .ToList()))
@@ -97,18 +97,21 @@ public sealed class MealsController(
         }
 
         var inputs = request.CommonItems
-            .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+            .Where(x => x.InventoryItemId.HasValue || !string.IsNullOrWhiteSpace(x.Name))
             .Select(x => (Input: x, Category: "Common", IsOptional: false))
             .Concat(request.OptionalItems
-                .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+                .Where(x => x.InventoryItemId.HasValue || !string.IsNullOrWhiteSpace(x.Name))
                 .Select(x => (Input: x, Category: "Options", IsOptional: true)))
             .ToList();
         var duplicate = inputs
-            .GroupBy(x => ItemCatalogService.NormalizeName(x.Input.Name))
+            .GroupBy(x => x.Input.InventoryItemId.HasValue
+                ? $"id:{x.Input.InventoryItemId.Value}"
+                : $"name:{ItemCatalogService.NormalizeName(x.Input.Name)}")
             .FirstOrDefault(x => x.Count() > 1);
         if (duplicate is not null)
         {
-            return BadRequest(new { message = $"{duplicate.First().Input.Name.Trim()} is listed more than once." });
+            var duplicateName = duplicate.First().Input.Name?.Trim();
+            return BadRequest(new { message = $"{(string.IsNullOrWhiteSpace(duplicateName) ? "This item" : duplicateName)} is listed more than once." });
         }
 
         var inventoryItems = await db.InventoryItems.AsNoTracking()
@@ -116,6 +119,7 @@ public sealed class MealsController(
                 && x.Wing == selectedWing
                 && (x.Category == "Common" || x.Category == "Options"))
             .ToListAsync(cancellationToken);
+        var inventoryById = inventoryItems.ToDictionary(x => x.Id);
         var inventoryByCategoryAndName = inventoryItems
             .GroupBy(x => (x.Category, Name: ItemCatalogService.NormalizeName(x.Item)))
             .ToDictionary(x => x.Key, x => x.First());
@@ -123,9 +127,27 @@ public sealed class MealsController(
         var resolvedInputs = new List<(MealItemInput Input, bool IsOptional, InventoryItem? InventoryItem)>();
         foreach (var entry in inputs)
         {
-            inventoryByCategoryAndName.TryGetValue(
-                (entry.Category, ItemCatalogService.NormalizeName(entry.Input.Name)),
-                out var inventoryItem);
+            InventoryItem? inventoryItem = null;
+            if (entry.Input.InventoryItemId.HasValue)
+            {
+                if (!inventoryById.TryGetValue(entry.Input.InventoryItemId.Value, out inventoryItem))
+                {
+                    return BadRequest(new { message = "Selected inventory item was not found in this wing." });
+                }
+                if (inventoryItem.Category != entry.Category)
+                {
+                    return BadRequest(new
+                    {
+                        message = $"{inventoryItem.Item} belongs to {inventoryItem.Category}, not {entry.Category}.",
+                    });
+                }
+            }
+            else
+            {
+                inventoryByCategoryAndName.TryGetValue(
+                    (entry.Category, ItemCatalogService.NormalizeName(entry.Input.Name)),
+                    out inventoryItem);
+            }
             if (entry.IsOptional && inventoryItem is null)
             {
                 return BadRequest(new
@@ -143,7 +165,7 @@ public sealed class MealsController(
             {
                 MealConfigurationId = config.Id,
                 InventoryItemId = entry.InventoryItem?.Id,
-                Name = entry.Input.Name.Trim(),
+                Name = entry.InventoryItem?.Item ?? entry.Input.Name.Trim(),
                 Cost = Math.Max(0m, entry.Input.Cost),
                 IsOptional = entry.IsOptional,
             });

@@ -1,6 +1,6 @@
 namespace HallBackend.Application.Dtos;
 
-public sealed record MealItemDto(Guid Id, string Name, decimal Cost);
+public sealed record MealItemDto(Guid Id, string Name, decimal Cost, Guid? InventoryItemId = null);
 public sealed record MealTypeDto(string Id, string Label, int Order, TimeOnly StartsAt, TimeOnly EndsAt);
 public sealed record MealEntryDto(string MealTypeId, IReadOnlyList<MealItemDto> CommonItems, IReadOnlyList<MealItemDto> OptionalItems, string Status);
 public sealed record MealDayDto(string Id, string Label, int Order, IReadOnlyList<MealEntryDto> Meals);
@@ -27,7 +27,7 @@ public sealed record UpsertMealConfigurationRequest(
     string? Wing,
     IReadOnlyList<MealItemInput> CommonItems,
     IReadOnlyList<MealItemInput> OptionalItems);
-public sealed record MealItemInput(string Name, decimal Cost);
+public sealed record MealItemInput(string Name, decimal Cost, Guid? InventoryItemId = null);
 public sealed record AdminMealOptionChoiceDto(Guid Id, string Name);
 public sealed record AdminStudentMealStatusDto(
     string MealPeriod,
