@@ -39,6 +39,64 @@ function mealCost(meal) {
     .reduce((sum, item) => sum + Number(item.cost || 0), 0);
 }
 
+function inventoryKey(item) {
+  return item.inventoryItemId || item.id;
+}
+
+function MenuInventoryPicker({ title, items, selectedItems, onToggle, onCostChange, disabled, isLoading, costEditable }) {
+  const selectedIds = new Set(selectedItems.map(inventoryKey).filter(Boolean));
+  const selectedById = new Map(selectedItems.map((item) => [inventoryKey(item), item]));
+
+  return (
+    <section className="meal-inventory-picker">
+      <div className="meal-inventory-picker__head">
+        <strong>{title}</strong>
+        <span>{selectedItems.length} selected</span>
+      </div>
+      <p className="meal-inventory-picker__hint">Select optional choices from inventory so student selections stay linked for billing.</p>
+      <div className="meal-inventory-picker__selected">
+        {selectedItems.length ? selectedItems.map((item, index) => (
+          <div key={`${inventoryKey(item)}-${index}`} className={`meal-inventory-selected-item${costEditable ? '' : ' no-cost'}`}>
+            <span>{item.name}</span>
+            {costEditable ? (
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={item.cost ?? 0}
+                disabled={disabled}
+                aria-label={`${item.name} menu cost`}
+                onChange={(event) => onCostChange(index, event.target.value)}
+              />
+            ) : null}
+            <button type="button" onClick={() => onToggle(item)} disabled={disabled}>Remove</button>
+          </div>
+        )) : <p>No items selected.</p>}
+      </div>
+      <div className="meal-inventory-picker__list">
+        {isLoading ? (
+          <p>Loading inventory...</p>
+        ) : items.length ? items.map((item) => {
+          const selected = selectedIds.has(item.id);
+          const current = selectedById.get(item.id);
+          return (
+            <button
+              type="button"
+              key={item.id}
+              className={selected ? 'is-selected' : ''}
+              onClick={() => onToggle(current || item)}
+              disabled={disabled}
+            >
+              <span>{item.name}</span>
+              <small>{item.unit?.toUpperCase()} · {item.isStored ? 'Stored' : 'Non-stored'}</small>
+            </button>
+          );
+        }) : <p>No active inventory items in this category.</p>}
+      </div>
+    </section>
+  );
+}
+
 function MealCell({ meal, onEdit }) {
   const hasItems = Boolean(meal?.commonItems?.length || meal?.optionalItems?.length);
   if (!hasItems) {
@@ -97,7 +155,7 @@ export default function AdminMealManagement() {
     dayId: '',
     mealTypeId: '',
     commonText: '',
-    optionalText: '',
+    optionalItems: [],
   });
   const [overrideForm, setOverrideForm] = useState(emptyOverride);
 
@@ -128,6 +186,18 @@ export default function AdminMealManagement() {
   );
 
   const overrides = useMemo(() => overridesData || [], [overridesData]);
+  const {
+    data: inventoryItems = [],
+    isLoading: isInventoryLoading,
+  } = useCachedFetch(
+    `meal-menu-inventory-${selectedWing}`,
+    () => adminDataService.getInventory(false, selectedWing),
+    { ttl: 30_000 }
+  );
+  const optionalInventoryItems = useMemo(
+    () => inventoryItems.filter((item) => item.category === 'Options'),
+    [inventoryItems],
+  );
 
   const loadOperations = useCallback(() => {
     invalidate('meal-counts');
@@ -202,7 +272,13 @@ export default function AdminMealManagement() {
 
   const openMenuEditor = (dayId = dayOptions[0]?.id, mealTypeId = mealTypeOptions[0]?.id) => {
     setMenuFormError('');
-    setFormState(getMealForEdit(dayId, mealTypeId));
+    const meal = getMealForEdit(dayId, mealTypeId);
+    setFormState({
+      dayId: meal.dayId,
+      mealTypeId: meal.mealTypeId,
+      commonText: meal.commonText,
+      optionalItems: meal.optionalItems,
+    });
     setMenuModalOpen(true);
   };
 
@@ -215,6 +291,26 @@ export default function AdminMealManagement() {
   const updateMenuForm = (field, value) => {
     setMenuFormError('');
     setFormState((current) => ({ ...current, [field]: value }));
+  };
+
+  const toggleMenuInventoryItem = (field, item) => {
+    setMenuFormError('');
+    setFormState((current) => {
+      const items = current[field] || [];
+      const key = inventoryKey(item);
+      const exists = items.some((entry) => inventoryKey(entry) === key);
+      return {
+        ...current,
+        [field]: exists
+          ? items.filter((entry) => inventoryKey(entry) !== key)
+          : [...items, {
+            id: item.id,
+            inventoryItemId: item.inventoryItemId || item.id,
+            name: item.name,
+            cost: Number(item.cost || 0),
+          }],
+      };
+    });
   };
 
   const saveMenu = async (event) => {
@@ -797,7 +893,14 @@ export default function AdminMealManagement() {
             <label>Meal<select value={formState.mealTypeId} onChange={(event) => updateMenuForm('mealTypeId', event.target.value)} disabled={saving}>{mealTypeOptions.map((meal) => <option key={meal.id} value={meal.id}>{meal.label}</option>)}</select></label>
           </div>
           <label>Regular Items<input value={formState.commonText} onChange={(event) => updateMenuForm('commonText', event.target.value)} placeholder="Rice-0, Dal-0" disabled={saving} /></label>
-          <label className={menuFormError ? 'has-error' : ''}>Optional Items<input value={formState.optionalText} onChange={(event) => updateMenuForm('optionalText', event.target.value)} placeholder="Fish, Beef" aria-invalid={Boolean(menuFormError)} disabled={saving} /></label>
+          <MenuInventoryPicker
+            title="Optional Items"
+            items={optionalInventoryItems}
+            selectedItems={formState.optionalItems || []}
+            onToggle={(item) => toggleMenuInventoryItem('optionalItems', item)}
+            disabled={saving}
+            isLoading={isInventoryLoading}
+          />
         </form>
       </Modal>
 

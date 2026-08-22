@@ -52,6 +52,17 @@ function formatOptionalItemsToText(items = []) {
   return items.map((item) => item.name).join(', ');
 }
 
+function cleanItems(items = []) {
+  return items
+    .filter((item) => item.inventoryItemId || item.id || item.name)
+    .map((item, index) => ({
+      id: item.inventoryItemId || item.id || `item-${index + 1}`,
+      inventoryItemId: item.inventoryItemId || null,
+      name: item.name || '',
+      cost: Number(item.cost || 0),
+    }));
+}
+
 export default function useAdminMealModule(wing) {
   const cacheKey = wing ? `admin-meal-module-${wing}` : null;
   const {
@@ -170,21 +181,27 @@ export default function useAdminMealModule(wing) {
     return {
       dayId,
       mealTypeId,
+      commonItems: cleanItems(meal?.commonItems),
+      optionalItems: cleanItems(meal?.optionalItems),
       commonText: formatItemsToText(meal?.commonItems),
       optionalText: formatOptionalItemsToText(meal?.optionalItems),
     };
   }, [days]);
 
-  const saveMealConfiguration = useCallback(async ({ dayId, mealTypeId, commonText, optionalText }) => {
-    const commonItems = parseItemsFromText(commonText, `${dayId}-${mealTypeId}-common`);
-    const optionalItems = parseOptionalItems(optionalText, `${dayId}-${mealTypeId}-optional`);
+  const saveMealConfiguration = useCallback(async ({ dayId, mealTypeId, commonItems, optionalItems, commonText, optionalText }) => {
+    const nextCommonItems = Array.isArray(commonItems)
+      ? cleanItems(commonItems)
+      : parseItemsFromText(commonText, `${dayId}-${mealTypeId}-common`);
+    const nextOptionalItems = Array.isArray(optionalItems)
+      ? cleanItems(optionalItems)
+      : parseOptionalItems(optionalText, `${dayId}-${mealTypeId}-optional`);
 
     const updated = await mealRepository.upsertMealConfiguration({
       dayId,
       mealTypeId,
       wing,
-      commonItems,
-      optionalItems,
+      commonItems: nextCommonItems,
+      optionalItems: nextOptionalItems,
     });
 
     queryCache.invalidate('meal-counts');

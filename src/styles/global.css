@@ -4450,6 +4450,129 @@ button {
   box-shadow: 0 0 0 3px rgba(248, 113, 113, .1);
 }
 
+.meal-inventory-picker {
+  display: grid;
+  gap: .75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .85rem;
+  background: #fbfdff;
+}
+
+.meal-inventory-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  color: var(--text);
+}
+
+.meal-inventory-picker__head span {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.meal-inventory-picker__hint {
+  margin: -.25rem 0 .1rem;
+  color: #64748b;
+  font-size: .8rem;
+}
+
+.meal-inventory-picker__selected,
+.meal-inventory-picker__list {
+  display: grid;
+  gap: .5rem;
+}
+
+.meal-inventory-picker__selected p,
+.meal-inventory-picker__list p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: .82rem;
+}
+
+.meal-inventory-selected-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px auto;
+  align-items: center;
+  gap: .5rem;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  padding: .5rem;
+  background: #fff;
+}
+
+.meal-inventory-selected-item.no-cost {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.meal-inventory-selected-item span {
+  min-width: 0;
+  color: var(--text);
+  font-size: .86rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meal-inventory-selected-item input {
+  height: 34px;
+  padding: .45rem .55rem;
+}
+
+.meal-inventory-selected-item button {
+  border: 0;
+  background: transparent;
+  color: #b42318;
+  cursor: pointer;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.meal-inventory-picker__list {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  max-height: 210px;
+  overflow: auto;
+  padding-right: .15rem;
+}
+
+.meal-inventory-picker__list button {
+  display: grid;
+  gap: .15rem;
+  min-height: 58px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: .55rem .65rem;
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.meal-inventory-picker__list button.is-selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.meal-inventory-picker__list button span {
+  font-size: .85rem;
+  font-weight: 700;
+}
+
+.meal-inventory-picker__list button small {
+  color: var(--muted);
+  font-size: .72rem;
+}
+
+.meal-inventory-picker__list button:disabled,
+.meal-inventory-selected-item button:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
 @media (max-width: 950px) {
 
   .admin-meal-count-grid,
@@ -4473,6 +4596,10 @@ button {
 
   .admin-meal-form>div {
     grid-template-columns: 1fr;
+  }
+
+  .meal-inventory-selected-item {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .settings-summary-grid {
