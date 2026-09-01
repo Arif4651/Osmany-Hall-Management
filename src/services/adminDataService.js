@@ -14,6 +14,7 @@ export const adminDataService = {
   getAllInventoryBatches: async (wing) => apiRequest(`/inventory/batches${toQueryString({ wing })}`),
   getInventoryLedger: async ({ itemId, from, to, wing }) => apiRequest(`/inventory/transactions${toQueryString({ itemId, from, to, wing })}`),
   createInventoryMovement: async (payload) => apiRequest('/inventory/transactions', { method: 'POST', body: JSON.stringify(payload) }),
+  createBulkInventoryMovements: async (payload) => apiRequest('/inventory/transactions/bulk', { method: 'POST', body: JSON.stringify(payload) }),
   updateInventoryMovement: async (id, payload) => apiRequest(`/inventory/transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteInventoryMovement: async (id) => apiRequest(`/inventory/transactions/${id}`, { method: 'DELETE' }),
   getAuditLogs: async () => apiRequest('/audit-logs'),
