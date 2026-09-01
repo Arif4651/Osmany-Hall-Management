@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, ChevronDown, Flame, Pencil, Search, Trash2, Package, Loader2, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package, Loader2, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
