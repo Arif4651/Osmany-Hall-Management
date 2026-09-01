@@ -15,6 +15,20 @@ public sealed record SaveStockTransactionRequest(
     Guid? SourceBatchId = null);
 
 /// <summary>
+/// Atomic bulk submission: all items are validated and inserted in one DB transaction.
+/// If any item fails, the whole batch is rolled back and <see cref="BulkTransactionResult.Errors"/>
+/// contains per-item error messages keyed by zero-based index.
+/// </summary>
+public sealed record BulkStockTransactionRequest(
+    IReadOnlyList<SaveStockTransactionRequest> Items,
+    string? Wing);
+
+public sealed record BulkTransactionItemError(int Index, string Message);
+public sealed record BulkTransactionResult(
+    int Succeeded,
+    IReadOnlyList<BulkTransactionItemError> Errors);
+
+/// <summary>
 /// One stock-in lot of an item, with its own unit rate. <paramref name="Label"/> is a display
 /// position among the item's open batches ("Rice-1", "Rice-2") and renumbers as batches are
 /// exhausted — never store or send it back as an identifier; use <paramref name="Id"/>.

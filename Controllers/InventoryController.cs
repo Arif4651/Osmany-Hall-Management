@@ -304,6 +304,114 @@ public sealed class InventoryController(
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    /// <summary>
+    /// Atomic bulk submission for Stock Out and Non-Stock sessions.
+    /// All items are validated first (no writes); if any fail, returns 400 with per-item errors.
+    /// If all pass, inserts everything in one DB transaction, then rebuilds stock and billing.
+    /// </summary>
+    [HttpPost("transactions/bulk")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Create)]
+    public async Task<ActionResult<BulkTransactionResult>> CreateBulkTransactions(
+        BulkStockTransactionRequest bulkRequest, CancellationToken cancellationToken)
+    {
+        if (bulkRequest.Items is null || bulkRequest.Items.Count == 0)
+            return BadRequest(new { message = "No items supplied." });
+
+        var selectedWing = await currentUser.GetManagedWingAsync(bulkRequest.Wing, cancellationToken);
+
+        // ── Validation pass (no DB writes) ────────────────────────────────────
+        var errors = new List<BulkTransactionItemError>();
+        var computed = new List<SaveStockTransactionRequest>(bulkRequest.Items.Count);
+
+        for (int i = 0; i < bulkRequest.Items.Count; i++)
+        {
+            var req = bulkRequest.Items[i];
+            var item = await db.InventoryItems.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == req.ItemId && !x.IsDeleted, cancellationToken);
+
+            if (item is null)
+            {
+                errors.Add(new BulkTransactionItemError(i, "Inventory item was not found."));
+                computed.Add(req);
+                continue;
+            }
+
+            bool isStockInOrNonStock = (item.IsStored && req.TransactionType == "in") ||
+                                       (!item.IsStored && req.TransactionType == "out");
+            decimal? computedRate = req.Rate;
+
+            if (isStockInOrNonStock)
+            {
+                if (req.Quantity <= 0m) { errors.Add(new BulkTransactionItemError(i, $"{item.Item}: Quantity must be greater than zero.")); computed.Add(req); continue; }
+                if (!req.TotalPrice.HasValue || req.TotalPrice.Value <= 0m) { errors.Add(new BulkTransactionItemError(i, $"{item.Item}: Total Price must be greater than zero.")); computed.Add(req); continue; }
+                computedRate = req.TotalPrice.Value / req.Quantity;
+            }
+
+            var updatedReq = req with { Rate = computedRate };
+            var validationError = await ValidateTransactionAsync(updatedReq, selectedWing, cancellationToken);
+            if (validationError is not null)
+                errors.Add(new BulkTransactionItemError(i, $"{item.Item}: {validationError}"));
+
+            computed.Add(updatedReq);
+        }
+
+        if (errors.Count > 0)
+            return BadRequest(new BulkTransactionResult(0, errors));
+
+        // ── Write pass (all-or-nothing) ────────────────────────────────────────
+        try
+        {
+            await using var dbTx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+            var insertedItemIds = new HashSet<Guid>();
+            var affectedDates = new HashSet<DateOnly>();
+
+            for (int i = 0; i < computed.Count; i++)
+            {
+                var req = computed[i];
+                var item = await db.InventoryItems.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == req.ItemId, cancellationToken);
+                bool isStockInOrNonStock = (item!.IsStored && req.TransactionType == "in") ||
+                                           (!item.IsStored && req.TransactionType == "out");
+                var row = new StockTransaction
+                {
+                    ItemId = req.ItemId,
+                    TransactionType = req.TransactionType,
+                    Date = req.Date,
+                    MealPeriod = req.TransactionType == "out" ? req.MealPeriod : null,
+                    Quantity = req.Quantity,
+                    Rate = req.Rate ?? 0m,
+                    TotalCost = isStockInOrNonStock ? (req.TotalPrice ?? 0m) : 0m,
+                    Note = req.Note?.Trim(),
+                    CreatedById = currentUser.UserId,
+                    SourceBatchId = item.IsStored && req.TransactionType == "out" ? req.SourceBatchId : null,
+                };
+                db.StockTransactions.Add(row);
+                insertedItemIds.Add(req.ItemId);
+                affectedDates.Add(req.Date);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            foreach (var itemId in insertedItemIds)
+                await inventory.RebuildItemAsync(itemId, cancellationToken);
+
+            await db.SaveChangesAsync(cancellationToken);
+            await dbTx.CommitAsync(cancellationToken);
+
+            // Recalculate billing for every distinct month that was touched.
+            var months = affectedDates
+                .Select(d => (d.Month, d.Year))
+                .Distinct()
+                .OrderBy(x => x.Year).ThenBy(x => x.Month);
+            foreach (var (month, year) in months)
+                await billing.RecalculateForwardAsync(month, year, cancellationToken);
+
+            return Ok(new BulkTransactionResult(computed.Count, []));
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpPut("transactions/{id:guid}")]
     [HttpPut("movements/{id:guid}")]
     [RequirePermission(MenuKeys.AdminInventory, PermissionActions.Edit)]
