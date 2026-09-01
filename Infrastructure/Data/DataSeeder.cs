@@ -258,7 +258,8 @@ public sealed class DataSeeder(
 
         db.MealTypes.AddRange(mealTypes);
         db.MealDays.AddRange(days);
-        db.MealSettings.Add(new MealSetting { CutoffTime = new TimeOnly(17, 0), ForecastMaxOptions = 6 });
+        db.MealSettings.Add(new MealSetting { Wing = "Male",   CutoffTime = new TimeOnly(17, 0), ForecastMaxOptions = 6 });
+        db.MealSettings.Add(new MealSetting { Wing = "Female", CutoffTime = new TimeOnly(17, 0), ForecastMaxOptions = 6 });
 
         foreach (var day in days)
         foreach (var type in mealTypes)

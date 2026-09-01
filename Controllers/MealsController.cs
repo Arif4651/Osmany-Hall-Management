@@ -23,9 +23,13 @@ public sealed class MealsController(
     public async Task<ActionResult<MealModuleDto>> GetModule([FromQuery] string? wing, CancellationToken cancellationToken)
     {
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
-        // Deterministic in case more than one row ever exists (no DB constraint enforces exactly
-        // one) — always the oldest, so every reader agrees on which row is "the" settings row.
-        var setting = await db.MealSettings.AsNoTracking().OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken) ?? new MealSetting();
+        // Prefer the wing-specific row; fall back to any available row if one hasn't been seeded yet.
+        var setting = await db.MealSettings.AsNoTracking()
+            .Where(x => x.Wing == selectedWing)
+            .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await db.MealSettings.AsNoTracking().OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken)
+            ?? new MealSetting { Wing = selectedWing };
         var mealTypes = await db.MealTypes.AsNoTracking().OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
         var days = await db.MealDays.AsNoTracking()
             .OrderBy(x => x.SortOrder)
@@ -62,15 +66,19 @@ public sealed class MealsController(
     [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
     public async Task<ActionResult<MealModuleDto>> UpdateCutoff(UpdateCutoffRequest request, CancellationToken cancellationToken)
     {
-        var setting = await db.MealSettings.OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var selectedWing = await currentUser.GetMealWingAsync(request.Wing, cancellationToken);
+        var setting = await db.MealSettings
+            .Where(x => x.Wing == selectedWing)
+            .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
         if (setting is null)
         {
-            setting = new MealSetting();
+            setting = new MealSetting { Wing = selectedWing };
             db.MealSettings.Add(setting);
         }
         setting.CutoffTime = request.CutoffTime;
         await db.SaveChangesAsync(cancellationToken);
-        return await GetModule(null, cancellationToken);
+        return await GetModule(selectedWing, cancellationToken);
     }
 
     [HttpPut("configuration")]
@@ -417,14 +425,14 @@ public sealed class MealsController(
     public async Task<ActionResult<IReadOnlyList<MealPreferenceStateDto>>> SaveMyPreferences(
         SaveMealPreferenceStateRequest request, CancellationToken cancellationToken)
     {
-        var earliest = await GetEarliestStudentChangeDateAsync(cancellationToken);
-        if (request.EffectiveFrom < earliest)
-            return BadRequest(new { message = $"Meal changes can be applied from {earliest:yyyy-MM-dd}." });
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
         var wing = await db.Students.AsNoTracking()
             .Where(x => x.Id == studentId)
             .Select(x => x.Gender)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+        var earliest = await GetEarliestStudentChangeDateAsync(wing, cancellationToken);
+        if (request.EffectiveFrom < earliest)
+            return BadRequest(new { message = $"Meal changes can be applied from {earliest:yyyy-MM-dd}." });
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -455,7 +463,12 @@ public sealed class MealsController(
     public async Task<ActionResult> SaveMyMealOffRange(
         SaveMealOffRangeRequest request, CancellationToken cancellationToken)
     {
-        var earliest = await GetEarliestStudentChangeDateAsync(cancellationToken);
+        var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+        var earliest = await GetEarliestStudentChangeDateAsync(wing, cancellationToken);
         if (request.From < earliest)
             return BadRequest(new { message = $"Meal-off ranges can start from {earliest:yyyy-MM-dd}." });
         if (request.To < request.From)
@@ -466,7 +479,6 @@ public sealed class MealsController(
         if (periods.Count == 0 || periods.Any(x => !MealHistoryService.MealPeriods.Contains(x)))
             return BadRequest(new { message = "Select at least one valid meal period." });
 
-        var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
         var restoreDate = request.To.AddDays(1);
         var previousDate = request.From.AddDays(-1);
         var previous = await db.MealStatusHistory.AsNoTracking()
@@ -724,11 +736,14 @@ public sealed class MealsController(
         if (request.GuestCount < 1 || request.GuestCount > 20)
             return BadRequest(new { message = "Guest count must be between 1 and 20." });
 
-        var earliest = await GetEarliestStudentChangeDateAsync(cancellationToken);
+        var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+        var earliest = await GetEarliestStudentChangeDateAsync(wing, cancellationToken);
         if (request.Date < earliest)
             return BadRequest(new { message = $"Guest meals can be submitted from {earliest:yyyy-MM-dd}." });
-
-        var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
 
         // Upsert: one record per student/period/date
         var existing = await db.GuestMealRequests
@@ -767,7 +782,11 @@ public sealed class MealsController(
         // Once the booking cutoff for a date has passed, the mess may already be counting on it —
         // a student pulling the request out from under that would silently zero a bill the hall
         // has already acted on. Past this point only an admin (DeleteGuestMealAsAdmin) can remove it.
-        var earliest = await GetEarliestStudentChangeDateAsync(cancellationToken);
+        var wing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == studentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+        var earliest = await GetEarliestStudentChangeDateAsync(wing, cancellationToken);
         if (entity.Date < earliest)
         {
             return BadRequest(new
@@ -803,7 +822,7 @@ public sealed class MealsController(
     {
         var target = date ?? HallClock.Today;
         var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
-        
+
         // Fetch all active students
         var students = await db.Students.AsNoTracking()
             .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing)
@@ -929,12 +948,19 @@ public sealed class MealsController(
         );
     }
 
-    private async Task<DateOnly> GetEarliestStudentChangeDateAsync(CancellationToken cancellationToken)
+    private async Task<DateOnly> GetEarliestStudentChangeDateAsync(string wing, CancellationToken cancellationToken)
     {
+        // Use the wing-specific cutoff; fall back to any row if the wing's row hasn't been seeded yet.
         var cutoff = await db.MealSettings.AsNoTracking()
+            .Where(x => x.Wing == wing)
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (TimeOnly?)x.CutoffTime)
-            .FirstOrDefaultAsync(cancellationToken) ?? new TimeOnly(17, 0);
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await db.MealSettings.AsNoTracking()
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => (TimeOnly?)x.CutoffTime)
+                .FirstOrDefaultAsync(cancellationToken)
+            ?? new TimeOnly(17, 0);
         var daysAhead = HallClock.TimeOfDay >= cutoff ? 2 : 1;
         return HallClock.Today.AddDays(daysAhead);
     }

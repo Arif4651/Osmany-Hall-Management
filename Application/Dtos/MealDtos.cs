@@ -20,7 +20,7 @@ public sealed record MealCountDto(
 /// the client should say so rather than showing "0 students" as if that were known.
 /// </summary>
 public sealed record MealCountsForDateDto(DateOnly Date, string DayId, IReadOnlyList<MealCountDto> Meals, bool IsAvailable = true);
-public sealed record UpdateCutoffRequest(TimeOnly CutoffTime);
+public sealed record UpdateCutoffRequest(TimeOnly CutoffTime, string? Wing = null);
 public sealed record UpsertMealConfigurationRequest(
     string DayId,
     string MealTypeId,

@@ -28,12 +28,19 @@ public sealed class AdditionalMealService(HallDbContext db)
     /// MealsController.GetEarliestGuestDate: tomorrow, or the day after once the cutoff has passed.
     /// Marking the past would rewrite a month whose counts may already be billed.
     /// </summary>
-    public async Task<DateOnly> GetEarliestEditableDateAsync(CancellationToken cancellationToken)
+    public async Task<DateOnly> GetEarliestEditableDateAsync(string wing, CancellationToken cancellationToken)
     {
+        // Use the wing-specific cutoff; fall back to any row if the wing's row hasn't been seeded yet.
         var cutoff = await db.MealSettings.AsNoTracking()
+            .Where(x => x.Wing == wing)
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (TimeOnly?)x.CutoffTime)
-            .FirstOrDefaultAsync(cancellationToken) ?? new TimeOnly(17, 0);
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await db.MealSettings.AsNoTracking()
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => (TimeOnly?)x.CutoffTime)
+                .FirstOrDefaultAsync(cancellationToken)
+            ?? new TimeOnly(17, 0);
 
         var daysAhead = HallClock.TimeOfDay >= cutoff ? 2 : 1;
         return HallClock.Today.AddDays(daysAhead);
@@ -75,7 +82,7 @@ public sealed class AdditionalMealService(HallDbContext db)
             .ToListAsync(cancellationToken);
         var selectedKeys = selected.Select(x => (x.ItemId, x.MealPeriod)).ToHashSet();
 
-        var earliest = await GetEarliestEditableDateAsync(cancellationToken);
+        var earliest = await GetEarliestEditableDateAsync(gender ?? string.Empty, cancellationToken);
         var isEditable = date >= earliest;
 
         var slots = mealTypes.Select(meal => new AdditionalMealDaySlotDto(
@@ -118,7 +125,7 @@ public sealed class AdditionalMealService(HallDbContext db)
             .Select(x => new AdditionalMealMarkDto(x.Date, x.MealPeriod, x.ItemId))
             .ToListAsync(cancellationToken);
 
-        var earliest = await GetEarliestEditableDateAsync(cancellationToken);
+        var earliest = await GetEarliestEditableDateAsync(gender ?? string.Empty, cancellationToken);
 
         var days = Enumerable.Range(0, to.Day)
             .Select(offset => from.AddDays(offset))
@@ -160,7 +167,7 @@ public sealed class AdditionalMealService(HallDbContext db)
             .AnyAsync(x => x.Code == request.MealPeriod, cancellationToken);
         if (!mealExists) throw Invalid("Invalid meal period.");
 
-        var earliest = await GetEarliestEditableDateAsync(cancellationToken);
+        var earliest = await GetEarliestEditableDateAsync(student.Gender, cancellationToken);
         if (request.Date < earliest)
             throw Invalid($"Selections can only be changed from {earliest:dd MMM yyyy} onwards.");
 
