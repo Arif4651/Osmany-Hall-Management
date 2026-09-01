@@ -4,10 +4,10 @@ const apiRepository = {
   async getModule(wing) {
     return apiRequest(`/meals/module${toQueryString({ wing })}`);
   },
-  async updateCutoffTime(cutoffTime) {
+  async updateCutoffTime(cutoffTime, wing) {
     return apiRequest('/meals/settings/cutoff', {
       method: 'PUT',
-      body: JSON.stringify({ cutoffTime }),
+      body: JSON.stringify({ cutoffTime, wing }),
     });
   },
   async upsertMealConfiguration({ dayId, mealTypeId, wing, commonItems, optionalItems }) {

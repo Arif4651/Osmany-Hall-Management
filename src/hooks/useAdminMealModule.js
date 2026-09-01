@@ -169,10 +169,10 @@ export default function useAdminMealModule(wing) {
   const cutoffTime = moduleData?.settings?.cutoffTime || '';
 
   const updateCutoffTime = useCallback(async (nextCutoffTime) => {
-    const updated = await mealRepository.updateCutoffTime(nextCutoffTime);
+    const updated = await mealRepository.updateCutoffTime(nextCutoffTime, wing);
     queryCache.invalidate('meal-counts');
     setModuleData(updated);
-  }, [setModuleData]);
+  }, [wing, setModuleData]);
 
   const getMealForEdit = useCallback((dayId, mealTypeId) => {
     const day = days.find((entry) => entry.id === dayId);
