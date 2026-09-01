@@ -284,9 +284,21 @@ export default function MealSheet() {
 
   // Badge totals (B/L/D/students) scoped to gender + hall, but not the free-text search — same
   // scope the backend aggregate used to cover on its own before the hall filter existed.
+  // Counts include regular meal ON count + total guest meal quantity.
   const scopedStats = useMemo(() => {
     if (!data || !data.rows) {
-      return { totalStudents: 0, breakfastCount: 0, lunchCount: 0, dinnerCount: 0 };
+      return {
+        totalStudents: 0,
+        breakfastCount: 0,
+        breakfastRegular: 0,
+        breakfastGuest: 0,
+        lunchCount: 0,
+        lunchRegular: 0,
+        lunchGuest: 0,
+        dinnerCount: 0,
+        dinnerRegular: 0,
+        dinnerGuest: 0,
+      };
     }
     let list = data.rows;
     if (genderFilter !== 'All') {
@@ -295,11 +307,30 @@ export default function MealSheet() {
     if (hallFilter !== 'All') {
       list = list.filter(r => r.hallName === hallFilter);
     }
+
+    const breakfastRegular = list.filter(r => r.breakfastOn).length;
+    const breakfastGuest = list.reduce((sum, r) => sum + (Number(r.breakfastGuestCount) || 0), 0);
+    const breakfastCount = breakfastRegular + breakfastGuest;
+
+    const lunchRegular = list.filter(r => r.lunchOn).length;
+    const lunchGuest = list.reduce((sum, r) => sum + (Number(r.lunchGuestCount) || 0), 0);
+    const lunchCount = lunchRegular + lunchGuest;
+
+    const dinnerRegular = list.filter(r => r.dinnerOn).length;
+    const dinnerGuest = list.reduce((sum, r) => sum + (Number(r.dinnerGuestCount) || 0), 0);
+    const dinnerCount = dinnerRegular + dinnerGuest;
+
     return {
       totalStudents: list.length,
-      breakfastCount: list.filter(r => r.breakfastOn).length,
-      lunchCount: list.filter(r => r.lunchOn).length,
-      dinnerCount: list.filter(r => r.dinnerOn).length,
+      breakfastCount,
+      breakfastRegular,
+      breakfastGuest,
+      lunchCount,
+      lunchRegular,
+      lunchGuest,
+      dinnerCount,
+      dinnerRegular,
+      dinnerGuest,
     };
   }, [data, genderFilter, hallFilter]);
 
@@ -595,15 +626,72 @@ export default function MealSheet() {
       >
         {/* Aggregated totals */}
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ background: '#eef2ff', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#3730a3', fontSize: '0.85rem', fontWeight: 'bold' }}>
+          <span
+            title={`Breakfast: ${scopedStats.breakfastRegular} Regular + ${scopedStats.breakfastGuest} Guest = ${scopedStats.breakfastCount} Total`}
+            style={{
+              background: '#eef2ff',
+              padding: '0.35rem 0.75rem',
+              borderRadius: '20px',
+              color: '#3730a3',
+              fontSize: '0.85rem',
+              fontWeight: 'bold',
+              display: 'inline-flex',
+              alignItems: 'center',
+              cursor: 'default',
+            }}
+          >
             B <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.breakfastCount}</span>
+            {scopedStats.breakfastGuest > 0 && (
+              <span style={{ fontSize: '0.74rem', fontWeight: 'normal', color: '#4338ca', marginLeft: '0.35rem' }}>
+                ({scopedStats.breakfastRegular} + {scopedStats.breakfastGuest} Guest)
+              </span>
+            )}
           </span>
-          <span style={{ background: '#ecfdf5', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#065f46', fontSize: '0.85rem', fontWeight: 'bold' }}>
+
+          <span
+            title={`Lunch: ${scopedStats.lunchRegular} Regular + ${scopedStats.lunchGuest} Guest = ${scopedStats.lunchCount} Total`}
+            style={{
+              background: '#ecfdf5',
+              padding: '0.35rem 0.75rem',
+              borderRadius: '20px',
+              color: '#065f46',
+              fontSize: '0.85rem',
+              fontWeight: 'bold',
+              display: 'inline-flex',
+              alignItems: 'center',
+              cursor: 'default',
+            }}
+          >
             L <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.lunchCount}</span>
+            {scopedStats.lunchGuest > 0 && (
+              <span style={{ fontSize: '0.74rem', fontWeight: 'normal', color: '#047857', marginLeft: '0.35rem' }}>
+                ({scopedStats.lunchRegular} + {scopedStats.lunchGuest} Guest)
+              </span>
+            )}
           </span>
-          <span style={{ background: '#fffbeb', padding: '0.35rem 0.75rem', borderRadius: '20px', color: '#92400e', fontSize: '0.85rem', fontWeight: 'bold' }}>
+
+          <span
+            title={`Dinner: ${scopedStats.dinnerRegular} Regular + ${scopedStats.dinnerGuest} Guest = ${scopedStats.dinnerCount} Total`}
+            style={{
+              background: '#fffbeb',
+              padding: '0.35rem 0.75rem',
+              borderRadius: '20px',
+              color: '#92400e',
+              fontSize: '0.85rem',
+              fontWeight: 'bold',
+              display: 'inline-flex',
+              alignItems: 'center',
+              cursor: 'default',
+            }}
+          >
             D <span style={{ color: 'var(--text)', marginLeft: '0.2rem' }}>{scopedStats.dinnerCount}</span>
+            {scopedStats.dinnerGuest > 0 && (
+              <span style={{ fontSize: '0.74rem', fontWeight: 'normal', color: '#b45309', marginLeft: '0.35rem' }}>
+                ({scopedStats.dinnerRegular} + {scopedStats.dinnerGuest} Guest)
+              </span>
+            )}
           </span>
+
           <span style={{ color: 'var(--muted)', fontSize: '0.85rem', fontWeight: '600', marginLeft: '0.5rem' }}>
             {scopedStats.totalStudents} students
           </span>
