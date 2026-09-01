@@ -933,9 +933,9 @@ public sealed class MealsController(
             }
         }
 
-        var bCount = rows.Count(x => x.BreakfastOn);
-        var lCount = rows.Count(x => x.LunchOn);
-        var dCount = rows.Count(x => x.DinnerOn);
+        var bCount = rows.Count(x => x.BreakfastOn) + rows.Sum(x => x.BreakfastGuestCount);
+        var lCount = rows.Count(x => x.LunchOn) + rows.Sum(x => x.LunchGuestCount);
+        var dCount = rows.Count(x => x.DinnerOn) + rows.Sum(x => x.DinnerGuestCount);
 
         return new MealSheetDto(
             target,
