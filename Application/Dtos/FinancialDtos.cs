@@ -39,7 +39,14 @@ public sealed record InventoryBatchDto(
     decimal Rate, decimal RemainingValue, bool IsOpeningBatch, string? Note);
 
 
-public sealed record MealPreferenceStateDto(string MealPeriod, bool IsOn, Guid? OptionItemId, string? OptionName = null, int GuestCount = 0);
+public sealed record MealPreferenceStateDto(
+    string MealPeriod,
+    bool IsOn,
+    Guid? OptionItemId,
+    string? OptionName = null,
+    int GuestCount = 0,
+    /// <summary>See <see cref="HallBackend.Application.Dtos.OptionSelectionState"/> for valid values.</summary>
+    string OptionSelectionState = HallBackend.Application.Dtos.OptionSelectionState.NotRequired);
 public sealed record SaveMealPreferenceStateRequest(
     DateOnly EffectiveFrom, IReadOnlyList<MealPreferenceStateDto> Meals);
 public sealed record SaveMealOffRangeRequest(

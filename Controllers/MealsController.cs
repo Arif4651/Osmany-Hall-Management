@@ -51,7 +51,7 @@ public sealed class MealsController(
                                 && item.InventoryItem != null
                                 && item.InventoryItem.Category == "Options"
                                 && !item.InventoryItem.IsDeleted)
-                            .Select(item => new MealItemDto(item.InventoryItemId!.Value, item.Name, item.Cost, item.InventoryItemId))
+                            .Select(item => new MealItemDto(item.InventoryItemId!.Value, item.Name, item.Cost, item.InventoryItemId, item.IsDefault))
                             .ToList(),
                         config.Status))
                     .ToList()))
@@ -111,6 +111,10 @@ public sealed class MealsController(
                 .Where(x => x.InventoryItemId.HasValue || !string.IsNullOrWhiteSpace(x.Name))
                 .Select(x => (Input: x, Category: "Options", IsOptional: true)))
             .ToList();
+        // At most one optional item may be the admin-defined default for this configuration.
+        var defaultCount = inputs.Count(x => x.IsOptional && x.Input.IsDefault);
+        if (defaultCount > 1)
+            return BadRequest(new { message = "Only one optional item can be marked as the default fallback." });
         var duplicate = inputs
             .GroupBy(x => x.Input.InventoryItemId.HasValue
                 ? $"id:{x.Input.InventoryItemId.Value}"
@@ -176,6 +180,7 @@ public sealed class MealsController(
                 Name = entry.InventoryItem?.Item ?? entry.Input.Name.Trim(),
                 Cost = Math.Max(0m, entry.Input.Cost),
                 IsOptional = entry.IsOptional,
+                IsDefault = entry.IsOptional && entry.Input.IsDefault,
             });
         }
 
@@ -413,11 +418,95 @@ public sealed class MealsController(
         var optionNames = await db.InventoryItems.AsNoTracking()
             .Where(x => x.Category == "Options" && !x.IsDeleted)
             .ToDictionaryAsync(x => x.Id, x => x.Item, cancellationToken);
-        return MealHistoryService.MealPeriods.Select(period => new MealPreferenceStateDto(
-            period,
-            MealHistoryService.GetEffectiveStatus(studentId, wing, period, target, statuses, overrides),
-            preferences.Where(x => x.MealPeriod == period).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.OptionItemId,
-            optionNames.GetValueOrDefault(preferences.Where(x => x.MealPeriod == period).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault()?.OptionItemId ?? Guid.Empty))).ToList();
+
+        // Load current day's menu to know which optional items are available and which is the default.
+        var dayCode = target.DayOfWeek.ToString()[..3].ToLowerInvariant();
+        var menuConfigs = await db.MealConfigurations.AsNoTracking()
+            .Include(x => x.MealDay)
+            .Include(x => x.MealType)
+            .Include(x => x.Items)
+            .ThenInclude(x => x.InventoryItem)
+            .Where(x => x.Wing == wing && x.MealDay!.Code == dayCode)
+            .ToListAsync(cancellationToken);
+
+        // Determine whether cutoff has already passed for the effective date.
+        var cutoff = await db.MealSettings.AsNoTracking()
+            .Where(x => x.Wing == wing)
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => (TimeOnly?)x.CutoffTime)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? new TimeOnly(17, 0);
+        var isCutoffPassed = HallClock.TimeOfDay >= cutoff;
+
+        // Eagerly track whether we need to write any defaults so we can save once.
+        var wroteDefault = false;
+        var resolvedResults = new List<(string Period, bool IsOn, Guid? OptionItemId, string? OptionName, string State)>();
+
+        foreach (var period in MealHistoryService.MealPeriods)
+        {
+            var isOn = MealHistoryService.GetEffectiveStatus(studentId, wing, period, target, statuses, overrides);
+
+            // Optional items available in today's configured menu for this period.
+            var menuOptional = menuConfigs
+                .Where(x => x.MealType!.Code == period)
+                .SelectMany(x => x.Items)
+                .Where(x => x.IsOptional && x.InventoryItemId.HasValue
+                    && x.InventoryItem != null && !x.InventoryItem.IsDeleted)
+                .ToList();
+
+            if (!isOn || menuOptional.Count == 0)
+            {
+                // No selection needed — either meal is off or there are no optional items.
+                resolvedResults.Add((period, isOn, null, null, OptionSelectionState.NotRequired));
+                continue;
+            }
+
+            var savedPref = preferences.Where(x => x.MealPeriod == period)
+                .OrderByDescending(x => x.EffectiveFrom)
+                .FirstOrDefault();
+            var savedOptionId = savedPref?.OptionItemId;
+            var savedOptionIsValid = savedOptionId.HasValue
+                && menuOptional.Any(x => x.InventoryItemId == savedOptionId);
+
+            if (savedOptionIsValid)
+            {
+                // Student has a valid saved selection that is still on the current menu.
+                resolvedResults.Add((period, isOn, savedOptionId, optionNames.GetValueOrDefault(savedOptionId!.Value), OptionSelectionState.Selected));
+                continue;
+            }
+
+            if (!isCutoffPassed)
+            {
+                // Cutoff has not passed — show the selection-required state; student can still choose.
+                resolvedResults.Add((period, isOn, null, null, OptionSelectionState.SelectionRequired));
+                continue;
+            }
+
+            // Cutoff has passed with no valid selection — apply the admin-defined default.
+            var defaultItem = menuOptional.FirstOrDefault(x => x.IsDefault);
+            if (defaultItem is not null)
+            {
+                await history.SetPreferenceAsync(studentId, period, defaultItem.InventoryItemId, target, cancellationToken);
+                wroteDefault = true;
+                resolvedResults.Add((period, isOn, defaultItem.InventoryItemId, optionNames.GetValueOrDefault(defaultItem.InventoryItemId!.Value), OptionSelectionState.DefaultAssigned));
+            }
+            else
+            {
+                // No admin default configured — remain in selection-required so admin is alerted.
+                resolvedResults.Add((period, isOn, null, null, OptionSelectionState.SelectionRequired));
+            }
+        }
+
+        if (wroteDefault)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            // Recalculate bills forward so the newly assigned default is reflected in billing.
+            await billing.RecalculateForwardAsync(target.Month, target.Year, cancellationToken);
+        }
+
+        return resolvedResults.Select(r => new MealPreferenceStateDto(
+            r.Period, r.IsOn, r.OptionItemId, r.OptionName,
+            GuestCount: 0, OptionSelectionState: r.State)).ToList();
     }
 
     [HttpPut("preferences/me")]
@@ -580,7 +669,12 @@ public sealed class MealsController(
                     isOn,
                     preference?.OptionItemId,
                     optionNames.GetValueOrDefault(preference?.OptionItemId ?? Guid.Empty),
-                    guestCount);
+                    guestCount,
+                    // Snapshot is historical — we don't recompute state here, just report Selected
+                    // if an option was saved, NotRequired otherwise.
+                    OptionSelectionState: preference?.OptionItemId.HasValue == true
+                        ? OptionSelectionState.Selected
+                        : OptionSelectionState.NotRequired);
             }).ToList()));
         }
         return rows;
@@ -1077,18 +1171,129 @@ public sealed class MealsController(
                     .SelectMany(x => x.Items)
                     .Where(x => x.IsOptional && x.InventoryItemId.HasValue)
                     .GroupBy(x => x.InventoryItemId!.Value)
-                    .Select(x => new AdminMealOptionChoiceDto(x.Key, x.First().Name))
+                    .Select(x => new AdminMealOptionChoiceDto(x.Key, x.First().Name, x.First().IsDefault))
                     .OrderBy(x => x.Name)
                     .ToList();
 
+                var isOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, period, target, statuses, overrides);
+                var savedPrefId = preference?.OptionItemId;
+                var savedIsValid = savedPrefId.HasValue && availableOptions.Any(x => x.Id == savedPrefId.Value);
+                var adminState = (!isOn || availableOptions.Count == 0)
+                    ? OptionSelectionState.NotRequired
+                    : savedIsValid
+                        ? OptionSelectionState.Selected
+                        : OptionSelectionState.SelectionRequired;
+
                 return new AdminStudentMealStatusDto(
                     period,
-                    MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, period, target, statuses, overrides),
+                    isOn,
                     preference?.OptionItemId,
                     availableOptions.FirstOrDefault(x => x.Id == preference?.OptionItemId)?.Name,
-                    availableOptions);
+                    availableOptions,
+                    adminState);
             })
                 .ToList());
+    }
+    /// <summary>
+    /// Admin bulk endpoint: applies the admin-configured default option for every active student
+    /// in the wing whose meal is ON for the target date but who has not yet selected an option.
+    /// Should be called at or after cutoff. Returns the number of students assigned.
+    /// </summary>
+    [HttpPost("apply-defaults")]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit)]
+    public async Task<ActionResult<ApplyDefaultsResultDto>> ApplyDefaults(
+        [FromQuery] DateOnly? date, [FromQuery] string? wing, CancellationToken cancellationToken)
+    {
+        var target = date ?? HallClock.Today.AddDays(1);
+        var selectedWing = await currentUser.GetMealWingAsync(wing, cancellationToken);
+
+        var dayCode = target.DayOfWeek.ToString()[..3].ToLowerInvariant();
+        var menuConfigs = await db.MealConfigurations.AsNoTracking()
+            .Include(x => x.MealDay)
+            .Include(x => x.MealType)
+            .Include(x => x.Items)
+            .ThenInclude(x => x.InventoryItem)
+            .Where(x => x.Wing == selectedWing && x.MealDay!.Code == dayCode)
+            .ToListAsync(cancellationToken);
+
+        // For each period, find the admin-defined default item (if any).
+        var defaultByPeriod = MealHistoryService.MealPeriods
+            .Select(period =>
+            {
+                var defaultItem = menuConfigs
+                    .Where(x => x.MealType!.Code == period)
+                    .SelectMany(x => x.Items)
+                    .FirstOrDefault(x => x.IsOptional && x.IsDefault && x.InventoryItemId.HasValue
+                        && x.InventoryItem != null && !x.InventoryItem.IsDeleted);
+                return (Period: period, DefaultItem: defaultItem);
+            })
+            .Where(x => x.DefaultItem is not null)
+            .ToDictionary(x => x.Period, x => x.DefaultItem!);
+
+        if (defaultByPeriod.Count == 0)
+            return Ok(new ApplyDefaultsResultDto(0, 0, target));
+
+        var activeStudents = await db.Students.AsNoTracking()
+            .Where(x => x.Status == MealResolutionContext.BillableStatus && x.Gender == selectedWing)
+            .ToListAsync(cancellationToken);
+        var studentIds = activeStudents.Select(x => x.Id).ToList();
+
+        var statuses = await db.MealStatusHistory.AsNoTracking()
+            .Where(x => studentIds.Contains(x.StudentId)
+                && x.EffectiveFrom <= target
+                && (x.EffectiveTo == null || x.EffectiveTo >= target))
+            .ToListAsync(cancellationToken);
+        var overrides = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= target && x.EffectiveTo >= target)
+            .ToListAsync(cancellationToken);
+        var existingPrefs = await db.MealPreferenceHistory.AsNoTracking()
+            .Where(x => studentIds.Contains(x.StudentId)
+                && x.DayOfWeek == target.DayOfWeek
+                && x.EffectiveFrom <= target
+                && (x.EffectiveTo == null || x.EffectiveTo >= target))
+            .ToListAsync(cancellationToken);
+
+        // Build a set of (studentId, period) pairs that already have a valid saved option.
+        var validPrefSet = existingPrefs
+            .Where(p => p.OptionItemId.HasValue && defaultByPeriod.TryGetValue(p.MealPeriod, out var di)
+                && menuConfigs
+                    .Where(x => x.MealType!.Code == p.MealPeriod)
+                    .SelectMany(x => x.Items)
+                    .Any(x => x.IsOptional && x.InventoryItemId == p.OptionItemId && x.InventoryItem != null && !x.InventoryItem.IsDeleted))
+            .Select(p => (p.StudentId, p.MealPeriod))
+            .ToHashSet();
+
+        int assigned = 0;
+        int skipped = 0;
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            foreach (var student in activeStudents)
+            {
+                if (!MealResolutionContext.HasJoinedBy(student, target)) { skipped++; continue; }
+                foreach (var (period, defaultItem) in defaultByPeriod)
+                {
+                    var isOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, period, target, statuses, overrides);
+                    if (!isOn) { skipped++; continue; }
+                    if (validPrefSet.Contains((student.Id, period))) { skipped++; continue; }
+
+                    await history.SetPreferenceAsync(student.Id, period, defaultItem.InventoryItemId, target, cancellationToken);
+                    assigned++;
+                }
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        if (assigned > 0)
+            await billing.RecalculateForwardAsync(target.Month, target.Year, cancellationToken);
+
+        return Ok(new ApplyDefaultsResultDto(assigned, skipped, target));
     }
 
 }

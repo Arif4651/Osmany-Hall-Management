@@ -1,6 +1,22 @@
 namespace HallBackend.Application.Dtos;
 
-public sealed record MealItemDto(Guid Id, string Name, decimal Cost, Guid? InventoryItemId = null);
+/// <summary>
+/// Describes the resolved state of the optional-item requirement for a student's meal on a date.
+/// These are string constants (not an enum) so the JSON shape is stable and human-readable.
+/// </summary>
+public static class OptionSelectionState
+{
+    /// <summary>The meal has no optional items — nothing to select.</summary>
+    public const string NotRequired = "not_required";
+    /// <summary>The student has a valid saved selection that is still on the current menu.</summary>
+    public const string Selected = "selected";
+    /// <summary>Meal is ON and options exist, but the student has not selected one yet and cutoff has not passed.</summary>
+    public const string SelectionRequired = "selection_required";
+    /// <summary>Cutoff passed with no valid selection — admin-defined default was automatically assigned.</summary>
+    public const string DefaultAssigned = "default_assigned";
+}
+
+public sealed record MealItemDto(Guid Id, string Name, decimal Cost, Guid? InventoryItemId = null, bool IsDefault = false);
 public sealed record MealTypeDto(string Id, string Label, int Order, TimeOnly StartsAt, TimeOnly EndsAt);
 public sealed record MealEntryDto(string MealTypeId, IReadOnlyList<MealItemDto> CommonItems, IReadOnlyList<MealItemDto> OptionalItems, string Status);
 public sealed record MealDayDto(string Id, string Label, int Order, IReadOnlyList<MealEntryDto> Meals);
@@ -27,14 +43,18 @@ public sealed record UpsertMealConfigurationRequest(
     string? Wing,
     IReadOnlyList<MealItemInput> CommonItems,
     IReadOnlyList<MealItemInput> OptionalItems);
-public sealed record MealItemInput(string Name, decimal Cost, Guid? InventoryItemId = null);
-public sealed record AdminMealOptionChoiceDto(Guid Id, string Name);
+public sealed record MealItemInput(string Name, decimal Cost, Guid? InventoryItemId = null, bool IsDefault = false);
+public sealed record AdminMealOptionChoiceDto(Guid Id, string Name, bool IsDefault = false);
+/// <summary>Result DTO for the admin bulk apply-defaults endpoint.</summary>
+public sealed record ApplyDefaultsResultDto(int AssignedCount, int SkippedCount, DateOnly TargetDate);
 public sealed record AdminStudentMealStatusDto(
     string MealPeriod,
     bool IsOn,
     Guid? OptionItemId,
     string? OptionName,
-    IReadOnlyList<AdminMealOptionChoiceDto> AvailableOptions);
+    IReadOnlyList<AdminMealOptionChoiceDto> AvailableOptions,
+    /// <summary>See <see cref="OptionSelectionState"/> — used by the admin UI to highlight pending selections.</summary>
+    string OptionSelectionState = Dtos.OptionSelectionState.NotRequired);
 
 // Global meal override DTOs
 public sealed record GlobalMealOverrideDto(
