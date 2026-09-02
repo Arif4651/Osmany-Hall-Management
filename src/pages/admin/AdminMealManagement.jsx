@@ -43,7 +43,7 @@ function inventoryKey(item) {
   return item.inventoryItemId || item.id;
 }
 
-function MenuInventoryPicker({ title, items, selectedItems, onToggle, onCostChange, disabled, isLoading, costEditable }) {
+function MenuInventoryPicker({ title, items, selectedItems, onToggle, onCostChange, onSetDefault, disabled, isLoading, costEditable }) {
   const selectedIds = new Set(selectedItems.map(inventoryKey).filter(Boolean));
   const selectedById = new Map(selectedItems.map((item) => [inventoryKey(item), item]));
 
@@ -53,10 +53,10 @@ function MenuInventoryPicker({ title, items, selectedItems, onToggle, onCostChan
         <strong>{title}</strong>
         <span>{selectedItems.length} selected</span>
       </div>
-      <p className="meal-inventory-picker__hint">Select optional choices from inventory so student selections stay linked for billing.</p>
+      <p className="meal-inventory-picker__hint">Select optional choices from inventory so student selections stay linked for billing. Mark one as <strong>Default</strong> — it will be auto-assigned after cutoff if a student forgets to pick.</p>
       <div className="meal-inventory-picker__selected">
         {selectedItems.length ? selectedItems.map((item, index) => (
-          <div key={`${inventoryKey(item)}-${index}`} className={`meal-inventory-selected-item${costEditable ? '' : ' no-cost'}`}>
+          <div key={`${inventoryKey(item)}-${index}`} className={`meal-inventory-selected-item${costEditable ? '' : ' no-cost'}${item.isDefault ? ' is-default' : ''}`}>
             <span>{item.name}</span>
             {costEditable ? (
               <input
@@ -68,6 +68,21 @@ function MenuInventoryPicker({ title, items, selectedItems, onToggle, onCostChan
                 aria-label={`${item.name} menu cost`}
                 onChange={(event) => onCostChange(index, event.target.value)}
               />
+            ) : null}
+            {onSetDefault ? (
+              <label
+                className={`meal-default-radio${item.isDefault ? ' is-checked' : ''}`}
+                title="Mark as the automatic fallback if a student misses the cutoff without selecting"
+              >
+                <input
+                  type="radio"
+                  name={`meal-default-${title}`}
+                  checked={Boolean(item.isDefault)}
+                  disabled={disabled}
+                  onChange={() => onSetDefault(inventoryKey(item))}
+                />
+                Default
+              </label>
             ) : null}
             <button type="button" onClick={() => onToggle(item)} disabled={disabled}>Remove</button>
           </div>
@@ -107,11 +122,19 @@ function MealCell({ meal, onEdit }) {
       </div>
     );
   }
+  const defaultOption = meal?.optionalItems?.find((item) => item.isDefault);
   return (
     <div className="meal-menu-cell">
       <strong>{itemNames(meal.commonItems)}</strong>
       {meal.optionalItems.length > 0 && (
-        <span>Options: {meal.optionalItems.map((item) => item.name).join(', ')}</span>
+        <span>
+          Options: {meal.optionalItems.map((item) => (
+            item.isDefault ? `${item.name} (Default)` : item.name
+          )).join(', ')}
+        </span>
+      )}
+      {!defaultOption && meal.optionalItems.length > 0 && (
+        <span className="meal-no-default-warning" title="No default set — students who miss cutoff will stay in selection_required state">⚠️ No default set</span>
       )}
       <span className="meal-menu-cost">Cost: {formatCurrency(mealCost(meal))}</span>
       <button type="button" onClick={onEdit}><Edit2 size={14} /> Edit</button>
@@ -308,9 +331,22 @@ export default function AdminMealManagement() {
             inventoryItemId: item.inventoryItemId || item.id,
             name: item.name,
             cost: Number(item.cost || 0),
+            isDefault: false,
           }],
       };
     });
+  };
+
+  const setDefaultOptionalItem = (itemKey) => {
+    setMenuFormError('');
+    setFormState((current) => ({
+      ...current,
+      // Exclusive: mark only the picked item as default, clear all others.
+      optionalItems: (current.optionalItems || []).map((item) => ({
+        ...item,
+        isDefault: inventoryKey(item) === itemKey,
+      })),
+    }));
   };
 
   const saveMenu = async (event) => {
@@ -898,6 +934,7 @@ export default function AdminMealManagement() {
             items={optionalInventoryItems}
             selectedItems={formState.optionalItems || []}
             onToggle={(item) => toggleMenuInventoryItem('optionalItems', item)}
+            onSetDefault={setDefaultOptionalItem}
             disabled={saving}
             isLoading={isInventoryLoading}
           />

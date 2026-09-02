@@ -6654,6 +6654,93 @@ button {
   flex: 2 1 240px;
 }
 
+/* selection_required state: amber highlight to draw attention */
+.meal-pref-optional.is-required {
+  --field-border: #f59e0b;
+}
+
+.meal-pref-optional.is-required select {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+/* default_assigned state: subtle muted indicator */
+.meal-pref-optional.is-auto select {
+  border-color: var(--border);
+  background: var(--input-bg, #f8fafc);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Inline label badges on the meal period name */
+.meal-pref-select-badge {
+  color: #d97706;
+  font-weight: 600;
+  font-size: .8em;
+}
+
+.meal-pref-auto-badge {
+  color: var(--text-muted);
+  font-size: .8em;
+}
+
+/* Highlight the entire row when selection is required */
+.meal-pref-row.has-selection-required {
+  background: linear-gradient(90deg, #fffbeb 0%, transparent 100%);
+  border-radius: .5rem;
+  padding-left: .4rem;
+  margin-left: -.4rem;
+}
+
+/* Admin menu config: default radio button styling */
+.meal-default-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: .2rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: .35rem;
+  background: transparent;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+
+.meal-default-radio:hover {
+  border-color: #6d3bb3;
+  color: #6d3bb3;
+}
+
+.meal-default-radio.is-checked {
+  border-color: #6d3bb3;
+  background: #f3e8ff;
+  color: #6d3bb3;
+  font-weight: 600;
+}
+
+.meal-default-radio input[type="radio"] {
+  accent-color: #6d3bb3;
+  width: 13px;
+  height: 13px;
+}
+
+/* "is-default" highlighted selected item row */
+.meal-inventory-selected-item.is-default {
+  border-left: 3px solid #6d3bb3;
+  padding-left: .6rem;
+  background: #faf5ff;
+}
+
+/* "No default set" warning in menu cell */
+.meal-no-default-warning {
+  color: #d97706;
+  font-size: .76rem;
+  font-weight: 500;
+}
+
 .meal-preferences-actions {
   margin-top: 1.2rem;
 }

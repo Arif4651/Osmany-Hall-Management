@@ -66,10 +66,23 @@ const MealPreferenceRow = memo(function MealPreferenceRow({
     onPreferenceChange(mealType.id, 'optionItemId', event.target.value);
   }, [mealType.id, onPreferenceChange]);
 
+  const selectionState = preference.optionSelectionState || 'not_required';
+  const isSelectionRequired = selectionState === 'selection_required';
+  const isDefaultAssigned = selectionState === 'default_assigned';
+  const hasOptions = options && options.length > 0;
+
   return (
-    <div className={`meal-pref-row ${isLast ? 'is-last' : ''}`}>
+    <div className={`meal-pref-row ${isLast ? 'is-last' : ''} ${isSelectionRequired ? 'has-selection-required' : ''}`}>
       <label className="field-control meal-pref-primary">
-        <span>{mealType.label}</span>
+        <span>
+          {mealType.label}
+          {isSelectionRequired && hasOptions && (
+            <span className="meal-pref-select-badge" title="You must choose an option before saving"> — Select Option</span>
+          )}
+          {isDefaultAssigned && hasOptions && (
+            <span className="meal-pref-auto-badge" title="Default was auto-assigned after cutoff"> — Auto</span>
+          )}
+        </span>
         <select
           value={preference.enabled ? 'on' : 'off'}
           onChange={handleEnabledChange}
@@ -79,18 +92,25 @@ const MealPreferenceRow = memo(function MealPreferenceRow({
           <option value="off">Off</option>
         </select>
       </label>
-      {preference.enabled ? (
-        <label className="field-control meal-pref-optional">
-          <span>Optional Choice</span>
+      {preference.enabled && hasOptions ? (
+        <label className={`field-control meal-pref-optional${isSelectionRequired ? ' is-required' : ''}${isDefaultAssigned ? ' is-auto' : ''}`}>
+          <span>
+            {isSelectionRequired ? '⚠️ Select Option' : isDefaultAssigned ? 'Auto-assigned (default)' : 'Optional Choice'}
+          </span>
           <select
             value={preference.optionItemId || ''}
             onChange={handleOptionChange}
             disabled={isDisabled}
           >
-            <option value="">None</option>
+            {/* Only show blank option when NOT in selection_required; auto-assigned and selected
+                states retain the current value. selection_required forces user to pick. */}
+            {!isSelectionRequired && <option value="">None</option>}
+            {isSelectionRequired && !preference.optionItemId && (
+              <option value="" disabled>-- Choose an option --</option>
+            )}
             {options.map((option) => (
               <option key={option.id} value={option.id}>
-                {option.name}
+                {option.name}{option.isDefault ? ' (Default)' : ''}
               </option>
             ))}
           </select>
@@ -375,6 +395,7 @@ export default function MealManagement() {
     savePreferences,
     resetPreferences,
     getMealOptions,
+    requiresSelection,
   } = useStudentMealModule(user?.studentId);
 
   const [isSaving, setIsSaving] = useState(false);

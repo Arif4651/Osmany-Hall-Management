@@ -23,6 +23,8 @@ function mapPreferenceList(preferenceList = []) {
     {
       enabled: preference.isOn,
       optionItemId: preference.optionItemId || '',
+      // Propagate the server-resolved selection state so the UI can show the right indicator.
+      optionSelectionState: preference.optionSelectionState || 'not_required',
     },
   ]));
 }
@@ -37,10 +39,10 @@ function removeUnavailableOptions(preferences, moduleState, effectiveDate) {
     const meal = targetDay.meals.find((entry) => entry.mealTypeId === mealPeriod);
     const optionExists = !preference.optionItemId
       || meal?.optionalItems?.some((option) => option.id === preference.optionItemId);
-    return [
-      mealPeriod,
-      optionExists ? preference : { ...preference, optionItemId: '' },
-    ];
+    if (optionExists) return [mealPeriod, preference];
+    // Option was removed from the menu — clear it locally but keep the server state (backend
+    // will recompute on next GET /preferences/me).
+    return [mealPeriod, { ...preference, optionItemId: '', optionSelectionState: 'selection_required' }];
   }));
 }
 
@@ -175,6 +177,15 @@ export default function useStudentMealModule(studentId) {
     return meal?.optionalItems || [];
   }, [tomorrowMenu]);
 
+  /**
+   * Returns true when the student must actively choose an optional item before saving.
+   * Use this to highlight the meal row in the UI.
+   */
+  const requiresSelection = useCallback((mealTypeId) => {
+    const pref = preferences[mealTypeId];
+    return pref?.optionSelectionState === 'selection_required';
+  }, [preferences]);
+
   return {
     isLoading,
     errorMessage,
@@ -190,6 +201,7 @@ export default function useStudentMealModule(studentId) {
     savePreferences,
     resetPreferences,
     getMealOptions,
+    requiresSelection,
     reload: () => {
       refreshModule();
       refreshPrefs();

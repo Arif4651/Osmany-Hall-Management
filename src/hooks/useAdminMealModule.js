@@ -52,7 +52,7 @@ function formatOptionalItemsToText(items = []) {
   return items.map((item) => item.name).join(', ');
 }
 
-function cleanItems(items = []) {
+function cleanItems(items = [], includeIsDefault = false) {
   return items
     .filter((item) => item.inventoryItemId || item.id || item.name)
     .map((item, index) => ({
@@ -60,6 +60,8 @@ function cleanItems(items = []) {
       inventoryItemId: item.inventoryItemId || null,
       name: item.name || '',
       cost: Number(item.cost || 0),
+      // Carry isDefault only for optional items — it has no meaning on common items.
+      ...(includeIsDefault ? { isDefault: Boolean(item.isDefault) } : {}),
     }));
 }
 
@@ -182,7 +184,8 @@ export default function useAdminMealModule(wing) {
       dayId,
       mealTypeId,
       commonItems: cleanItems(meal?.commonItems),
-      optionalItems: cleanItems(meal?.optionalItems),
+      // Preserve isDefault from the server so the editor pre-populates the default radio button.
+      optionalItems: cleanItems(meal?.optionalItems, true),
       commonText: formatItemsToText(meal?.commonItems),
       optionalText: formatOptionalItemsToText(meal?.optionalItems),
     };
@@ -192,8 +195,9 @@ export default function useAdminMealModule(wing) {
     const nextCommonItems = Array.isArray(commonItems)
       ? cleanItems(commonItems)
       : parseItemsFromText(commonText, `${dayId}-${mealTypeId}-common`);
+    // Include isDefault when sending optional items — critical for the default-fallback feature.
     const nextOptionalItems = Array.isArray(optionalItems)
-      ? cleanItems(optionalItems)
+      ? cleanItems(optionalItems, true)
       : parseOptionalItems(optionalText, `${dayId}-${mealTypeId}-optional`);
 
     const updated = await mealRepository.upsertMealConfiguration({
