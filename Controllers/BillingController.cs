@@ -110,6 +110,108 @@ public sealed class BillingController(
         return rows;
     }
 
+    [HttpGet("me/guest-meals")]
+    public async Task<ActionResult<StudentGuestMealBreakdownDto>> GetMyGuestMeals(
+        [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    {
+        if (month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
+        var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
+        var student = await db.Students.AsNoTracking().FirstOrDefaultAsync(x => x.Id == studentId, cancellationToken);
+        if (student is null) return NotFound();
+
+        return await BuildGuestMealBreakdownAsync(student, month, year, cancellationToken);
+    }
+
+    [HttpGet("students/{studentId:guid}/guest-meals")]
+    [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
+    public async Task<ActionResult<StudentGuestMealBreakdownDto>> GetStudentGuestMeals(
+        Guid studentId, [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
+    {
+        if (month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
+        var student = await db.Students.AsNoTracking().FirstOrDefaultAsync(x => x.Id == studentId, cancellationToken);
+        if (student is null) return NotFound();
+
+        var wingFilter = await currentUser.GetOwnWingFilterAsync(null, cancellationToken);
+        if (wingFilter is not null && !string.Equals(student.Gender, wingFilter, StringComparison.OrdinalIgnoreCase))
+            return Forbid();
+
+        return await BuildGuestMealBreakdownAsync(student, month, year, cancellationToken);
+    }
+
+    private async Task<StudentGuestMealBreakdownDto> BuildGuestMealBreakdownAsync(
+        Student student, int month, int year, CancellationToken cancellationToken)
+    {
+        var from = new DateOnly(year, month, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+
+        var guestMeals = await db.GuestMealRequests.AsNoTracking()
+            .Where(x => x.StudentId == student.Id && x.Date >= from && x.Date <= to)
+            .OrderBy(x => x.Date).ThenBy(x => x.MealPeriod)
+            .ToListAsync(cancellationToken);
+
+        if (guestMeals.Count == 0)
+        {
+            return new StudentGuestMealBreakdownDto(
+                student.Id,
+                student.StudentName,
+                student.RollNumber,
+                month,
+                year,
+                0m,
+                0,
+                Array.Empty<GuestMealBreakdownItemDto>());
+        }
+
+        var transactions = await db.StockTransactions.AsNoTracking()
+            .Include(x => x.Item)
+            .Where(x => x.TransactionType == "out" && x.Date >= from && x.Date <= to)
+            .ToListAsync(cancellationToken);
+
+        var meals = await MealResolutionContext.LoadAsync(db, from, to, cancellationToken);
+        var mealUnitCosts = new Dictionary<(DateOnly Date, string MealPeriod), decimal>();
+
+        foreach (var transaction in transactions)
+        {
+            if (transaction.Item is null || string.IsNullOrWhiteSpace(transaction.MealPeriod)) continue;
+            if (string.IsNullOrWhiteSpace(transaction.Item.Wing)) continue;
+            if (!string.Equals(transaction.Item.Wing, student.Gender, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
+            if (participants.Count == 0) continue;
+            var share = transaction.TotalCost / participants.Count;
+            var key = (transaction.Date, transaction.MealPeriod.ToLowerInvariant());
+            mealUnitCosts[key] = mealUnitCosts.GetValueOrDefault(key) + share;
+        }
+
+        var items = guestMeals.Select(g =>
+        {
+            var unitCost = mealUnitCosts.GetValueOrDefault((g.Date, g.MealPeriod.ToLowerInvariant()), 0m);
+            var totalCost = Math.Round(unitCost * g.GuestCount, 2);
+            return new GuestMealBreakdownItemDto(
+                g.Id,
+                g.Date,
+                g.Date.DayOfWeek.ToString(),
+                g.MealPeriod,
+                g.GuestCount,
+                Math.Round(unitCost, 2),
+                totalCost,
+                g.CreatedAtUtc);
+        }).ToList();
+
+        var totalBill = items.Sum(x => x.TotalCost);
+        var totalCount = items.Sum(x => x.GuestCount);
+
+        return new StudentGuestMealBreakdownDto(
+            student.Id,
+            student.StudentName,
+            student.RollNumber,
+            month,
+            year,
+            totalBill,
+            totalCount,
+            items);
+    }
+
     [HttpPut("service-bills")]
     [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Edit)]
     public async Task<IActionResult> SaveServiceBill(SaveServiceBillRequest request, CancellationToken cancellationToken)

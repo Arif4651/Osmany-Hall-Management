@@ -146,3 +146,24 @@ public sealed record SaveAdminStudentMealStatusRequest(
     Guid? OptionItemId);
 
 public sealed record PaymentListResponse(IReadOnlyList<PaymentSubmissionDto> Items, int Page, int PageSize, int Total, int TotalPages);
+
+public sealed record GuestMealBreakdownItemDto(
+    Guid Id,
+    DateOnly Date,
+    string DayOfWeek,
+    string MealPeriod,
+    int GuestCount,
+    decimal UnitCost,
+    decimal TotalCost,
+    DateTime CreatedAtUtc);
+
+public sealed record StudentGuestMealBreakdownDto(
+    Guid StudentId,
+    string StudentName,
+    string RollNumber,
+    int Month,
+    int Year,
+    decimal TotalGuestMealBill,
+    int TotalGuestCount,
+    IReadOnlyList<GuestMealBreakdownItemDto> Items);
+
