@@ -13,6 +13,7 @@ import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import OthersBillPanel from '../../components/financial/OthersBillPanel';
 import { MENU_KEYS } from '../../services/permissionService';
 import { adminDataService } from '../../services/adminDataService';
+import { financialService } from '../../services/financialService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -65,6 +66,25 @@ export default function BillingManagement() {
   const [savingSubsidy, setSavingSubsidy] = useState(false);
   const [deletingSubsidyId, setDeletingSubsidyId] = useState(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
+
+  const [selectedGuestStudent, setSelectedGuestStudent] = useState(null);
+  const [guestDetailLoading, setGuestDetailLoading] = useState(false);
+  const [studentGuestBreakdown, setStudentGuestBreakdown] = useState(null);
+
+  const openGuestMealModal = async (studentRow) => {
+    setSelectedGuestStudent(studentRow);
+    setGuestDetailLoading(true);
+    try {
+      const data = await financialService.getStudentGuestMealBreakdown(studentRow.studentId, filters.month, filters.year);
+      setStudentGuestBreakdown(data);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load guest meal details');
+      setStudentGuestBreakdown(null);
+    } finally {
+      setGuestDetailLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (lockedWing) {
@@ -675,7 +695,16 @@ export default function BillingManagement() {
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.serviceBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.monthlyBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right', color: '#047857', fontWeight: '700' }}>{formatCurrency(row.dswSubsidy || 0)}</td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.guestMealBill || 0)}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="admin-guest-cell-btn"
+                          onClick={() => openGuestMealModal(row)}
+                          title="Click to view guest meal breakdown"
+                        >
+                          {formatCurrency(row.guestMealBill || 0)}
+                        </button>
+                      </td>
                       {canSeeOthersBill && (
                         <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.othersBill || 0)}</td>
                       )}
@@ -792,6 +821,80 @@ export default function BillingManagement() {
               placeholder="Optional notes"
             />
           </label>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedGuestStudent)}
+        onClose={() => {
+          setSelectedGuestStudent(null);
+          setStudentGuestBreakdown(null);
+        }}
+        title={`Guest Meals — ${selectedGuestStudent?.studentName || ''} (${selectedGuestStudent?.rollNumber || ''})`}
+      >
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          <div className="guest-meal-summary-bar">
+            <div>
+              <span className="summary-label">Billing Period</span>
+              <strong className="summary-val">{filters.month}/{filters.year}</strong>
+            </div>
+            <div>
+              <span className="summary-label">Total Guest Meals</span>
+              <strong className="summary-val">{studentGuestBreakdown?.totalGuestCount || 0}</strong>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="summary-label">Total Guest Bill</span>
+              <strong className="summary-val" style={{ color: 'var(--primary, #1e3a8a)' }}>
+                {formatCurrency(studentGuestBreakdown?.totalGuestMealBill ?? selectedGuestStudent?.guestMealBill ?? 0)}
+              </strong>
+            </div>
+          </div>
+
+          {guestDetailLoading ? (
+            <TableSkeleton rows={3} cols={4} />
+          ) : !studentGuestBreakdown?.items || studentGuestBreakdown.items.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--muted)' }}>
+              No guest meals were requested by this student in {filters.month}/{filters.year}.
+            </div>
+          ) : (
+            <div className="table-wrap" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+              <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem' }}>Date & Day</th>
+                    <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem' }}>Meal Period</th>
+                    <th style={{ textAlign: 'center', padding: '0.6rem 0.75rem' }}>Guests</th>
+                    <th style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>Rate / Meal</th>
+                    <th style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>Total Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {studentGuestBreakdown.items.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '0.6rem 0.75rem' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>{item.date}</div>
+                        <small style={{ color: 'var(--muted)', fontSize: '0.74rem' }}>{item.dayOfWeek}</small>
+                      </td>
+                      <td style={{ padding: '0.6rem 0.75rem', textTransform: 'capitalize' }}>
+                        <span className={`meal-badge meal-badge-${item.mealPeriod.toLowerCase()}`}>
+                          {item.mealPeriod}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '0.6rem 0.75rem', fontWeight: 600 }}>
+                        {item.guestCount}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', color: 'var(--muted)' }}>
+                        {formatCurrency(item.unitCost)}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
+                        {formatCurrency(item.totalCost)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Receipt } from 'lucide-react';
+import { Receipt, Users } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
+import Modal from '../../components/ui/Modal';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
@@ -12,10 +13,12 @@ const now = new Date();
 export default function Billing() {
   useDocumentTitle('Billing');
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
 
-  const billKey      = `billing-me-${period.month}-${period.year}`;
-  const subsidiesKey = `billing-subsidies-me-${period.month}-${period.year}`;
-  const othersKey    = `billing-others-me-${period.month}-${period.year}`;
+  const billKey        = `billing-me-${period.month}-${period.year}`;
+  const subsidiesKey   = `billing-subsidies-me-${period.month}-${period.year}`;
+  const othersKey      = `billing-others-me-${period.month}-${period.year}`;
+  const guestMealKey   = `billing-guest-meals-me-${period.month}-${period.year}`;
 
   const { data: bill, isLoading: billLoading, isRefreshing: billRefreshing, error: billError } =
     useCachedFetch(billKey, () => financialService.getMyBill(period.month, period.year), { ttl: 2 * 60_000 });
@@ -26,6 +29,9 @@ export default function Billing() {
   const { data: othersLines = [], isLoading: othersLoading, isRefreshing: othersRefreshing } =
     useCachedFetch(othersKey, () => financialService.getMyOthersBills(period.month, period.year), { ttl: 2 * 60_000 });
 
+  const { data: guestBreakdown, isLoading: guestLoading, isRefreshing: guestRefreshing } =
+    useCachedFetch(guestMealKey, () => financialService.getMyGuestMealBreakdown(period.month, period.year), { ttl: 2 * 60_000 });
+
   // Whether this student's wing has any optional item assigned at all — Tea is Female-only
   // today, so a male student's item list is naturally empty. Used only to decide whether the
   // Others Bill card belongs on the page; the amounts themselves always come from `bill`.
@@ -34,7 +40,7 @@ export default function Billing() {
     useCachedFetch(eligibleKey, () => financialService.getAdditionalMonth(period.month, period.year), { ttl: 2 * 60_000 });
 
   const isLoading = billLoading || subsidiesLoading || othersLoading || eligibleLoading;
-  const isRefreshing = billRefreshing || subsidiesRefreshing || othersRefreshing || eligibleRefreshing;
+  const isRefreshing = billRefreshing || subsidiesRefreshing || othersRefreshing || eligibleRefreshing || guestRefreshing;
   const error = billError;
   const othersTotal = othersLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
   // Show the card if the student's wing currently has an item assigned, or if it already has
@@ -42,6 +48,8 @@ export default function Billing() {
   const hasAdditionalAccess = (eligibleMonth?.items?.length ?? 0) > 0
     || othersLines.length > 0
     || (bill?.othersBill ?? 0) > 0;
+
+  const monthLabel = new Date(period.year, period.month - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   return (
     <div className="financial-page">
@@ -99,13 +107,25 @@ export default function Billing() {
               {/* <p>Deducted from eligible meal charges</p> */}
             </div>
           )}
-          {(bill.guestMealBill ?? 0) > 0 && (
-            <div className="financial-card financial-card-highlight">
+          <div
+            className="financial-card financial-card-highlight financial-card-clickable"
+            onClick={() => setGuestModalOpen(true)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setGuestModalOpen(true)}
+            title="Click to view all guest meals for this month"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3>Guest Meal Bill</h3>
-              <strong>{formatCurrency(bill.guestMealBill)}</strong>
-              {/* <p>Extra guest meal charges</p> */}
+              <span className="badge-clickable-hint">View Details →</span>
             </div>
-          )}
+            <strong>{formatCurrency(bill.guestMealBill ?? 0)}</strong>
+            <p>
+              {guestBreakdown?.totalGuestCount
+                ? `${guestBreakdown.totalGuestCount} guest meal${guestBreakdown.totalGuestCount > 1 ? 's' : ''} opened`
+                : 'Click to view monthly guest meals'}
+            </p>
+          </div>
           {/* Shown whenever the student's wing has an optional item — even at zero this month, so
               they can see it's accounted for rather than wondering if the charge is missing.
               Hidden entirely for a wing with nothing assigned (e.g. male, before Tea is opened
@@ -276,6 +296,106 @@ export default function Billing() {
           </div>
         </section>
       )}
+
+      <Modal
+        isOpen={guestModalOpen}
+        onClose={() => setGuestModalOpen(false)}
+        title={`Guest Meal Details — ${monthLabel}`}
+      >
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          <div className="guest-meal-summary-bar">
+            <div>
+              <span className="summary-label">Total Guest Meals</span>
+              <strong className="summary-val">{guestBreakdown?.totalGuestCount || 0}</strong>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="summary-label">Total Guest Bill</span>
+              <strong className="summary-val" style={{ color: 'var(--primary, #1e3a8a)' }}>
+                {formatCurrency(guestBreakdown?.totalGuestMealBill || 0)}
+              </strong>
+            </div>
+          </div>
+
+          {guestLoading ? (
+            <TableSkeleton rows={3} cols={4} />
+          ) : !guestBreakdown?.items || guestBreakdown.items.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--muted)' }}>
+              <Users size={32} style={{ margin: '0 auto 0.5rem', opacity: 0.4, display: 'block' }} />
+              No guest meals were requested for {monthLabel}.
+            </div>
+          ) : (
+            <>
+              {/* Desktop view: clean data table */}
+              <div className="table-wrap student-guest-table-wrap">
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem' }}>Date & Day</th>
+                      <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem' }}>Meal Period</th>
+                      <th style={{ textAlign: 'center', padding: '0.6rem 0.75rem' }}>Guests</th>
+                      <th style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>Rate / Meal</th>
+                      <th style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {guestBreakdown.items.map((item) => (
+                      <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '0.6rem 0.75rem' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>{item.date}</div>
+                          <small style={{ color: 'var(--muted)', fontSize: '0.74rem' }}>{item.dayOfWeek}</small>
+                        </td>
+                        <td style={{ padding: '0.6rem 0.75rem', textTransform: 'capitalize' }}>
+                          <span className={`meal-badge meal-badge-${item.mealPeriod.toLowerCase()}`}>
+                            {item.mealPeriod}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '0.6rem 0.75rem', fontWeight: 600 }}>
+                          {item.guestCount}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', color: 'var(--muted)' }}>
+                          {formatCurrency(item.unitCost)}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
+                          {formatCurrency(item.totalCost)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile view: responsive card list */}
+              <div className="responsive-card-list student-guest-cards-wrap">
+                {guestBreakdown.items.map((item) => (
+                  <div className="responsive-card" key={item.id} style={{ padding: '0.65rem 0.75rem' }}>
+                    <div className="responsive-card-head" style={{ marginBottom: '0.35rem' }}>
+                      <div>
+                        <strong>{item.date}</strong>
+                        <span style={{ color: 'var(--muted)', fontSize: '0.74rem', marginLeft: '0.35rem' }}>({item.dayOfWeek})</span>
+                      </div>
+                      <b style={{ color: 'var(--primary)' }}>{formatCurrency(item.totalCost)}</b>
+                    </div>
+                    <div className="responsive-card-body" style={{ fontSize: '0.8rem' }}>
+                      <div>
+                        <span>Period</span>
+                        <b style={{ textTransform: 'capitalize' }}>{item.mealPeriod}</b>
+                      </div>
+                      <div>
+                        <span>Guests</span>
+                        <b>{item.guestCount} {item.guestCount > 1 ? 'meals' : 'meal'}</b>
+                      </div>
+                      <div>
+                        <span>Rate / meal</span>
+                        <b>{formatCurrency(item.unitCost)}</b>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -27,4 +27,8 @@ export const financialService = {
 
   // The student's own Others Bill breakdown for a month.
   getMyOthersBills: (month, year) => apiRequest(`/billing/me/others-bills${toQueryString({ month, year })}`),
+
+  // Guest meal bill breakdowns for Billing
+  getMyGuestMealBreakdown: (month, year) => apiRequest(`/billing/me/guest-meals${toQueryString({ month, year })}`),
+  getStudentGuestMealBreakdown: (studentId, month, year) => apiRequest(`/billing/students/${studentId}/guest-meals${toQueryString({ month, year })}`),
 };
