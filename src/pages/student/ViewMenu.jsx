@@ -17,15 +17,38 @@ function mealCost(meal) {
   return (meal?.commonItems || []).reduce((sum, item) => sum + Number(item.cost || 0), 0);
 }
 
-function StudentMealCell({ meal }) {
+const DAY_TABS = [
+  { id: 'sun', short: 'Sun' },
+  { id: 'mon', short: 'Mon' },
+  { id: 'tue', short: 'Tue' },
+  { id: 'wed', short: 'Wed' },
+  { id: 'thu', short: 'Thu' },
+  { id: 'fri', short: 'Fri' },
+  { id: 'sat', short: 'Sat' },
+];
+
+function StudentMealCell({ meal, isMobile = false }) {
   const hasItems = Boolean(meal?.commonItems?.length || meal?.optionalItems?.length);
   if (!hasItems) return <span className="meal-empty">Not configured</span>;
 
   return (
-    <div className="meal-menu-cell student-meal-menu-cell">
-      <strong>{itemNames(meal.commonItems)}</strong>
+    <div className={`meal-menu-cell student-meal-menu-cell ${isMobile ? 'is-mobile-cell' : ''}`}>
+      <strong className="student-meal-common-items">{itemNames(meal.commonItems)}</strong>
       {meal.optionalItems.length > 0 && (
-        <span>Options: {meal.optionalItems.map((item) => item.name).join(', ')}</span>
+        <div className="meal-options-list">
+          <span className="meal-options-label">Options:</span>
+          {meal.optionalItems.map((item, idx) => (
+            <span
+              key={item.id || idx}
+              className={`student-menu-option-pill ${item.isDefault ? 'is-default' : ''}`}
+            >
+              <span className="option-name">{item.name}</span>
+              {item.isDefault && (
+                <span className="option-default-tag">Default</span>
+              )}
+            </span>
+          ))}
+        </div>
       )}
       <span className="meal-menu-cost">Cost: {formatCurrency(mealCost(meal))}</span>
     </div>
@@ -62,6 +85,12 @@ export default function ViewMenu() {
     dayLabel: day.label,
     mealsByType: Object.fromEntries(day.meals.map((meal) => [meal.mealTypeId, meal])),
   })), [moduleData]);
+
+  const [selectedDay, setSelectedDay] = useState('all');
+  const filteredMenuRows = useMemo(() => {
+    if (selectedDay === 'all') return menuRows;
+    return menuRows.filter((r) => r.dayId === selectedDay);
+  }, [menuRows, selectedDay]);
 
   const downloadMealRoutine = async () => {
     if (!menuRows.length) return;
@@ -150,8 +179,26 @@ export default function ViewMenu() {
 
         if (meal?.optionalItems?.length) {
           const options = document.createElement('div');
-          options.textContent = `Options: ${meal.optionalItems.map((item) => item.name).join(', ')}`;
-          options.style.cssText = 'margin-top:5px;color:#6d3bb3;font-size:12px;';
+          options.style.cssText = 'margin-top:6px;font-size:11.5px;line-height:1.4;';
+
+          const label = document.createElement('span');
+          label.textContent = 'Options: ';
+          label.style.cssText = 'color:#64748b;font-weight:600;';
+          options.appendChild(label);
+
+          meal.optionalItems.forEach((item, idx) => {
+            if (idx > 0) {
+              const sep = document.createElement('span');
+              sep.textContent = '  ';
+              options.appendChild(sep);
+            }
+            const itemBadge = document.createElement('span');
+            itemBadge.textContent = item.isDefault ? `${item.name} (Default)` : item.name;
+            itemBadge.style.cssText = item.isDefault
+              ? 'color:#3730a3;background:#e0e7ff;font-weight:600;padding:1px 5px;border-radius:3px;border:1px solid #c7d2fe;'
+              : 'color:#475569;background:#f1f5f9;padding:1px 5px;border-radius:3px;border:1px solid #e2e8f0;';
+            options.appendChild(itemBadge);
+          });
           cell.appendChild(options);
         }
 
@@ -209,59 +256,101 @@ export default function ViewMenu() {
     <div className="admin-meal-page student-view-menu-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
       
-      <header className="admin-meal-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
-          <ClipboardList size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
-          <div>
-            <h1 style={{ margin: 0 }}>Weekly Menu</h1>
-            <p style={{ margin: '0.25rem 0 0 0' }}>View the complete day-by-day meal routine.</p>
+      {/* Unified Professional Header */}
+      <header className="student-view-menu-header">
+        <div className="student-view-menu-header-main">
+          <div className="student-view-menu-title-row">
+            <ClipboardList size={22} className="student-view-menu-icon" />
+            <h1>Weekly Meal Routine</h1>
           </div>
+          <p>Regular items, optional choices, and meal costs for the week.</p>
         </div>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          className="student-view-menu-download-btn"
+          onClick={downloadMealRoutine}
+          disabled={!menuRows.length || isDownloading || isLoading}
+        >
+          <Download size={14} /> {isDownloading ? 'Exporting...' : 'Download PDF'}
+        </Button>
       </header>
 
       {error && <div className="admin-meal-message">{error}</div>}
 
-      <section className="admin-meal-menu-section">
-        <div className="admin-meal-section-head">
-          <div>
-            <h2>Meal Routine</h2>
-            <p>Regular items, optional choices, and meal costs for the full week.</p>
-          </div>
-          <Button
-            variant="secondary"
-            onClick={downloadMealRoutine}
-            disabled={!menuRows.length || isDownloading || isLoading}
-          >
-            <Download size={16} /> {isDownloading ? 'Preparing PDF...' : 'Download PDF'}
-          </Button>
-        </div>
+      <section className="admin-meal-menu-section student-menu-content-card">
 
         {isLoading && !moduleData ? (
           <TableSkeleton rows={7} cols={4} />
         ) : (
           moduleData && (
-            <div className="admin-meal-table-wrap">
-              <table className="admin-meal-table">
-                <thead>
-                  <tr>
-                    <th>Day</th>
-                    {mealTypes.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {menuRows.map((row) => (
-                    <tr key={row.dayId}>
-                      <td><strong>{row.dayLabel}</strong></td>
-                      {mealTypes.map((mealType) => (
-                        <td key={mealType.id}>
-                          <StudentMealCell meal={row.mealsByType[mealType.id]} />
-                        </td>
-                      ))}
+            <>
+              {/* Desktop / Tablet Table View */}
+              <div className="admin-meal-table-wrap student-menu-desktop-table">
+                <table className="admin-meal-table">
+                  <thead>
+                    <tr>
+                      <th className="sticky-day-col">Day</th>
+                      {mealTypes.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {menuRows.map((row) => (
+                      <tr key={row.dayId}>
+                        <td className="sticky-day-col"><strong>{row.dayLabel}</strong></td>
+                        {mealTypes.map((mealType) => (
+                          <td key={mealType.id}>
+                            <StudentMealCell meal={row.mealsByType[mealType.id]} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile View: Day Filter Pill Tabs & Spacious Day Cards */}
+              <div className="student-menu-mobile-tabs">
+                <button
+                  type="button"
+                  className={`student-menu-tab-btn ${selectedDay === 'all' ? 'is-active' : ''}`}
+                  onClick={() => setSelectedDay('all')}
+                >
+                  All Days
+                </button>
+                {DAY_TABS.map((day) => (
+                  <button
+                    key={day.id}
+                    type="button"
+                    className={`student-menu-tab-btn ${selectedDay === day.id ? 'is-active' : ''}`}
+                    onClick={() => setSelectedDay(day.id)}
+                  >
+                    {day.short}
+                  </button>
+                ))}
+              </div>
+
+              <div className="student-menu-mobile-cards">
+                {filteredMenuRows.map((row) => (
+                  <div key={row.dayId} className="student-menu-day-card">
+                    <div className="student-menu-day-header">
+                      <strong>{row.dayLabel}</strong>
+                    </div>
+                    <div className="student-menu-day-meals">
+                      {mealTypes.map((mealType) => (
+                        <div key={mealType.id} className="student-menu-meal-block">
+                          <div className="student-menu-meal-badge">
+                            <span>{mealType.label}</span>
+                          </div>
+                          <StudentMealCell meal={row.mealsByType[mealType.id]} isMobile />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )
         )}
       </section>

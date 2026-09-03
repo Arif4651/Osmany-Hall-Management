@@ -552,8 +552,26 @@ export default function AdminMealManagement() {
 
         if (meal?.optionalItems?.length) {
           const options = document.createElement('div');
-          options.textContent = `Options: ${meal.optionalItems.map((item) => item.name).join(', ')}`;
-          options.style.cssText = 'margin-top:5px;color:#6d3bb3;font-size:12px;';
+          options.style.cssText = 'margin-top:6px;font-size:11.5px;line-height:1.4;';
+
+          const label = document.createElement('span');
+          label.textContent = 'Options: ';
+          label.style.cssText = 'color:#64748b;font-weight:600;';
+          options.appendChild(label);
+
+          meal.optionalItems.forEach((item, idx) => {
+            if (idx > 0) {
+              const sep = document.createElement('span');
+              sep.textContent = '  ';
+              options.appendChild(sep);
+            }
+            const itemBadge = document.createElement('span');
+            itemBadge.textContent = item.isDefault ? `${item.name} (Default)` : item.name;
+            itemBadge.style.cssText = item.isDefault
+              ? 'color:#3730a3;background:#e0e7ff;font-weight:600;padding:1px 5px;border-radius:3px;border:1px solid #c7d2fe;'
+              : 'color:#475569;background:#f1f5f9;padding:1px 5px;border-radius:3px;border:1px solid #e2e8f0;';
+            options.appendChild(itemBadge);
+          });
           cell.appendChild(options);
         }
 
@@ -616,23 +634,23 @@ export default function AdminMealManagement() {
           <p>Configure menus, control hall-wide meals, and review daily counts.</p>
         </div>
         <div className="admin-meal-actions">
-            {user?.role === 'super_admin' ? (
-              <label>Wing
-                <select value={selectedWing} onChange={(event) => setSelectedWing(event.target.value)}>
-                  <option value="Male">Male Wing</option>
-                  <option value="Female">Female Wing</option>
-                </select>
+          {user?.role === 'super_admin' ? (
+            <label>Wing
+              <select value={selectedWing} onChange={(event) => setSelectedWing(event.target.value)}>
+                <option value="Male">Male Wing</option>
+                <option value="Female">Female Wing</option>
+              </select>
+            </label>
+          ) : <span className="admin-wing-badge">{selectedWing} Wing</span>}
+          {activeSection === 'menu' ? (
+            <>
+              <label>Cutoff
+                <input type="time" value={cutoffTime} onChange={(event) => updateCutoffTime(event.target.value)} disabled={isLoading} />
               </label>
-            ) : <span className="admin-wing-badge">{selectedWing} Wing</span>}
-            {activeSection === 'menu' ? (
-              <>
-                <label>Cutoff
-                  <input type="time" value={cutoffTime} onChange={(event) => updateCutoffTime(event.target.value)} disabled={isLoading} />
-                </label>
-                <Button onClick={() => openMenuEditor()} disabled={isLoading}><Settings2 size={17} /> Configure Menu</Button>
-              </>
-            ) : null}
-          </div>
+              <Button onClick={() => openMenuEditor()} disabled={isLoading}><Settings2 size={17} /> Configure Menu</Button>
+            </>
+          ) : null}
+        </div>
       </header>
 
       <div className="admin-wing-context">
@@ -731,8 +749,31 @@ export default function AdminMealManagement() {
                       <div className="admin-meal-choice-breakdown">
                         <h4>Meal Choice Breakdown</h4>
                         {meal.optionalChoices.map((option) => (
-                          <div key={option.optionItemId}><span>{option.name}</span><b>{option.studentCount}</b></div>
+                          <div key={option.optionItemId}>
+                            <span>
+                              {option.name}
+                              {option.isDefault ? (
+                                <span style={{ marginLeft: '0.4rem', fontSize: '0.74rem', color: '#4f46e5', fontWeight: 600, background: '#e0e7ff', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                                  Default
+                                </span>
+                              ) : null}
+                            </span>
+                            <b>{option.studentCount}</b>
+                          </div>
                         ))}
+                        {(() => {
+                          const selectedTotal = meal.optionalChoices.reduce((sum, opt) => sum + opt.studentCount, 0);
+                          const unselectedCount = Math.max(0, meal.enabledStudents - selectedTotal);
+                          if (unselectedCount > 0 && meal.optionalChoices.length > 0) {
+                            return (
+                              <div key="unselected" style={{ color: '#64748b', borderTop: '1px dashed #e2e8f0', marginTop: '0.25rem', paddingTop: '0.25rem' }}>
+                                <span style={{ fontStyle: 'italic', fontSize: '0.82rem' }}>Pending Choice (Before Cutoff)</span>
+                                <b>{unselectedCount}</b>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                         {!meal.optionalChoices.length && <p>No optional choices configured for this meal.</p>}
                       </div>
                     </article>

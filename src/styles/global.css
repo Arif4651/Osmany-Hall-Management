@@ -9104,117 +9104,286 @@ button {
 .student-view-menu-page .admin-meal-table-wrap {
   max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
 }
 
 .student-view-menu-page .admin-meal-table {
   width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+}
+
+.student-view-menu-page .admin-meal-table th,
+.student-view-menu-page .admin-meal-table td {
+  padding: 0.85rem 0.75rem;
+  line-height: 1.45;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.student-view-menu-page .admin-meal-table .sticky-day-col {
+  position: sticky;
+  left: 0;
+  background: #f8fafc;
+  z-index: 2;
+  font-weight: 700;
+  color: #1e293b;
+  min-width: 105px;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.04);
+}
+
+/* Option pills in both desktop table and mobile cards */
+.student-menu-option-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+.student-menu-option-pill.is-default {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+  font-weight: 600;
+}
+
+.student-menu-option-pill .option-default-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  background-color: #4338ca;
+  color: #ffffff;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.meal-options-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.meal-options-label {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+/* Unified Professional Header for Student View Menu */
+.student-view-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #ffffff;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.student-view-menu-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
   min-width: 0;
 }
 
-/* Tier 1 (<=900px, i.e. as soon as the sidebar becomes an overlay):
-   drop every inner minimum width so the Day + meal columns simply wrap to
-   fit the viewport - exactly how Meal Snapshot behaves. */
-@media (max-width: 900px) {
-  .student-view-menu-page .admin-meal-header>div {
-    flex-wrap: wrap;
+.student-view-menu-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.student-view-menu-title-row h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #152f62;
+  letter-spacing: -0.01em;
+}
+
+.student-view-menu-icon {
+  color: #1e3a8a;
+  flex-shrink: 0;
+}
+
+.student-view-menu-header-main p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.student-view-menu-download-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.student-menu-content-card {
+  padding: 1.25rem;
+}
+
+/* Desktop vs Mobile Toggle */
+.student-menu-desktop-table {
+  display: block;
+}
+
+.student-menu-mobile-tabs,
+.student-menu-mobile-cards {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .student-view-menu-header {
+    padding: 0.75rem 0.85rem;
+    gap: 0.5rem;
+    border-radius: 10px;
   }
 
-  .student-view-menu-page .admin-meal-section-head {
-    align-items: flex-start;
+  .student-view-menu-title-row h1 {
+    font-size: 1.05rem;
+  }
+
+  .student-view-menu-header-main p {
+    font-size: 0.74rem;
+  }
+
+  .student-view-menu-download-btn {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.76rem;
+    white-space: nowrap;
+  }
+
+  .student-menu-content-card {
+    padding: 0.75rem 0.65rem;
+  }
+
+  .student-menu-desktop-table {
+    display: none;
+  }
+
+  .student-menu-mobile-tabs {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.75rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .student-menu-tab-btn {
+    padding: 0.3rem 0.65rem;
+    border-radius: 20px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #475569;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .student-menu-tab-btn.is-active {
+    background: #1e3a8a;
+    border-color: #1e3a8a;
+    color: #ffffff;
+    box-shadow: 0 2px 4px rgba(30, 58, 138, 0.2);
+  }
+
+  .student-menu-mobile-cards {
+    display: flex;
     flex-direction: column;
-    gap: .75rem;
+    gap: 0.75rem;
   }
 
-  .student-view-menu-page .admin-meal-section-head .btn {
-    width: 100%;
-    justify-content: center;
+  .student-menu-day-card {
+    background: #ffffff;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
   }
 
-  .student-view-menu-page .admin-meal-table {
-    table-layout: fixed;
+  .student-menu-day-header {
+    background: #f1f5f9;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
-  .student-view-menu-page .admin-meal-table th,
-  .student-view-menu-page .admin-meal-table td {
-    padding: .7rem .55rem;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+  .student-menu-day-meals {
+    display: flex;
+    flex-direction: column;
+    padding: 0.65rem;
+    gap: 0.65rem;
   }
 
-  .student-view-menu-page .admin-meal-table th:first-child,
-  .student-view-menu-page .admin-meal-table td:first-child {
-    width: 6rem;
+  .student-menu-meal-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.65rem 0.75rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
   }
 
-  .student-view-menu-page .meal-menu-cell {
-    min-width: 0;
-    gap: .3rem;
-  }
-}
-
-/* Tier 2 (<=600px): compact the typography so three meal columns stay
-   comfortably readable on a phone. */
-@media (max-width: 600px) {
-  .student-view-menu-page .admin-meal-menu-section {
-    padding: .9rem;
+  .student-menu-meal-badge {
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #0369a1;
   }
 
-  .student-view-menu-page .admin-meal-table th,
-  .student-view-menu-page .admin-meal-table td {
-    padding: .55rem .45rem;
+  .student-meal-menu-cell.is-mobile-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
-  .student-view-menu-page .admin-meal-table th {
-    font-size: .66rem;
-    letter-spacing: .02em;
+  .student-meal-menu-cell.is-mobile-cell .student-meal-common-items {
+    font-size: 0.86rem;
+    color: #1e293b;
+    line-height: 1.4;
   }
 
-  .student-view-menu-page .admin-meal-table th:first-child,
-  .student-view-menu-page .admin-meal-table td:first-child {
-    width: 4.4rem;
+  .student-meal-menu-cell.is-mobile-cell .meal-options-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
   }
 
-  .student-view-menu-page .admin-meal-table td:first-child strong {
-    font-size: .78rem;
-  }
-
-  .student-view-menu-page .meal-menu-cell {
-    gap: .25rem;
-  }
-
-  .student-view-menu-page .meal-menu-cell strong {
-    font-size: .76rem;
-    line-height: 1.3;
-  }
-
-  .student-view-menu-page .meal-menu-cell span {
-    font-size: .68rem;
-    line-height: 1.3;
-  }
-
-  .student-view-menu-page .meal-empty {
-    font-size: .7rem;
-  }
-
-  .student-view-menu-page .admin-meal-header h1 {
-    font-size: 1.3rem;
-  }
-}
-
-/* Tier 3 (<=400px): last squeeze for the smallest phones. */
-@media (max-width: 400px) {
-  .student-view-menu-page .admin-meal-menu-section {
-    padding: .7rem;
-  }
-
-  .student-view-menu-page .admin-meal-table th,
-  .student-view-menu-page .admin-meal-table td {
-    padding: .45rem .3rem;
-  }
-
-  .student-view-menu-page .admin-meal-table th:first-child,
-  .student-view-menu-page .admin-meal-table td:first-child {
-    width: 3.6rem;
+  .student-meal-menu-cell.is-mobile-cell .meal-menu-cost {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #059669;
+    margin-top: 0.15rem;
   }
 }
 
