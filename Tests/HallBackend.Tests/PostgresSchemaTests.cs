@@ -46,6 +46,8 @@ public sealed class PostgresSchemaTests
         Assert.Equal(0L, reader.GetInt64(0));
     }
 
+
+
     [Fact]
     public async Task NoticesTable_IsCorrectlyConfigured()
     {

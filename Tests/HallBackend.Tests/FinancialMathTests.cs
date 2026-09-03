@@ -212,4 +212,58 @@ public sealed class FinancialMathTests
             ItemCatalogService.NormalizeName(left),
             ItemCatalogService.NormalizeName(right));
     }
+
+    [Fact]
+    public void MealResolutionContext_FindSelectedOption_ResolvesExplicitAndDefaultFallback()
+    {
+        var student1Id = Guid.NewGuid(); // explicit choice: Egg
+        var student2Id = Guid.NewGuid(); // no choice: should fallback to Fish Rui (default)
+        var student3Id = Guid.NewGuid(); // obsolete choice: should fallback to Fish Rui (default)
+        var date = new DateOnly(2026, 9, 3); // Thursday
+
+        var fishRui = Guid.NewGuid();
+        var egg = Guid.NewGuid();
+        var obsoleteBeef = Guid.NewGuid();
+
+        var students = new List<HallBackend.Domain.Entities.Student>
+        {
+            new() { Id = student1Id, Gender = "Male", Status = MealResolutionContext.BillableStatus, JoinDate = new DateOnly(2026, 1, 1), StudentId = "S1", StudentName = "Student 1", HallName = "Male", RoomNo = "101" },
+            new() { Id = student2Id, Gender = "Male", Status = MealResolutionContext.BillableStatus, JoinDate = new DateOnly(2026, 1, 1), StudentId = "S2", StudentName = "Student 2", HallName = "Male", RoomNo = "102" },
+            new() { Id = student3Id, Gender = "Male", Status = MealResolutionContext.BillableStatus, JoinDate = new DateOnly(2026, 1, 1), StudentId = "S3", StudentName = "Student 3", HallName = "Male", RoomNo = "103" },
+        };
+
+        var preferences = new Dictionary<(Guid, string, DayOfWeek), List<HallBackend.Domain.Entities.MealPreferenceHistory>>
+        {
+            [(student1Id, "lunch", DayOfWeek.Thursday)] = new()
+            {
+                new() { StudentId = student1Id, MealPeriod = "lunch", DayOfWeek = DayOfWeek.Thursday, OptionItemId = egg, EffectiveFrom = new DateOnly(2026, 9, 1) }
+            },
+            [(student3Id, "lunch", DayOfWeek.Thursday)] = new()
+            {
+                new() { StudentId = student3Id, MealPeriod = "lunch", DayOfWeek = DayOfWeek.Thursday, OptionItemId = obsoleteBeef, EffectiveFrom = new DateOnly(2026, 8, 1) }
+            }
+        };
+
+        var menuOptions = new Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MealResolutionContext.MenuOptionConfig>
+        {
+            [("Male", DayOfWeek.Thursday, "lunch")] = new(new HashSet<Guid> { fishRui, egg }, fishRui)
+        };
+
+        var context = new MealResolutionContext(
+            students,
+            [],
+            [],
+            preferences,
+            menuOptions);
+
+        // Past or current date (cutoff passed) -> resolves explicit choice or falls back to default
+        Assert.Equal(egg, context.FindSelectedOption(student1Id, "lunch", date));
+        Assert.Equal(fishRui, context.FindSelectedOption(student2Id, "lunch", date));
+        Assert.Equal(fishRui, context.FindSelectedOption(student3Id, "lunch", date));
+
+        // Future date (cutoff NOT passed) -> resolves explicit choice, but does NOT assign default yet
+        var futureDate = HallClock.Today.AddDays(5);
+        Assert.Null(context.FindSelectedOption(student2Id, "lunch", futureDate));
+    }
 }
+

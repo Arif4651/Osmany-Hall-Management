@@ -22,7 +22,7 @@ public sealed record MealEntryDto(string MealTypeId, IReadOnlyList<MealItemDto> 
 public sealed record MealDayDto(string Id, string Label, int Order, IReadOnlyList<MealEntryDto> Meals);
 public sealed record MealSettingsDto(TimeOnly CutoffTime, IReadOnlyList<MealTypeDto> MealTypes, int ForecastMaxOptions);
 public sealed record MealModuleDto(MealSettingsDto Settings, IReadOnlyList<MealDayDto> Days);
-public sealed record MealCountOptionDto(Guid OptionItemId, string Name, decimal Cost, int StudentCount);
+public sealed record MealCountOptionDto(Guid OptionItemId, string Name, decimal Cost, int StudentCount, bool IsDefault = false);
 public sealed record MealCountDto(
     string MealTypeId,
     string MealTypeLabel,

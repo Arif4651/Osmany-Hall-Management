@@ -246,6 +246,9 @@ public sealed class MealsController(
             .Where(x => x.MealDay!.Code == dayCode && x.Wing == selectedWing)
             .ToListAsync(cancellationToken);
 
+        var earliest = await GetEarliestStudentChangeDateAsync(selectedWing, cancellationToken);
+        var isCutoffPassed = target < earliest;
+
         var counts = mealTypes.Select(type =>
         {
             var enabledStudents = activeStudents
@@ -258,43 +261,65 @@ public sealed class MealsController(
                     overrides))
                 .Select(student => student.Id)
                 .ToList();
-            var selectedOptionCounts = enabledStudents
-                .Select(studentId => preferences
-                    .Where(x => x.StudentId == studentId && x.MealPeriod == type.Code)
-                    .OrderByDescending(x => x.EffectiveFrom)
-                    .FirstOrDefault()?.OptionItemId)
-                .Where(x => x.HasValue && optionItems.ContainsKey(x.Value))
-                .Select(x => x!.Value)
-                .GroupBy(x => x)
-                .ToDictionary(group => group.Key, group => group.Count());
-            var configuredOptionIds = menuConfigurations
-                .Where(x => x.MealType!.Code == type.Code)
-                .SelectMany(x => x.Items)
-                .Where(x => x.IsOptional && x.InventoryItemId.HasValue)
+
+            var menuConfig = menuConfigurations.FirstOrDefault(x => x.MealType!.Code == type.Code);
+            var optionalItems = menuConfig?.Items
+                .Where(x => x.IsOptional && x.InventoryItemId.HasValue && optionItems.ContainsKey(x.InventoryItemId.Value))
+                .ToList() ?? [];
+
+            var availableOptionIds = optionalItems.Select(x => x.InventoryItemId!.Value).ToHashSet();
+            var defaultOptionId = optionalItems.FirstOrDefault(x => x.IsDefault)?.InventoryItemId;
+
+            var studentPreferences = preferences
+                .Where(x => x.MealPeriod == type.Code)
+                .GroupBy(x => x.StudentId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).First().OptionItemId);
+
+            var resolvedOptionCounts = new Dictionary<Guid, int>();
+            foreach (var studentId in enabledStudents)
+            {
+                var prefId = studentPreferences.GetValueOrDefault(studentId);
+                Guid? resolvedId = null;
+                if (prefId.HasValue && availableOptionIds.Contains(prefId.Value))
+                {
+                    resolvedId = prefId.Value;
+                }
+                else if (isCutoffPassed && defaultOptionId.HasValue)
+                {
+                    resolvedId = defaultOptionId.Value;
+                }
+
+                if (resolvedId.HasValue)
+                {
+                    resolvedOptionCounts[resolvedId.Value] = resolvedOptionCounts.GetValueOrDefault(resolvedId.Value) + 1;
+                }
+            }
+
+            var configuredOptionIds = optionalItems
                 .Select(x => x.InventoryItemId!.Value)
-                .Where(optionItems.ContainsKey)
-                .Concat(selectedOptionCounts.Keys)
+                .Concat(resolvedOptionCounts.Keys)
                 .Distinct()
                 .ToList();
-            var configuredOptionCosts = menuConfigurations
-                .Where(x => x.MealType!.Code == type.Code)
-                .SelectMany(x => x.Items)
-                .Where(x => x.IsOptional && x.InventoryItemId.HasValue)
+            var configuredOptionCosts = optionalItems
                 .GroupBy(x => x.InventoryItemId!.Value)
                 .ToDictionary(x => x.Key, x => x.First().Cost);
+
             var choices = configuredOptionIds
                 .Select(optionId =>
                 {
                     var option = optionItems[optionId];
+                    var isDef = defaultOptionId.HasValue && defaultOptionId.Value == optionId;
                     return new MealCountOptionDto(
                         option.Id,
                         option.Item,
                         configuredOptionCosts.GetValueOrDefault(optionId),
-                        selectedOptionCounts.GetValueOrDefault(optionId));
+                        resolvedOptionCounts.GetValueOrDefault(optionId),
+                        isDef);
                 })
                 .OrderByDescending(x => x.StudentCount)
                 .ThenBy(x => x.Name)
                 .ToList();
+
             return new MealCountDto(
                 type.Code,
                 type.Label,
@@ -430,13 +455,8 @@ public sealed class MealsController(
             .ToListAsync(cancellationToken);
 
         // Determine whether cutoff has already passed for the effective date.
-        var cutoff = await db.MealSettings.AsNoTracking()
-            .Where(x => x.Wing == wing)
-            .OrderBy(x => x.CreatedAtUtc)
-            .Select(x => (TimeOnly?)x.CutoffTime)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? new TimeOnly(17, 0);
-        var isCutoffPassed = HallClock.TimeOfDay >= cutoff;
+        var earliest = await GetEarliestStudentChangeDateAsync(wing, cancellationToken);
+        var isCutoffPassed = target < earliest;
 
         // Eagerly track whether we need to write any defaults so we can save once.
         var wroteDefault = false;
@@ -980,11 +1000,53 @@ public sealed class MealsController(
             var overrides = await db.GlobalMealOverrides.AsNoTracking()
                 .Where(x => x.Wing == selectedWing && x.EffectiveFrom <= target && x.EffectiveTo >= target)
                 .ToListAsync(cancellationToken);
+            var dayCode = target.DayOfWeek.ToString()[..3].ToLowerInvariant();
+            var menuConfigurations = await db.MealConfigurations.AsNoTracking()
+                .Include(x => x.MealDay)
+                .Include(x => x.MealType)
+                .Include(x => x.Items)
+                .Where(x => x.MealDay!.Code == dayCode && x.Wing == selectedWing)
+                .ToListAsync(cancellationToken);
+
+            var earliest = await GetEarliestStudentChangeDateAsync(selectedWing, cancellationToken);
+            var isCutoffPassed = target < earliest;
+
+            var periodConfigs = MealHistoryService.MealPeriods.ToDictionary(
+                period => period,
+                period =>
+                {
+                    var config = menuConfigurations.FirstOrDefault(x => x.MealType!.Code == period);
+                    var optItems = config?.Items
+                        .Where(x => x.IsOptional && x.InventoryItemId.HasValue && optionNames.ContainsKey(x.InventoryItemId.Value))
+                        .ToList() ?? [];
+                    var availableIds = optItems.Select(x => x.InventoryItemId!.Value).ToHashSet();
+                    var defaultId = optItems.FirstOrDefault(x => x.IsDefault)?.InventoryItemId;
+                    return (AvailableIds: availableIds, DefaultId: defaultId);
+                });
+
             var guestMealsByStudentAndPeriod = guestMeals.ToDictionary(x => (x.StudentId, x.MealPeriod), x => x.GuestCount);
             var guestMealIdsByStudentAndPeriod = guestMeals.ToDictionary(x => (x.StudentId, x.MealPeriod), x => x.Id);
             var preferencesByStudentAndPeriod = preferences
                 .GroupBy(x => (x.StudentId, x.MealPeriod))
                 .ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.EffectiveFrom).First());
+
+            string? ResolveOptionName(string period, bool isOn, MealPreferenceHistory? pref)
+            {
+                if (!isOn) return null;
+                var pConf = periodConfigs[period];
+                if (pConf.AvailableIds.Count == 0) return null;
+
+                var prefId = pref?.OptionItemId;
+                if (prefId.HasValue && pConf.AvailableIds.Contains(prefId.Value))
+                {
+                    return optionNames.GetValueOrDefault(prefId.Value);
+                }
+                if (isCutoffPassed && pConf.DefaultId.HasValue)
+                {
+                    return optionNames.GetValueOrDefault(pConf.DefaultId.Value);
+                }
+                return null;
+            }
 
             foreach (var student in students)
             {
@@ -1014,9 +1076,9 @@ public sealed class MealsController(
                     bOn,
                     lOn,
                     dOn,
-                    optionNames.GetValueOrDefault(bPreference?.OptionItemId ?? Guid.Empty),
-                    optionNames.GetValueOrDefault(lPreference?.OptionItemId ?? Guid.Empty),
-                    optionNames.GetValueOrDefault(dPreference?.OptionItemId ?? Guid.Empty),
+                    ResolveOptionName("breakfast", bOn, bPreference),
+                    ResolveOptionName("lunch", lOn, lPreference),
+                    ResolveOptionName("dinner", dOn, dPreference),
                     bGuest,
                     lGuest,
                     dGuest,
@@ -1178,17 +1240,38 @@ public sealed class MealsController(
                 var isOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, period, target, statuses, overrides);
                 var savedPrefId = preference?.OptionItemId;
                 var savedIsValid = savedPrefId.HasValue && availableOptions.Any(x => x.Id == savedPrefId.Value);
-                var adminState = (!isOn || availableOptions.Count == 0)
-                    ? OptionSelectionState.NotRequired
-                    : savedIsValid
-                        ? OptionSelectionState.Selected
-                        : OptionSelectionState.SelectionRequired;
+                var defaultOption = availableOptions.FirstOrDefault(x => x.IsDefault);
+
+                Guid? effectiveOptionId = null;
+                string? effectiveOptionName = null;
+                string adminState;
+
+                if (!isOn || availableOptions.Count == 0)
+                {
+                    adminState = OptionSelectionState.NotRequired;
+                }
+                else if (savedIsValid)
+                {
+                    effectiveOptionId = savedPrefId;
+                    effectiveOptionName = availableOptions.FirstOrDefault(x => x.Id == savedPrefId)?.Name;
+                    adminState = OptionSelectionState.Selected;
+                }
+                else if (defaultOption != null)
+                {
+                    effectiveOptionId = defaultOption.Id;
+                    effectiveOptionName = defaultOption.Name;
+                    adminState = OptionSelectionState.DefaultAssigned;
+                }
+                else
+                {
+                    adminState = OptionSelectionState.SelectionRequired;
+                }
 
                 return new AdminStudentMealStatusDto(
                     period,
                     isOn,
-                    preference?.OptionItemId,
-                    availableOptions.FirstOrDefault(x => x.Id == preference?.OptionItemId)?.Name,
+                    effectiveOptionId,
+                    effectiveOptionName,
                     availableOptions,
                     adminState);
             })

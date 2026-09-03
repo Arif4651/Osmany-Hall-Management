@@ -28,21 +28,52 @@ public sealed class MealResolutionContext
     /// </summary>
     public const string BillableStatus = "active";
 
+    public sealed record MenuOptionConfig(
+        HashSet<Guid> AvailableOptionItemIds,
+        Guid? DefaultOptionItemId);
+
+    private static readonly Dictionary<string, DayOfWeek> DayCodeToDayOfWeek = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["sun"] = DayOfWeek.Sunday,
+        ["mon"] = DayOfWeek.Monday,
+        ["tue"] = DayOfWeek.Tuesday,
+        ["wed"] = DayOfWeek.Wednesday,
+        ["thu"] = DayOfWeek.Thursday,
+        ["fri"] = DayOfWeek.Friday,
+        ["sat"] = DayOfWeek.Saturday,
+    };
+
     private readonly Dictionary<(string Wing, string MealPeriod), List<GlobalMealOverride>> overrides;
     private readonly Dictionary<(Guid StudentId, string MealPeriod), List<MealStatusHistory>> statuses;
     private readonly Dictionary<(Guid StudentId, string MealPeriod, DayOfWeek DayOfWeek), List<MealPreferenceHistory>> preferences;
+    private readonly Dictionary<Guid, Student> studentsById;
+    private readonly Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MenuOptionConfig> menuOptions;
+    private readonly Dictionary<string, TimeOnly> wingCutoffs;
 
-    private MealResolutionContext(
+    public MealResolutionContext(
         List<Student> students,
         Dictionary<(string, string), List<GlobalMealOverride>> overrides,
         Dictionary<(Guid, string), List<MealStatusHistory>> statuses,
-        Dictionary<(Guid, string, DayOfWeek), List<MealPreferenceHistory>> preferences)
+        Dictionary<(Guid, string, DayOfWeek), List<MealPreferenceHistory>> preferences,
+        Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MenuOptionConfig>? menuOptions = null,
+        Dictionary<string, TimeOnly>? wingCutoffs = null)
     {
         Students = students;
         StudentsByWing = students.GroupBy(x => x.Gender).ToDictionary(g => g.Key, g => g.ToList());
+        studentsById = students.ToDictionary(x => x.Id);
         this.overrides = overrides;
         this.statuses = statuses;
         this.preferences = preferences;
+        this.menuOptions = menuOptions ?? [];
+        this.wingCutoffs = wingCutoffs ?? new Dictionary<string, TimeOnly>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public bool IsCutoffPassed(DateOnly targetDate, string wing)
+    {
+        var cutoff = wingCutoffs.GetValueOrDefault(wing, new TimeOnly(17, 0));
+        var daysAhead = HallClock.TimeOfDay >= cutoff ? 2 : 1;
+        var earliest = HallClock.Today.AddDays(daysAhead);
+        return targetDate < earliest;
     }
 
     public IReadOnlyList<Student> Students { get; }
@@ -72,6 +103,43 @@ public sealed class MealResolutionContext
             .Where(x => x.EffectiveFrom <= to && (x.EffectiveTo == null || x.EffectiveTo >= from))
             .ToListAsync(cancellationToken);
 
+        var menuConfigs = await db.MealConfigurations.AsNoTracking()
+            .Include(x => x.MealDay)
+            .Include(x => x.MealType)
+            .Include(x => x.Items)
+            .ThenInclude(x => x.InventoryItem)
+            .ToListAsync(cancellationToken);
+
+        var menuOptionsMap = new Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MenuOptionConfig>();
+        foreach (var config in menuConfigs)
+        {
+            if (string.IsNullOrWhiteSpace(config.Wing)
+                || config.MealDay is null
+                || !DayCodeToDayOfWeek.TryGetValue(config.MealDay.Code, out var dow)
+                || config.MealType is null)
+            {
+                continue;
+            }
+
+            var optionalItems = config.Items
+                .Where(x => x.IsOptional
+                    && x.InventoryItemId.HasValue
+                    && x.InventoryItem != null
+                    && !x.InventoryItem.IsDeleted
+                    && x.InventoryItem.Category == "Options")
+                .ToList();
+
+            var availableIds = optionalItems.Select(x => x.InventoryItemId!.Value).ToHashSet();
+            var defaultId = optionalItems.FirstOrDefault(x => x.IsDefault)?.InventoryItemId;
+
+            menuOptionsMap[(config.Wing, dow, config.MealType.Code)] = new MenuOptionConfig(availableIds, defaultId);
+        }
+
+        var settingRows = await db.MealSettings.AsNoTracking().ToListAsync(cancellationToken);
+        var wingCutoffs = settingRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.Wing))
+            .ToDictionary(x => x.Wing!, x => x.CutoffTime, StringComparer.OrdinalIgnoreCase);
+
         return new MealResolutionContext(
             students,
             overrideRows
@@ -82,7 +150,9 @@ public sealed class MealResolutionContext
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList()),
             preferenceRows
                 .GroupBy(x => (x.StudentId, x.MealPeriod, x.DayOfWeek))
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList()));
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList()),
+            menuOptionsMap,
+            wingCutoffs);
     }
 
     /// <summary>The wing-level override in effect for that period and date, if any. Beats individual status.</summary>
@@ -135,11 +205,39 @@ public sealed class MealResolutionContext
         && DateOnly.FromDateTime(createdAtUtc) == date
         && createdAtUtc > asOfUtc.Value;
 
-    /// <summary>The option the student had selected for that meal on that weekday, if any.</summary>
+    /// <summary>
+    /// The option the student has resolved for that meal on that date:
+    /// returns the student's valid saved preference if present on that day's configured menu;
+    /// otherwise falls back to the menu's default optional item if configured.
+    /// </summary>
     public Guid? FindSelectedOption(Guid studentId, string mealPeriod, DateOnly date)
-        => preferences.TryGetValue((studentId, mealPeriod, date.DayOfWeek), out var rows)
-            ? rows.FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))?.OptionItemId
-            : null;
+    {
+        if (!studentsById.TryGetValue(studentId, out var student)) return null;
+
+        var wing = student.Gender;
+        menuOptions.TryGetValue((wing, date.DayOfWeek, mealPeriod), out var menuConfig);
+
+        Guid? savedOptionId = null;
+        if (preferences.TryGetValue((studentId, mealPeriod, date.DayOfWeek), out var rows))
+        {
+            savedOptionId = rows.FirstOrDefault(x => x.EffectiveFrom <= date && (x.EffectiveTo == null || x.EffectiveTo >= date))?.OptionItemId;
+        }
+
+        // Student has a valid saved selection that is currently active on the configured menu
+        if (savedOptionId.HasValue && menuConfig != null && menuConfig.AvailableOptionItemIds.Contains(savedOptionId.Value))
+        {
+            return savedOptionId.Value;
+        }
+
+        // Cutoff/auto-assignment fallback: admin configured default item for this meal,
+        // ONLY if the cutoff for this target date has already passed.
+        if (IsCutoffPassed(date, wing) && menuConfig?.DefaultOptionItemId != null)
+        {
+            return menuConfig.DefaultOptionItemId.Value;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Students in the item's wing who are charged for it on that date and meal period.
