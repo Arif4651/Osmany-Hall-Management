@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Calculator, Coffee, HandCoins, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { Calculator, Coffee, HandCoins, RefreshCcw, ShieldAlert, ArrowUpDown, Search, X } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
@@ -23,6 +23,20 @@ const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), sta
 const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
 const tailHeaders = ['Due Bill', 'Total Bill', 'Status'];
 const emptySubsidyForm = { wing: 'Male', subsidyAmount: '', date: todayLocal(), mealPeriod: 'breakfast', notes: '' };
+
+const HEADER_KEY_MAP = {
+  'Student Name': 'studentName',
+  'Roll': 'rollNumber',
+  'Hall ID': 'hallId',
+  'Service Bill': 'serviceBill',
+  'Monthly Bill': 'monthlyBill',
+  'DSW Subsidy': 'dswSubsidy',
+  'Guest Meal Bill': 'guestMealBill',
+  'Others Bill': 'othersBill',
+  'Due Bill': 'dueBill',
+  'Total Bill': 'totalBill',
+  'Status': 'status',
+};
 
 const getAlign = (header) => {
   if (['Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Others Bill', 'Due Bill', 'Total Bill'].includes(header)) return 'right';
@@ -151,6 +165,65 @@ export default function BillingManagement() {
   const rows = combinedData?.rows || [];
   const dswSubsidies = combinedData?.dswSubsidies || [];
 
+  // Search & Sorting States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState('studentName');
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  const filteredAndSortedRows = useMemo(() => {
+    let list = [...rows];
+
+    // Search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((r) =>
+        r.studentName?.toLowerCase().includes(q) ||
+        r.rollNumber?.toLowerCase().includes(q) ||
+        r.hallId?.toLowerCase().includes(q) ||
+        String(r.status || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Column sorting
+    list.sort((a, b) => {
+      let valA = a[sortField] ?? '';
+      let valB = b[sortField] ?? '';
+
+      // Numeric fields
+      const numericFields = ['serviceBill', 'monthlyBill', 'dswSubsidy', 'guestMealBill', 'othersBill', 'dueBill', 'totalBill'];
+      if (numericFields.includes(sortField)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+        return sortAsc ? valA - valB : valB - valA;
+      }
+
+      // Numeric ID sort if parseable
+      if (sortField === 'hallId' || sortField === 'rollNumber') {
+        const numA = parseInt(valA, 10);
+        const numB = parseInt(valB, 10);
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return sortAsc ? numA - numB : numB - numA;
+        }
+      }
+
+      if (typeof valA === 'string') {
+        return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return sortAsc ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+    });
+
+    return list;
+  }, [rows, searchQuery, sortField, sortAsc]);
+
   useEffect(() => {
     if (combinedData) {
       setServiceAmount(combinedData.serviceAmount || '');
@@ -265,7 +338,7 @@ export default function BillingManagement() {
   };
 
 
-  const exportRows = () => rows.map((row) => ({
+  const exportRows = () => filteredAndSortedRows.map((row) => ({
     'Student Name': row.studentName,
     Roll: row.rollNumber,
     'Hall ID': row.hallId,
@@ -284,7 +357,7 @@ export default function BillingManagement() {
     const book = utils.book_new();
     utils.book_append_sheet(book, sheet, 'Bills');
     writeFile(book, `bills-${filters.year}-${filters.month}.csv`, { bookType: 'csv' });
-    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.csv`);
+    toast.success('Bills exported', `${filteredAndSortedRows.length} students · bills-${filters.year}-${filters.month}.csv`);
   };
 
   const exportExcel = () => {
@@ -292,14 +365,14 @@ export default function BillingManagement() {
     const book = utils.book_new();
     utils.book_append_sheet(book, sheet, 'Bills');
     writeFile(book, `bills-${filters.year}-${filters.month}.xlsx`);
-    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.xlsx`);
+    toast.success('Bills exported', `${filteredAndSortedRows.length} students · bills-${filters.year}-${filters.month}.xlsx`);
   };
 
   const exportPdf = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
     autoTable(doc, {
       head: [headers],
-      body: rows.map((row) => [
+      body: filteredAndSortedRows.map((row) => [
         row.studentName,
         row.rollNumber,
         row.hallId,
@@ -314,7 +387,7 @@ export default function BillingManagement() {
       ]),
     });
     doc.save(`bills-${filters.year}-${filters.month}.pdf`);
-    toast.success('Bills exported', `${rows.length} students · bills-${filters.year}-${filters.month}.pdf`);
+    toast.success('Bills exported', `${filteredAndSortedRows.length} students · bills-${filters.year}-${filters.month}.pdf`);
   };
 
   const saveService = async (event) => {
@@ -659,6 +732,43 @@ export default function BillingManagement() {
       </div>
 
       <section className="financial-card billing-table-card">
+        {/* Internal Search & Row Count Header */}
+        <div className="billing-search-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          <div style={{ position: 'relative', minWidth: '260px', maxWidth: '380px', flex: 1 }}>
+            <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by student name, roll, hall ID, status..."
+              style={{
+                width: '100%',
+                padding: '0.5rem 2rem 0.5rem 2.2rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                background: '#ffffff',
+                fontSize: '0.88rem',
+                outline: 'none',
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '2px' }}
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--muted)', fontWeight: 600 }}>
+            {filteredAndSortedRows.length === rows.length
+              ? `Total: ${rows.length} students`
+              : `Showing: ${filteredAndSortedRows.length} of ${rows.length} students`}
+          </div>
+        </div>
+
         {loading && !rows.length ? (
           <TableSkeleton rows={8} cols={headers.length} />
         ) : (
@@ -666,20 +776,44 @@ export default function BillingManagement() {
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {headers.map((header) => (
-                    <th key={header} style={{ textAlign: getAlign(header), padding: '0.75rem' }}>{header}</th>
-                  ))}
+                  {headers.map((header) => {
+                    const fieldKey = HEADER_KEY_MAP[header] || header;
+                    return (
+                      <th
+                        key={header}
+                        onClick={() => toggleSort(fieldKey)}
+                        style={{
+                          textAlign: getAlign(header),
+                          padding: '0.75rem',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                        }}
+                        title={`Sort by ${header}`}
+                      >
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          justifyContent: getAlign(header) === 'right' ? 'flex-end' : getAlign(header) === 'center' ? 'center' : 'flex-start',
+                          width: '100%',
+                        }}>
+                          {header}
+                          <ArrowUpDown size={12} style={{ opacity: sortField === fieldKey ? 1 : 0.35, flexShrink: 0 }} />
+                        </span>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {filteredAndSortedRows.length === 0 ? (
                   <tr>
                     <td colSpan={headers.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>
-                      No billing records found.
+                      {rows.length === 0 ? 'No billing records found.' : 'No students found matching your search.'}
                     </td>
                   </tr>
                 ) : (
-                rows.map((row) => {
+                filteredAndSortedRows.map((row) => {
                   const statusNorm = String(row.status || '').toLowerCase().replace('_', ' ').trim();
                   let badgeBg = '#f1f5f9';
                   let badgeColor = '#64748b';

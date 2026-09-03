@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FileSpreadsheet, FileText, Printer, AlertCircle, ArrowRight } from 'lucide-react';
+import { FileSpreadsheet, FileText, Printer, AlertCircle, ArrowRight, ArrowUpDown, Search, X } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
@@ -38,9 +38,21 @@ export default function DueBill() {
   const [modalError, setModalError] = useState('');
   const [highlightedId, setHighlightedId] = useState(null);
 
-  // Filter States
+  // Filter & Search & Sort States
   const [filterAmount, setFilterAmount] = useState('');
   const [filterCondition, setFilterCondition] = useState('all'); // 'all', 'above', 'below'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState('studentName');
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
 
   const cacheKey = `due-rows-${period.month}-${period.year}-${gender}`;
 
@@ -127,22 +139,63 @@ export default function DueBill() {
     }
   };
 
-  // Client-side filtering logic for instant UX updates
+  // Client-side filtering and sorting logic
   const filteredRows = useMemo(() => {
-    if (filterCondition === 'all') return rows;
-    const threshold = parseFloat(filterAmount);
-    if (isNaN(threshold)) return rows;
+    let list = [...rows];
 
-    return rows.filter((row) => {
-      if (filterCondition === 'above') {
-        return row.dueBill >= threshold;
+    // Dues threshold filter
+    if (filterCondition !== 'all') {
+      const threshold = parseFloat(filterAmount);
+      if (!isNaN(threshold)) {
+        if (filterCondition === 'above') {
+          list = list.filter((row) => (row.dueBill ?? 0) >= threshold);
+        } else if (filterCondition === 'below') {
+          list = list.filter((row) => (row.dueBill ?? 0) <= threshold);
+        }
       }
-      if (filterCondition === 'below') {
-        return row.dueBill <= threshold;
+    }
+
+    // Internal search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((r) =>
+        r.studentName?.toLowerCase().includes(q) ||
+        r.studentCode?.toLowerCase().includes(q) ||
+        r.department?.toLowerCase().includes(q) ||
+        r.mobileNumber?.toLowerCase().includes(q) ||
+        r.hallId?.toLowerCase().includes(q)
+      );
+    }
+
+    // Column sorting
+    list.sort((a, b) => {
+      let valA = a[sortField] ?? '';
+      let valB = b[sortField] ?? '';
+
+      // Numeric due bill sort
+      if (sortField === 'dueBill') {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+        return sortAsc ? valA - valB : valB - valA;
       }
-      return true;
+
+      // Numeric hall ID sort if digits
+      if (sortField === 'hallId') {
+        const numA = parseInt(valA, 10);
+        const numB = parseInt(valB, 10);
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return sortAsc ? numA - numB : numB - numA;
+        }
+      }
+
+      if (typeof valA === 'string') {
+        return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return sortAsc ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
     });
-  }, [rows, filterAmount, filterCondition]);
+
+    return list;
+  }, [rows, filterAmount, filterCondition, searchQuery, sortField, sortAsc]);
 
   const flatRows = () => filteredRows.map((row) => ({
     'Student Name': row.studentName,
@@ -370,12 +423,44 @@ export default function DueBill() {
           )}
         </div>
 
-        {(filterCondition !== 'all' || filterAmount) && (
+        {/* Internal Search Input */}
+        <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 220px', maxWidth: '380px' }}>
+          <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', pointerEvents: 'none' }} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name, ID, mobile, hall..."
+            style={{
+              width: '100%',
+              padding: '0.5rem 2rem 0.5rem 2.2rem',
+              borderRadius: '6px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface, #ffffff)',
+              color: 'var(--text)',
+              fontSize: '0.9rem',
+              outline: 'none',
+            }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '2px' }}
+              title="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {(filterCondition !== 'all' || filterAmount || searchQuery) && (
           <button
             type="button"
             onClick={() => {
               setFilterCondition('all');
               setFilterAmount('');
+              setSearchQuery('');
             }}
             style={{
               background: 'none',
@@ -418,12 +503,36 @@ export default function DueBill() {
               </colgroup>
               <thead>
                 <tr>
-                  <th>Student Name</th>
-                  <th>Student ID</th>
-                  <th>Department</th>
-                  <th>Mobile Number</th>
-                  <th>Hall ID</th>
-                  <th className="due-amount-cell">Current Due Bill</th>
+                  <th onClick={() => toggleSort('studentName')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      Student Name <ArrowUpDown size={12} style={{ opacity: sortField === 'studentName' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
+                  <th onClick={() => toggleSort('studentCode')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      Student ID <ArrowUpDown size={12} style={{ opacity: sortField === 'studentCode' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
+                  <th onClick={() => toggleSort('department')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      Department <ArrowUpDown size={12} style={{ opacity: sortField === 'department' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
+                  <th onClick={() => toggleSort('mobileNumber')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      Mobile Number <ArrowUpDown size={12} style={{ opacity: sortField === 'mobileNumber' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
+                  <th onClick={() => toggleSort('hallId')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      Hall ID <ArrowUpDown size={12} style={{ opacity: sortField === 'hallId' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
+                  <th onClick={() => toggleSort('dueBill')} className="due-amount-cell" style={{ cursor: 'pointer', userSelect: 'none', textAlign: 'right' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', width: '100%' }}>
+                      Current Due Bill <ArrowUpDown size={12} style={{ opacity: sortField === 'dueBill' ? 1 : 0.4 }} />
+                    </span>
+                  </th>
                   <th className="due-action-cell">Action</th>
                 </tr>
               </thead>
