@@ -737,12 +737,25 @@ export default function AdminMealManagement() {
               <div className="admin-meal-count-grid">
                 {(counts?.meals || []).map((meal) => {
                   const onPercent = meal.totalStudents ? Math.round((meal.enabledStudents / meal.totalStudents) * 100) : 0;
+                  const totalMeals = meal.totalMeals ?? (meal.enabledStudents + (meal.guestCount || 0));
+                  const guestCount = meal.guestCount || 0;
                   return (
                     <article key={meal.mealTypeId} className="admin-meal-count-card">
                       <div className="admin-meal-count-title"><h3>{meal.mealTypeLabel}</h3><span>{onPercent}% active</span></div>
                       <div className="admin-meal-progress"><i style={{ width: `${onPercent}%` }} /></div>
                       <div className="admin-meal-count-numbers">
-                        <span className="count-on"><b>{meal.enabledStudents}</b> Meal On</span>
+                        <span className="count-on">
+                          <b>{totalMeals}</b> Total Meals
+                          {guestCount > 0 ? (
+                            <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600 }}>
+                              ({meal.enabledStudents} Student + {guestCount} Guest)
+                            </small>
+                          ) : (
+                            <small style={{ display: 'block', fontSize: '0.74rem', color: '#64748b', fontWeight: 500 }}>
+                              (Meal On)
+                            </small>
+                          )}
+                        </span>
                         <span className="count-off"><b>{meal.disabledStudents}</b> Meal Off</span>
                         <span><b>{meal.totalStudents}</b> Students</span>
                       </div>
@@ -758,12 +771,19 @@ export default function AdminMealManagement() {
                                 </span>
                               ) : null}
                             </span>
-                            <b>{option.studentCount}</b>
+                            <div style={{ textAlign: 'right' }}>
+                              <b>{option.studentCount}</b>
+                              {option.guestCount > 0 && (
+                                <small style={{ display: 'block', fontSize: '0.72rem', color: '#059669', fontWeight: 500 }}>
+                                  ({option.studentCount - option.guestCount} + {option.guestCount} Guest)
+                                </small>
+                              )}
+                            </div>
                           </div>
                         ))}
                         {(() => {
                           const selectedTotal = meal.optionalChoices.reduce((sum, opt) => sum + opt.studentCount, 0);
-                          const unselectedCount = Math.max(0, meal.enabledStudents - selectedTotal);
+                          const unselectedCount = Math.max(0, totalMeals - selectedTotal);
                           if (unselectedCount > 0 && meal.optionalChoices.length > 0) {
                             return (
                               <div key="unselected" style={{ color: '#64748b', borderTop: '1px dashed #e2e8f0', marginTop: '0.25rem', paddingTop: '0.25rem' }}>

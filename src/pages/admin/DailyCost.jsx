@@ -78,13 +78,18 @@ export default function DailyCost() {
         if (!meal.options || meal.options.length === 0) return fmt(meal.cost);
         return meal.options.map(o => `${o.name}: ${fmt(o.cost)}`).join(' | ');
       };
+      const formatStudents = (meal) => {
+        const total = meal.totalMeals ?? meal.students;
+        const g = meal.guestCount || 0;
+        return g > 0 ? `${total} (${total - g}+${g}G)` : `${total}`;
+      };
       return {
         Date: row.date,
-        ...(isStudentView ? {} : { 'Breakfast Cost': formatCost(row.breakfast), 'B. Students': row.breakfast.students }),
+        ...(isStudentView ? {} : { 'Breakfast Cost': formatCost(row.breakfast), 'B. Students': formatStudents(row.breakfast) }),
         [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.breakfast)),
-        ...(isStudentView ? {} : { 'Lunch Cost': formatCost(row.lunch), 'L. Students': row.lunch.students }),
+        ...(isStudentView ? {} : { 'Lunch Cost': formatCost(row.lunch), 'L. Students': formatStudents(row.lunch) }),
         [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.lunch)),
-        ...(isStudentView ? {} : { 'Dinner Cost': formatCost(row.dinner), 'D. Students': row.dinner.students }),
+        ...(isStudentView ? {} : { 'Dinner Cost': formatCost(row.dinner), 'D. Students': formatStudents(row.dinner) }),
         [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.dinner)),
         [totalCostColumnLabel]: fmt(getRowDisplayTotal(row)),
       };
@@ -116,18 +121,35 @@ export default function DailyCost() {
   };
 
   const renderStudentsCell = (meal) => {
+    const total = meal.totalMeals ?? meal.students;
+    const guestCount = meal.guestCount || 0;
+    const regular = total - guestCount;
     return (
       <td className="cell-student">
-        <strong style={{ fontSize: '1rem', color: '#1e293b' }}>{meal.students}</strong>
+        <strong style={{ fontSize: '1rem', color: '#1e293b' }}>{total}</strong>
+        {guestCount > 0 && (
+          <small style={{ display: 'block', fontSize: '0.72rem', color: '#059669', fontWeight: 600 }}>
+            ({regular} + {guestCount} Guest)
+          </small>
+        )}
         {meal.options && meal.options.length > 0 && (
           <div className="daily-cost-option-badge-list">
             {meal.options
               .filter((opt) => opt.name.toLowerCase() !== 'common')
-              .map((opt) => (
-                <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
-                  {opt.name}: <b>{opt.students}</b>
-                </span>
-              ))}
+              .map((opt) => {
+                const optTotal = opt.totalMeals ?? opt.students;
+                const optGuest = opt.guestCount || 0;
+                return (
+                  <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
+                    {opt.name}: <b>{optTotal}</b>
+                    {optGuest > 0 && (
+                      <small style={{ marginLeft: '0.2rem', opacity: 0.85, fontSize: '0.68rem' }}>
+                        ({optTotal - optGuest}+{optGuest}G)
+                      </small>
+                    )}
+                  </span>
+                );
+              })}
           </div>
         )}
       </td>
