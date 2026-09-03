@@ -94,7 +94,10 @@ public sealed record DailyCostMealDto(
     decimal MyCost,
     IReadOnlyList<DailyCostOptionBreakdownDto> Options,
     int GuestCount = 0,
-    int TotalMeals = 0);
+    int TotalMeals = 0,
+    decimal MyOwnCost = 0,
+    decimal MyGuestCost = 0,
+    int MyGuestCount = 0);
 
 public sealed record DailyCostRowDto(
     DateOnly Date,

@@ -167,10 +167,14 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                     }
                 }
 
+                decimal myOwnCost = 0m;
+                decimal myGuestCost = 0m;
+                int currentStudentGuests = 0;
+
                 if (currentStudentId.HasValue)
                 {
                     var isCurrentStudentOn = participants.Any(p => p.Id == currentStudentId.Value);
-                    var currentStudentGuests = periodGuests.Where(g => g.StudentId == currentStudentId.Value).Sum(g => g.GuestCount);
+                    currentStudentGuests = periodGuests.Where(g => g.StudentId == currentStudentId.Value).Sum(g => g.GuestCount);
                     var myPortions = (isCurrentStudentOn ? 1 : 0) + currentStudentGuests;
 
                     if (myPortions > 0)
@@ -179,7 +183,9 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                         {
                             if (tx.Item is null)
                             {
-                                myCost += FinancialMath.PerHead(tx.TotalCost, totalMeals) * myPortions;
+                                var unitShare = FinancialMath.PerHead(tx.TotalCost, totalMeals);
+                                if (isCurrentStudentOn) myOwnCost += unitShare;
+                                if (currentStudentGuests > 0) myGuestCost += unitShare * currentStudentGuests;
                                 continue;
                             }
 
@@ -192,7 +198,7 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                                 var chargedStudents = meals.Participants(tx.Item, period, date, tx.CreatedAtUtc);
                                 if (chargedStudents.Any(p => p.Id == currentStudentId.Value))
                                 {
-                                    myCost += share;
+                                    myOwnCost += share;
                                 }
                             }
 
@@ -201,21 +207,35 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                                 var chargedGuests = meals.GuestParticipants(tx.Item, period, date);
                                 if (chargedGuests.Any(g => g.StudentId == currentStudentId.Value))
                                 {
-                                    myCost += share * currentStudentGuests;
+                                    myGuestCost += share * currentStudentGuests;
                                 }
                             }
                         }
 
                         // Matches overallPerHead, which is netCost (gross minus subsidy) divided
                         // across every participant regardless of option
-                        if (totalMeals > 0)
+                        if (totalMeals > 0 && subsidyAmount > 0)
                         {
-                            myCost -= (subsidyAmount / totalMeals) * myPortions;
+                            var subsidyPerMeal = subsidyAmount / totalMeals;
+                            if (isCurrentStudentOn) myOwnCost -= subsidyPerMeal;
+                            if (currentStudentGuests > 0) myGuestCost -= subsidyPerMeal * currentStudentGuests;
                         }
                     }
                 }
 
-                return new DailyCostMealDto(netCost, totalMeals, overallPerHead, myCost, optionBreakdowns, totalGuestMeals, totalMeals);
+                myCost = myOwnCost + myGuestCost;
+
+                return new DailyCostMealDto(
+                    netCost,
+                    totalMeals,
+                    overallPerHead,
+                    myCost,
+                    optionBreakdowns,
+                    totalGuestMeals,
+                    totalMeals,
+                    myOwnCost,
+                    myGuestCost,
+                    currentStudentGuests);
             }
 
             DailyCostMealDto breakfast;
@@ -261,28 +281,48 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
             AverageStudents(x => x.Breakfast.Students),
             rows.Sum(x => x.Breakfast.PerHead),
             rows.Sum(x => x.Breakfast.MyCost),
-            new List<DailyCostOptionBreakdownDto>());
+            new List<DailyCostOptionBreakdownDto>(),
+            0,
+            0,
+            rows.Sum(x => x.Breakfast.MyOwnCost),
+            rows.Sum(x => x.Breakfast.MyGuestCost),
+            rows.Sum(x => x.Breakfast.MyGuestCount));
 
         var lunchTotal = new DailyCostMealDto(
             rows.Sum(x => x.Lunch.Cost),
             AverageStudents(x => x.Lunch.Students),
             rows.Sum(x => x.Lunch.PerHead),
             rows.Sum(x => x.Lunch.MyCost),
-            new List<DailyCostOptionBreakdownDto>());
+            new List<DailyCostOptionBreakdownDto>(),
+            0,
+            0,
+            rows.Sum(x => x.Lunch.MyOwnCost),
+            rows.Sum(x => x.Lunch.MyGuestCost),
+            rows.Sum(x => x.Lunch.MyGuestCount));
 
         var dinnerTotal = new DailyCostMealDto(
             rows.Sum(x => x.Dinner.Cost),
             AverageStudents(x => x.Dinner.Students),
             rows.Sum(x => x.Dinner.PerHead),
             rows.Sum(x => x.Dinner.MyCost),
-            new List<DailyCostOptionBreakdownDto>());
+            new List<DailyCostOptionBreakdownDto>(),
+            0,
+            0,
+            rows.Sum(x => x.Dinner.MyOwnCost),
+            rows.Sum(x => x.Dinner.MyGuestCost),
+            rows.Sum(x => x.Dinner.MyGuestCount));
 
         var grand = new DailyCostMealDto(
             breakfastTotal.Cost + lunchTotal.Cost + dinnerTotal.Cost,
             breakfastTotal.Students + lunchTotal.Students + dinnerTotal.Students,
             breakfastTotal.PerHead + lunchTotal.PerHead + dinnerTotal.PerHead,
             breakfastTotal.MyCost + lunchTotal.MyCost + dinnerTotal.MyCost,
-            new List<DailyCostOptionBreakdownDto>());
+            new List<DailyCostOptionBreakdownDto>(),
+            0,
+            0,
+            breakfastTotal.MyOwnCost + lunchTotal.MyOwnCost + dinnerTotal.MyOwnCost,
+            breakfastTotal.MyGuestCost + lunchTotal.MyGuestCost + dinnerTotal.MyGuestCost,
+            breakfastTotal.MyGuestCount + lunchTotal.MyGuestCount + dinnerTotal.MyGuestCount);
 
         return new DailyCostReportDto(month, year, effectiveGender, rows, breakfastTotal, lunchTotal, dinnerTotal, grand);
     }
