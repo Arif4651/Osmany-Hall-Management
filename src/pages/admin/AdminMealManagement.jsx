@@ -748,7 +748,7 @@ export default function AdminMealManagement() {
                           <b>{totalMeals}</b> Total Meals
                           {guestCount > 0 ? (
                             <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600 }}>
-                              ({meal.enabledStudents} Student + {guestCount} Guest)
+                              ({meal.enabledStudents} Students + {guestCount} Guests)
                             </small>
                           ) : (
                             <small style={{ display: 'block', fontSize: '0.74rem', color: '#64748b', fontWeight: 500 }}>
@@ -775,7 +775,7 @@ export default function AdminMealManagement() {
                               <b>{option.studentCount}</b>
                               {option.guestCount > 0 && (
                                 <small style={{ display: 'block', fontSize: '0.72rem', color: '#059669', fontWeight: 500 }}>
-                                  ({option.studentCount - option.guestCount} + {option.guestCount} Guest)
+                                  ({option.studentCount - option.guestCount} Students + {option.guestCount} Guests)
                                 </small>
                               )}
                             </div>

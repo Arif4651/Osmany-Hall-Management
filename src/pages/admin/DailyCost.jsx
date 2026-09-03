@@ -18,8 +18,8 @@ export default function DailyCost() {
   const { user, role } = useAuth();
   const isStudentView = role === 'student';
   const isLockedToWing = role === 'male_wing_admin' || role === 'female_wing_admin' || role === 'student';
-  const costColumnLabel = isStudentView ? 'My Cost' : '/Head';
-  const totalCostColumnLabel = isStudentView ? 'TOTAL My Cost' : 'TOTAL /Head';
+  const costColumnLabel = isStudentView ? 'My Cost' : 'Cost / Meal';
+  const totalCostColumnLabel = isStudentView ? 'TOTAL My Cost' : 'TOTAL Cost / Meal';
 
   // Wing admins and students are locked to their wing gender; super_admin/admin default to 'All'
   const [filters, setFilters] = useState({
@@ -83,28 +83,61 @@ export default function DailyCost() {
         const g = meal.guestCount || 0;
         return g > 0 ? `${total} (${total - g}+${g}G)` : `${total}`;
       };
+      const formatMealCost = (meal) => {
+        const displayVal = getMealDisplayCost(meal);
+        if (isStudentView && (meal.myGuestCount || 0) > 0) {
+          return `${fmt(displayVal)} (Own ${fmt(meal.myOwnCost)} + ${meal.myGuestCount}G ${fmt(meal.myGuestCost)})`;
+        }
+        return fmt(displayVal);
+      };
+      const formatRowTotal = (r) => {
+        const total = getRowDisplayTotal(r);
+        if (isStudentView) {
+          const gCount = (r.breakfast?.myGuestCount || 0) + (r.lunch?.myGuestCount || 0) + (r.dinner?.myGuestCount || 0);
+          if (gCount > 0) {
+            const ownCost = (r.breakfast?.myOwnCost || 0) + (r.lunch?.myOwnCost || 0) + (r.dinner?.myOwnCost || 0);
+            const gCost = (r.breakfast?.myGuestCost || 0) + (r.lunch?.myGuestCost || 0) + (r.dinner?.myGuestCost || 0);
+            return `${fmt(total)} (Own ${fmt(ownCost)} + ${gCount}G ${fmt(gCost)})`;
+          }
+        }
+        return fmt(total);
+      };
       return {
         Date: row.date,
-        ...(isStudentView ? {} : { 'Breakfast Cost': formatCost(row.breakfast), 'B. Students': formatStudents(row.breakfast) }),
-        [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.breakfast)),
-        ...(isStudentView ? {} : { 'Lunch Cost': formatCost(row.lunch), 'L. Students': formatStudents(row.lunch) }),
-        [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.lunch)),
-        ...(isStudentView ? {} : { 'Dinner Cost': formatCost(row.dinner), 'D. Students': formatStudents(row.dinner) }),
-        [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(row.dinner)),
-        [totalCostColumnLabel]: fmt(getRowDisplayTotal(row)),
+        ...(isStudentView ? {} : { 'Breakfast Cost': formatCost(row.breakfast), 'B. Total Meals': formatStudents(row.breakfast) }),
+        [`B. ${costColumnLabel}`]: formatMealCost(row.breakfast),
+        ...(isStudentView ? {} : { 'Lunch Cost': formatCost(row.lunch), 'L. Total Meals': formatStudents(row.lunch) }),
+        [`L. ${costColumnLabel}`]: formatMealCost(row.lunch),
+        ...(isStudentView ? {} : { 'Dinner Cost': formatCost(row.dinner), 'D. Total Meals': formatStudents(row.dinner) }),
+        [`D. ${costColumnLabel}`]: formatMealCost(row.dinner),
+        [totalCostColumnLabel]: formatRowTotal(row),
       };
     });
 
     if (report && rowsData.length > 0) {
+      const formatFooterMeal = (meal) => {
+        const displayVal = getMealDisplayCost(meal);
+        if (isStudentView && (meal.myGuestCount || 0) > 0) {
+          return `${fmt(displayVal)} (Own ${fmt(meal.myOwnCost)} + ${meal.myGuestCount}G ${fmt(meal.myGuestCost)})`;
+        }
+        return fmt(displayVal);
+      };
+      const formatFooterGrand = (grand) => {
+        const displayVal = getMealDisplayCost(grand);
+        if (isStudentView && (grand.myGuestCount || 0) > 0) {
+          return `${fmt(displayVal)} (Own ${fmt(grand.myOwnCost)} + ${grand.myGuestCount}G ${fmt(grand.myGuestCost)})`;
+        }
+        return fmt(displayVal);
+      };
       rowsData.push({
         Date: 'TOTAL',
-        ...(isStudentView ? {} : { 'Breakfast Cost': fmt(report.breakfast.cost), 'B. Students': report.breakfast.students }),
-        [`B. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.breakfast)),
-        ...(isStudentView ? {} : { 'Lunch Cost': fmt(report.lunch.cost), 'L. Students': report.lunch.students }),
-        [`L. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.lunch)),
-        ...(isStudentView ? {} : { 'Dinner Cost': fmt(report.dinner.cost), 'D. Students': report.dinner.students }),
-        [`D. ${costColumnLabel}`]: fmt(getMealDisplayCost(report.dinner)),
-        [totalCostColumnLabel]: fmt(getMealDisplayCost(report.grandTotal)),
+        ...(isStudentView ? {} : { 'Breakfast Cost': fmt(report.breakfast.cost), 'B. Total Meals': report.breakfast.students }),
+        [`B. ${costColumnLabel}`]: formatFooterMeal(report.breakfast),
+        ...(isStudentView ? {} : { 'Lunch Cost': fmt(report.lunch.cost), 'L. Total Meals': report.lunch.students }),
+        [`L. ${costColumnLabel}`]: formatFooterMeal(report.lunch),
+        ...(isStudentView ? {} : { 'Dinner Cost': fmt(report.dinner.cost), 'D. Total Meals': report.dinner.students }),
+        [`D. ${costColumnLabel}`]: formatFooterMeal(report.dinner),
+        [totalCostColumnLabel]: formatFooterGrand(report.grandTotal),
       });
     }
 
@@ -127,9 +160,13 @@ export default function DailyCost() {
     return (
       <td className="cell-student">
         <strong style={{ fontSize: '1rem', color: '#1e293b' }}>{total}</strong>
-        {guestCount > 0 && (
+        {guestCount > 0 ? (
           <small style={{ display: 'block', fontSize: '0.72rem', color: '#059669', fontWeight: 600 }}>
-            ({regular} + {guestCount} Guest)
+            ({regular} Students + {guestCount} Guests)
+          </small>
+        ) : (
+          <small style={{ display: 'block', fontSize: '0.72rem', color: '#64748b', fontWeight: 500 }}>
+            ({regular} Students)
           </small>
         )}
         {meal.options && meal.options.length > 0 && (
@@ -139,12 +176,13 @@ export default function DailyCost() {
               .map((opt) => {
                 const optTotal = opt.totalMeals ?? opt.students;
                 const optGuest = opt.guestCount || 0;
+                const optStudent = optTotal - optGuest;
                 return (
                   <span key={opt.name} className={`daily-cost-option-badge ${getBadgeClass(opt.name)}`}>
                     {opt.name}: <b>{optTotal}</b>
                     {optGuest > 0 && (
-                      <small style={{ marginLeft: '0.2rem', opacity: 0.85, fontSize: '0.68rem' }}>
-                        ({optTotal - optGuest}+{optGuest}G)
+                      <small style={{ marginLeft: '0.2rem', opacity: 0.9, fontSize: '0.68rem' }}>
+                        ({optStudent}S + {optGuest}G)
                       </small>
                     )}
                   </span>
@@ -177,33 +215,70 @@ export default function DailyCost() {
   };
 
   const renderPerHeadCell = (meal, cellClass) => {
+    const displayCost = getMealDisplayCost(meal);
+    const hasGuest = isStudentView && (meal.myGuestCount || 0) > 0;
     return (
       <td className={cellClass}>
-        <strong>{formatCurrency(getMealDisplayCost(meal))}</strong>
+        <strong>{formatCurrency(displayCost)}</strong>
+        {hasGuest && (
+          <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.2rem' }}>
+            Own {formatCurrency(meal.myOwnCost)} + {meal.myGuestCount} Guest{meal.myGuestCount > 1 ? 's' : ''} {formatCurrency(meal.myGuestCost)}
+          </small>
+        )}
       </td>
     );
   };
 
   const renderRowTotalPerHeadCell = (row) => {
+    const total = getRowDisplayTotal(row);
+    if (isStudentView) {
+      const gCount = (row.breakfast?.myGuestCount || 0) + (row.lunch?.myGuestCount || 0) + (row.dinner?.myGuestCount || 0);
+      const ownCost = (row.breakfast?.myOwnCost || 0) + (row.lunch?.myOwnCost || 0) + (row.dinner?.myOwnCost || 0);
+      const gCost = (row.breakfast?.myGuestCost || 0) + (row.lunch?.myGuestCost || 0) + (row.dinner?.myGuestCost || 0);
+      return (
+        <td className="cell-total">
+          <strong>{formatCurrency(total)}</strong>
+          {gCount > 0 && (
+            <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.2rem' }}>
+              Own {formatCurrency(ownCost)} + {gCount} Guest{gCount > 1 ? 's' : ''} {formatCurrency(gCost)}
+            </small>
+          )}
+        </td>
+      );
+    }
     return (
       <td className="cell-total">
-        <strong>{formatCurrency(getRowDisplayTotal(row))}</strong>
+        <strong>{formatCurrency(total)}</strong>
       </td>
     );
   };
 
   const renderFooterPerHeadCell = (meal, cellClass) => {
+    const displayCost = getMealDisplayCost(meal);
+    const hasGuest = isStudentView && (meal.myGuestCount || 0) > 0;
     return (
       <td className={cellClass} style={{ fontWeight: '750' }}>
-        {formatCurrency(getMealDisplayCost(meal))}
+        <strong>{formatCurrency(displayCost)}</strong>
+        {hasGuest && (
+          <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.2rem' }}>
+            Own {formatCurrency(meal.myOwnCost)} + {meal.myGuestCount} Guest{meal.myGuestCount > 1 ? 's' : ''} {formatCurrency(meal.myGuestCost)}
+          </small>
+        )}
       </td>
     );
   };
 
   const renderFooterGrandTotalCell = (grand) => {
+    const displayCost = getMealDisplayCost(grand);
+    const hasGuest = isStudentView && (grand.myGuestCount || 0) > 0;
     return (
       <td className="cell-total" style={{ fontWeight: '800' }}>
-        {formatCurrency(getMealDisplayCost(grand))}
+        <strong>{formatCurrency(displayCost)}</strong>
+        {hasGuest && (
+          <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.2rem' }}>
+            Own {formatCurrency(grand.myOwnCost)} + {grand.myGuestCount} Guest{grand.myGuestCount > 1 ? 's' : ''} {formatCurrency(grand.myGuestCost)}
+          </small>
+        )}
       </td>
     );
   };
@@ -371,18 +446,38 @@ export default function DailyCost() {
             <div className="daily-cost-card breakfast">
               <span className="card-label">BREAKFAST</span>
               <strong className="card-value">{formatCurrency(getMealDisplayCost(report.breakfast))}</strong>
+              {isStudentView && (report.breakfast?.myGuestCount || 0) > 0 && (
+                <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.25rem' }}>
+                  Own {formatCurrency(report.breakfast.myOwnCost)} + {report.breakfast.myGuestCount} Guest{report.breakfast.myGuestCount > 1 ? 's' : ''} {formatCurrency(report.breakfast.myGuestCost)}
+                </small>
+              )}
             </div>
             <div className="daily-cost-card lunch">
               <span className="card-label">LUNCH</span>
               <strong className="card-value">{formatCurrency(getMealDisplayCost(report.lunch))}</strong>
+              {isStudentView && (report.lunch?.myGuestCount || 0) > 0 && (
+                <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.25rem' }}>
+                  Own {formatCurrency(report.lunch.myOwnCost)} + {report.lunch.myGuestCount} Guest{report.lunch.myGuestCount > 1 ? 's' : ''} {formatCurrency(report.lunch.myGuestCost)}
+                </small>
+              )}
             </div>
             <div className="daily-cost-card dinner">
               <span className="card-label">DINNER</span>
               <strong className="card-value">{formatCurrency(getMealDisplayCost(report.dinner))}</strong>
+              {isStudentView && (report.dinner?.myGuestCount || 0) > 0 && (
+                <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.25rem' }}>
+                  Own {formatCurrency(report.dinner.myOwnCost)} + {report.dinner.myGuestCount} Guest{report.dinner.myGuestCount > 1 ? 's' : ''} {formatCurrency(report.dinner.myGuestCost)}
+                </small>
+              )}
             </div>
             <div className="daily-cost-card grand-total">
               <span className="card-label">GRAND TOTAL</span>
               <strong className="card-value">{formatCurrency(getMealDisplayCost(report.grandTotal))}</strong>
+              {isStudentView && (report.grandTotal?.myGuestCount || 0) > 0 && (
+                <small style={{ display: 'block', fontSize: '0.74rem', color: '#059669', fontWeight: 600, marginTop: '0.25rem' }}>
+                  Own {formatCurrency(report.grandTotal.myOwnCost)} + {report.grandTotal.myGuestCount} Guest{report.grandTotal.myGuestCount > 1 ? 's' : ''} {formatCurrency(report.grandTotal.myGuestCost)}
+                </small>
+              )}
             </div>
           </section>
 
@@ -413,13 +508,13 @@ export default function DailyCost() {
                       </tr>
                       <tr>
                         <th className="th-breakfast">Cost</th>
-                        <th className="th-breakfast">Students</th>
+                        <th className="th-breakfast">Total Meals</th>
                         <th className="th-breakfast">{costColumnLabel}</th>
                         <th className="th-lunch">Cost</th>
-                        <th className="th-lunch">Students</th>
+                        <th className="th-lunch">Total Meals</th>
                         <th className="th-lunch">{costColumnLabel}</th>
                         <th className="th-dinner">Cost</th>
-                        <th className="th-dinner">Students</th>
+                        <th className="th-dinner">Total Meals</th>
                         <th className="th-dinner">{costColumnLabel}</th>
                       </tr>
                     </>
