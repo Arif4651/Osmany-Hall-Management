@@ -78,14 +78,23 @@ public sealed record DueRowDto(
 public sealed record SaveDueAdjustmentRequest(
     Guid StudentId, int BillingMonth, int BillingYear, decimal AdjustedAmount, string? Note);
 
-public sealed record DailyCostOptionBreakdownDto(Guid OptionId, string Name, decimal Cost, int Students, decimal PerHead);
+public sealed record DailyCostOptionBreakdownDto(
+    Guid OptionId,
+    string Name,
+    decimal Cost,
+    int Students,
+    decimal PerHead,
+    int GuestCount = 0,
+    int TotalMeals = 0);
 
 public sealed record DailyCostMealDto(
     decimal Cost,
     int Students,
     decimal PerHead,
     decimal MyCost,
-    IReadOnlyList<DailyCostOptionBreakdownDto> Options);
+    IReadOnlyList<DailyCostOptionBreakdownDto> Options,
+    int GuestCount = 0,
+    int TotalMeals = 0);
 
 public sealed record DailyCostRowDto(
     DateOnly Date,

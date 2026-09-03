@@ -218,7 +218,7 @@ public sealed class InventoryController(
         // Same context the billing pass uses, so this preview cannot drift from the headcount
         // the bill is actually divided by.
         var meals = await MealResolutionContext.LoadAsync(db, date, date, cancellationToken);
-        return Ok(meals.CountParticipants(item, mealPeriod, date));
+        return Ok(meals.CountTotalParticipants(item, mealPeriod, date));
     }
 
     [HttpGet("transactions")]

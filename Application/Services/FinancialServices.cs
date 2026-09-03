@@ -54,7 +54,7 @@ public sealed class InventoryTransactionService(HallDbContext db)
                         continue;
                     }
 
-                    var participantsCount = meals.CountParticipants(item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
+                    var participantsCount = meals.CountTotalParticipants(item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
 
                     transaction.ParticipantCount = participantsCount;
                     transaction.Rate = participantsCount > 0 ? (transaction.TotalCost / participantsCount) : 0m;
@@ -589,10 +589,6 @@ public sealed class BillingCalculationService(
             .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.AllocatedAmount) })
             .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
 
-        var guestMealsGrouped = guestMeals
-            .GroupBy(x => (x.Date, x.MealPeriod))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
         var monthly = students.ToDictionary(x => x.Id, _ => 0m);
         var guestBill = students.ToDictionary(x => x.Id, _ => 0m);
         foreach (var transaction in transactions)
@@ -600,20 +596,18 @@ public sealed class BillingCalculationService(
             if (transaction.Item is null || string.IsNullOrWhiteSpace(transaction.MealPeriod)) continue;
             if (string.IsNullOrWhiteSpace(transaction.Item.Wing)) continue;
 
-            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
+            var studentParticipants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
+            var guestParticipants = meals.GuestParticipants(transaction.Item, transaction.MealPeriod, transaction.Date);
+            var totalCount = studentParticipants.Count + guestParticipants.Sum(x => x.GuestCount);
 
-            if (participants.Count == 0) continue;
-            var share = transaction.TotalCost / participants.Count;
-            foreach (var participant in participants) monthly[participant.Id] += share;
+            if (totalCount == 0) continue;
+            var share = transaction.TotalCost / totalCount;
+            foreach (var participant in studentParticipants) monthly[participant.Id] += share;
 
-            // Guest meals: add share per guest count for each requesting student
-            if (guestMealsGrouped.TryGetValue((transaction.Date, transaction.MealPeriod), out var transactionGuests))
+            foreach (var guest in guestParticipants)
             {
-                foreach (var guest in transactionGuests)
-                {
-                    if (!guestBill.ContainsKey(guest.StudentId)) continue;
-                    guestBill[guest.StudentId] += share * guest.GuestCount;
-                }
+                if (!guestBill.ContainsKey(guest.StudentId)) continue;
+                guestBill[guest.StudentId] += share * guest.GuestCount;
             }
         }
 

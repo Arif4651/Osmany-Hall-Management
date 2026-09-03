@@ -22,14 +22,16 @@ public sealed record MealEntryDto(string MealTypeId, IReadOnlyList<MealItemDto> 
 public sealed record MealDayDto(string Id, string Label, int Order, IReadOnlyList<MealEntryDto> Meals);
 public sealed record MealSettingsDto(TimeOnly CutoffTime, IReadOnlyList<MealTypeDto> MealTypes, int ForecastMaxOptions);
 public sealed record MealModuleDto(MealSettingsDto Settings, IReadOnlyList<MealDayDto> Days);
-public sealed record MealCountOptionDto(Guid OptionItemId, string Name, decimal Cost, int StudentCount, bool IsDefault = false);
+public sealed record MealCountOptionDto(Guid OptionItemId, string Name, decimal Cost, int StudentCount, bool IsDefault = false, int GuestCount = 0);
 public sealed record MealCountDto(
     string MealTypeId,
     string MealTypeLabel,
     int TotalStudents,
     int EnabledStudents,
     int DisabledStudents,
-    IReadOnlyList<MealCountOptionDto> OptionalChoices);
+    IReadOnlyList<MealCountOptionDto> OptionalChoices,
+    int GuestCount = 0,
+    int TotalMeals = 0);
 /// <summary>
 /// <paramref name="IsAvailable"/> is false only for a date the meal-decision window hasn't
 /// reached yet — the zero counts on that response are not real counts, just placeholders, and

@@ -112,17 +112,24 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                     return meals.IsMealOn(student.Id, period, date, wingOverride);
                 }).ToList();
 
-                var totalStudents = participants.Count;
-                var overallPerHead = FinancialMath.PerHead(netCost, totalStudents);
+                var periodGuests = effectiveGender == "All"
+                    ? meals.GetGuestMeals("Male", period, date).Concat(meals.GetGuestMeals("Female", period, date)).ToList()
+                    : meals.GetGuestMeals(effectiveGender, period, date).ToList();
+
+                var totalGuestMeals = periodGuests.Sum(x => x.GuestCount);
+                var regularStudents = participants.Count;
+                var totalMeals = regularStudents + totalGuestMeals;
+                var overallPerHead = FinancialMath.PerHead(netCost, totalMeals);
 
                 var participantPreferences = participants
                     .Select(student => new { Student = student, OptionId = meals.FindSelectedOption(student.Id, period, date) })
                     .ToList();
 
-                // Get active options that have students or transactions
+                // Get active options that have students, guests, or transactions
                 var activeOptions = optionItems
                     .Where(opt => (effectiveGender == "All" || opt.Wing == effectiveGender)
                         && (participantPreferences.Any(x => x.OptionId == opt.Id)
+                            || periodGuests.Any(g => meals.FindSelectedOption(g.StudentId, period, date) == opt.Id)
                             || periodTxs.Any(t => t.ItemId == opt.Id || (t.Item != null && t.Item.LinkedOptionId == opt.Id))))
                     .ToList();
 
@@ -138,58 +145,77 @@ public sealed class DailyCostController(HallDbContext db, CurrentUserService cur
                         .Sum(t => t.TotalCost);
 
                     var netCommonCost = commonTxCostRobust - subsidyAmount;
-                    var commonPerHead = FinancialMath.PerHead(netCommonCost, totalStudents);
-                    optionBreakdowns.Add(new DailyCostOptionBreakdownDto(Guid.Empty, "Common", netCommonCost, totalStudents, commonPerHead));
+                    var commonPerHead = FinancialMath.PerHead(netCommonCost, totalMeals);
+                    optionBreakdowns.Add(new DailyCostOptionBreakdownDto(Guid.Empty, "Common", netCommonCost, totalMeals, commonPerHead, totalGuestMeals, totalMeals));
 
                     foreach (var opt in activeOptions)
                     {
-                        var optStudentsCount = participantPreferences.Count(x => x.OptionId == opt.Id);
+                        var optRegularCount = participantPreferences.Count(x => x.OptionId == opt.Id);
+                        var optGuestCount = periodGuests
+                            .Where(g => meals.FindSelectedOption(g.StudentId, period, date) == opt.Id)
+                            .Sum(g => g.GuestCount);
+                        var optTotalCount = optRegularCount + optGuestCount;
+
                         var optTxCost = periodTxs
                             .Where(t => t.Item != null && (t.ItemId == opt.Id || (t.Item.LinkedOptionId.HasValue && t.Item.LinkedOptionId.Value == opt.Id)))
                             .Sum(t => t.TotalCost);
 
-                        var optPerHead = FinancialMath.PerHead(optTxCost, optStudentsCount);
+                        var optPerHead = FinancialMath.PerHead(optTxCost, optTotalCount);
                         var totalOptPerHead = commonPerHead + optPerHead;
 
-                        optionBreakdowns.Add(new DailyCostOptionBreakdownDto(opt.Id, opt.Item, optTxCost, optStudentsCount, totalOptPerHead));
+                        optionBreakdowns.Add(new DailyCostOptionBreakdownDto(opt.Id, opt.Item, optTxCost, optTotalCount, totalOptPerHead, optGuestCount, optTotalCount));
                     }
                 }
 
                 if (currentStudentId.HasValue)
                 {
-                    var studentPreference = participantPreferences.FirstOrDefault(x => x.Student.Id == currentStudentId.Value);
-                    if (studentPreference is not null)
+                    var isCurrentStudentOn = participants.Any(p => p.Id == currentStudentId.Value);
+                    var currentStudentGuests = periodGuests.Where(g => g.StudentId == currentStudentId.Value).Sum(g => g.GuestCount);
+                    var myPortions = (isCurrentStudentOn ? 1 : 0) + currentStudentGuests;
+
+                    if (myPortions > 0)
                     {
                         foreach (var tx in periodTxs)
                         {
                             if (tx.Item is null)
                             {
-                                myCost += FinancialMath.PerHead(tx.TotalCost, totalStudents);
+                                myCost += FinancialMath.PerHead(tx.TotalCost, totalMeals) * myPortions;
                                 continue;
                             }
 
-                            // The exact set BillingCalculationService charges for this transaction
-                            // — same-day toggle guard included, via tx.CreatedAtUtc — rather than
-                            // the day-wide participant list above, which has no way to tell "turned
-                            // on before this stock-out" from "turned on after it".
-                            var chargedParticipants = meals.Participants(tx.Item, period, date, tx.CreatedAtUtc);
-                            if (chargedParticipants.Count == 0) continue;
+                            var totalTxCount = meals.CountTotalParticipants(tx.Item, period, date, tx.CreatedAtUtc);
+                            if (totalTxCount == 0) continue;
+                            var share = tx.TotalCost / totalTxCount;
 
-                            if (chargedParticipants.Any(p => p.Id == currentStudentId.Value))
+                            if (isCurrentStudentOn)
                             {
-                                myCost += tx.TotalCost / chargedParticipants.Count;
+                                var chargedStudents = meals.Participants(tx.Item, period, date, tx.CreatedAtUtc);
+                                if (chargedStudents.Any(p => p.Id == currentStudentId.Value))
+                                {
+                                    myCost += share;
+                                }
+                            }
+
+                            if (currentStudentGuests > 0)
+                            {
+                                var chargedGuests = meals.GuestParticipants(tx.Item, period, date);
+                                if (chargedGuests.Any(g => g.StudentId == currentStudentId.Value))
+                                {
+                                    myCost += share * currentStudentGuests;
+                                }
                             }
                         }
 
                         // Matches overallPerHead, which is netCost (gross minus subsidy) divided
-                        // across every participant regardless of option: myCost was previously
-                        // gross-only, so a subsidised meal showed a smaller PerHead than the sum
-                        // of what the same meal's MyCost added up to across all participants.
-                        myCost -= FinancialMath.PerHead(subsidyAmount, totalStudents);
+                        // across every participant regardless of option
+                        if (totalMeals > 0)
+                        {
+                            myCost -= (subsidyAmount / totalMeals) * myPortions;
+                        }
                     }
                 }
 
-                return new DailyCostMealDto(netCost, totalStudents, overallPerHead, myCost, optionBreakdowns);
+                return new DailyCostMealDto(netCost, totalMeals, overallPerHead, myCost, optionBreakdowns, totalGuestMeals, totalMeals);
             }
 
             DailyCostMealDto breakfast;

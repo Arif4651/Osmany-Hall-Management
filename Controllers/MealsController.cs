@@ -236,6 +236,9 @@ public sealed class MealsController(
                 && x.EffectiveFrom <= target
                 && (x.EffectiveTo == null || x.EffectiveTo >= target))
             .ToListAsync(cancellationToken);
+        var guestMeals = await db.GuestMealRequests.AsNoTracking()
+            .Where(x => activeStudentIds.Contains(x.StudentId) && x.Date == target)
+            .ToListAsync(cancellationToken);
         var optionItems = await db.InventoryItems.AsNoTracking()
             .Where(x => x.Category == "Options" && !x.IsDeleted && x.Wing == selectedWing)
             .ToDictionaryAsync(x => x.Id, cancellationToken);
@@ -262,6 +265,11 @@ public sealed class MealsController(
                 .Select(student => student.Id)
                 .ToList();
 
+            var periodGuestMeals = guestMeals
+                .Where(x => string.Equals(x.MealPeriod, type.Code, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var totalGuests = periodGuestMeals.Sum(x => x.GuestCount);
+
             var menuConfig = menuConfigurations.FirstOrDefault(x => x.MealType!.Code == type.Code);
             var optionalItems = menuConfig?.Items
                 .Where(x => x.IsOptional && x.InventoryItemId.HasValue && optionItems.ContainsKey(x.InventoryItemId.Value))
@@ -275,23 +283,38 @@ public sealed class MealsController(
                 .GroupBy(x => x.StudentId)
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).First().OptionItemId);
 
-            var resolvedOptionCounts = new Dictionary<Guid, int>();
-            foreach (var studentId in enabledStudents)
+            Guid? ResolveOptionForStudent(Guid studentId)
             {
                 var prefId = studentPreferences.GetValueOrDefault(studentId);
-                Guid? resolvedId = null;
                 if (prefId.HasValue && availableOptionIds.Contains(prefId.Value))
                 {
-                    resolvedId = prefId.Value;
+                    return prefId.Value;
                 }
-                else if (isCutoffPassed && defaultOptionId.HasValue)
+                if (isCutoffPassed && defaultOptionId.HasValue)
                 {
-                    resolvedId = defaultOptionId.Value;
+                    return defaultOptionId.Value;
                 }
+                return null;
+            }
 
+            var resolvedOptionCounts = new Dictionary<Guid, int>();
+            var resolvedOptionGuestCounts = new Dictionary<Guid, int>();
+            foreach (var studentId in enabledStudents)
+            {
+                var resolvedId = ResolveOptionForStudent(studentId);
                 if (resolvedId.HasValue)
                 {
                     resolvedOptionCounts[resolvedId.Value] = resolvedOptionCounts.GetValueOrDefault(resolvedId.Value) + 1;
+                }
+            }
+
+            foreach (var guest in periodGuestMeals)
+            {
+                var resolvedId = ResolveOptionForStudent(guest.StudentId);
+                if (resolvedId.HasValue)
+                {
+                    resolvedOptionCounts[resolvedId.Value] = resolvedOptionCounts.GetValueOrDefault(resolvedId.Value) + guest.GuestCount;
+                    resolvedOptionGuestCounts[resolvedId.Value] = resolvedOptionGuestCounts.GetValueOrDefault(resolvedId.Value) + guest.GuestCount;
                 }
             }
 
@@ -314,11 +337,14 @@ public sealed class MealsController(
                         option.Item,
                         configuredOptionCosts.GetValueOrDefault(optionId),
                         resolvedOptionCounts.GetValueOrDefault(optionId),
-                        isDef);
+                        isDef,
+                        resolvedOptionGuestCounts.GetValueOrDefault(optionId));
                 })
                 .OrderByDescending(x => x.StudentCount)
                 .ThenBy(x => x.Name)
                 .ToList();
+
+            var totalMeals = enabledStudents.Count + totalGuests;
 
             return new MealCountDto(
                 type.Code,
@@ -326,7 +352,9 @@ public sealed class MealsController(
                 activeStudents.Count,
                 enabledStudents.Count,
                 activeStudents.Count - enabledStudents.Count,
-                choices);
+                choices,
+                totalGuests,
+                totalMeals);
         }).ToList();
 
         return new MealCountsForDateDto(target, dayCode, counts);

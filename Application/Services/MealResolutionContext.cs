@@ -49,6 +49,7 @@ public sealed class MealResolutionContext
     private readonly Dictionary<Guid, Student> studentsById;
     private readonly Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MenuOptionConfig> menuOptions;
     private readonly Dictionary<string, TimeOnly> wingCutoffs;
+    private readonly Dictionary<(string Wing, string MealPeriod, DateOnly Date), List<(Guid StudentId, int GuestCount)>> guestMeals;
 
     public MealResolutionContext(
         List<Student> students,
@@ -56,16 +57,18 @@ public sealed class MealResolutionContext
         Dictionary<(Guid, string), List<MealStatusHistory>> statuses,
         Dictionary<(Guid, string, DayOfWeek), List<MealPreferenceHistory>> preferences,
         Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MenuOptionConfig>? menuOptions = null,
-        Dictionary<string, TimeOnly>? wingCutoffs = null)
+        Dictionary<string, TimeOnly>? wingCutoffs = null,
+        Dictionary<(string Wing, string MealPeriod, DateOnly Date), List<(Guid StudentId, int GuestCount)>>? guestMeals = null)
     {
         Students = students;
-        StudentsByWing = students.GroupBy(x => x.Gender).ToDictionary(g => g.Key, g => g.ToList());
+        StudentsByWing = students.GroupBy(x => x.Gender).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
         studentsById = students.ToDictionary(x => x.Id);
         this.overrides = overrides;
         this.statuses = statuses;
         this.preferences = preferences;
         this.menuOptions = menuOptions ?? [];
         this.wingCutoffs = wingCutoffs ?? new Dictionary<string, TimeOnly>(StringComparer.OrdinalIgnoreCase);
+        this.guestMeals = guestMeals ?? new Dictionary<(string, string, DateOnly), List<(Guid, int)>>();
     }
 
     public bool IsCutoffPassed(DateOnly targetDate, string wing)
@@ -140,6 +143,18 @@ public sealed class MealResolutionContext
             .Where(x => !string.IsNullOrWhiteSpace(x.Wing))
             .ToDictionary(x => x.Wing!, x => x.CutoffTime, StringComparer.OrdinalIgnoreCase);
 
+        var guestMealRows = await db.GuestMealRequests.AsNoTracking()
+            .Where(x => x.Date >= from && x.Date <= to)
+            .ToListAsync(cancellationToken);
+
+        var studentsLookup = students.ToDictionary(x => x.Id);
+        var guestMealsMap = guestMealRows
+            .Where(x => studentsLookup.ContainsKey(x.StudentId))
+            .GroupBy(x => (studentsLookup[x.StudentId].Gender.ToLowerInvariant(), x.MealPeriod.ToLowerInvariant(), x.Date))
+            .ToDictionary(
+                g => (g.Key.Item1, g.Key.Item2, g.Key.Date),
+                g => g.Select(x => (x.StudentId, x.GuestCount)).ToList());
+
         return new MealResolutionContext(
             students,
             overrideRows
@@ -152,7 +167,8 @@ public sealed class MealResolutionContext
                 .GroupBy(x => (x.StudentId, x.MealPeriod, x.DayOfWeek))
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveFrom).ToList()),
             menuOptionsMap,
-            wingCutoffs);
+            wingCutoffs,
+            guestMealsMap);
     }
 
     /// <summary>The wing-level override in effect for that period and date, if any. Beats individual status.</summary>
@@ -282,4 +298,47 @@ public sealed class MealResolutionContext
     /// would be retroactively billed for an override dated before they joined.
     /// </summary>
     public static bool HasJoinedBy(Student student, DateOnly date) => student.JoinDate <= date;
+
+    /// <summary>
+    /// Guest meals requested by billable students in the specified wing on date and meal period.
+    /// </summary>
+    public IReadOnlyList<(Guid StudentId, int GuestCount)> GetGuestMeals(string wing, string mealPeriod, DateOnly date)
+    {
+        var key = (wing.ToLowerInvariant(), mealPeriod.ToLowerInvariant(), date);
+        return guestMeals.TryGetValue(key, out var list) ? list : [];
+    }
+
+    /// <summary>
+    /// Guest meals in the item's wing whose host student selected this item's option (or any guest for Common items).
+    /// </summary>
+    public List<(Guid StudentId, int GuestCount)> GuestParticipants(InventoryItem item, string mealPeriod, DateOnly date)
+    {
+        if (string.IsNullOrWhiteSpace(item.Wing)) return [];
+        var guests = GetGuestMeals(item.Wing, mealPeriod, date);
+        if (guests.Count == 0) return [];
+
+        if (item.Category == "Common")
+        {
+            return guests.ToList();
+        }
+
+        var requiredOption = item.Category == "Options" ? item.Id : item.LinkedOptionId;
+        if (!requiredOption.HasValue) return [];
+
+        return guests
+            .Where(g => FindSelectedOption(g.StudentId, mealPeriod, date) == requiredOption.Value)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Headcount of guest meals participating in <paramref name="item"/>.
+    /// </summary>
+    public int CountGuestParticipants(InventoryItem item, string mealPeriod, DateOnly date)
+        => GuestParticipants(item, mealPeriod, date).Sum(x => x.GuestCount);
+
+    /// <summary>
+    /// Total headcount (regular student participants + participating guest meals) for <paramref name="item"/>.
+    /// </summary>
+    public int CountTotalParticipants(InventoryItem item, string mealPeriod, DateOnly date, DateTime? asOfUtc = null)
+        => CountParticipants(item, mealPeriod, date, asOfUtc) + CountGuestParticipants(item, mealPeriod, date);
 }

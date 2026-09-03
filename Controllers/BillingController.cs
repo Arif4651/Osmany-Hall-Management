@@ -176,11 +176,17 @@ public sealed class BillingController(
             if (string.IsNullOrWhiteSpace(transaction.Item.Wing)) continue;
             if (!string.Equals(transaction.Item.Wing, student.Gender, StringComparison.OrdinalIgnoreCase)) continue;
 
-            var participants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
-            if (participants.Count == 0) continue;
-            var share = transaction.TotalCost / participants.Count;
-            var key = (transaction.Date, transaction.MealPeriod.ToLowerInvariant());
-            mealUnitCosts[key] = mealUnitCosts.GetValueOrDefault(key) + share;
+            var studentParticipants = meals.Participants(transaction.Item, transaction.MealPeriod, transaction.Date, transaction.CreatedAtUtc);
+            var guestParticipants = meals.GuestParticipants(transaction.Item, transaction.MealPeriod, transaction.Date);
+            var totalParticipants = studentParticipants.Count + guestParticipants.Sum(x => x.GuestCount);
+            if (totalParticipants == 0) continue;
+
+            var share = transaction.TotalCost / totalParticipants;
+            if (guestParticipants.Any(g => g.StudentId == student.Id))
+            {
+                var key = (transaction.Date, transaction.MealPeriod.ToLowerInvariant());
+                mealUnitCosts[key] = mealUnitCosts.GetValueOrDefault(key) + share;
+            }
         }
 
         var items = guestMeals.Select(g =>
