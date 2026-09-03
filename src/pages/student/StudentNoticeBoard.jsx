@@ -59,11 +59,11 @@ export default function StudentNoticeBoard() {
   return (
     <div className="notice-board-page">
       <header className="notice-board-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
-          <Megaphone size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+          <Megaphone size={24} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
           <div>
             <h1 style={{ margin: 0 }}>Notice Board</h1>
-            <p style={{ margin: '0.25rem 0 0 0' }}>Important announcements and notices for your wing</p>
+            <p style={{ margin: '0.15rem 0 0 0' }}>Announcements and notices for your wing</p>
           </div>
         </div>
       </header>

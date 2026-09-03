@@ -48,11 +48,11 @@ export default function Billing() {
       {/* Thin progress bar during background refresh */}
       {isRefreshing && <div className="data-refreshing-bar" />}
 
-      <header style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
-        <Receipt size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+      <header style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+        <Receipt size={24} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div>
           <h1 style={{ margin: 0 }}>Billing</h1>
-          <p style={{ margin: '0.25rem 0 0 0' }}>Select a month to view your calculated hall bill.</p>
+          <p style={{ margin: '0.15rem 0 0 0' }}>Calculated hall bill and subsidies by month</p>
         </div>
       </header>
 

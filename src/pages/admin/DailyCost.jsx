@@ -249,10 +249,10 @@ export default function DailyCost() {
       {isRefreshing && <div className="data-refreshing-bar" />}
 
       <div className="daily-cost-header">
-        <CalendarDays size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+        <CalendarDays size={24} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div className="header-title">
           <h1 style={{ margin: 0 }}>{isStudentView ? 'My Daily Cost' : 'Daily Cost'}</h1>
-          <p style={{ margin: '0.25rem 0 0 0' }}>{`Daily cost breakdown for ${selectedWingLabel} · ${currentMonthLabel}`}</p>
+          <p style={{ margin: '0.15rem 0 0 0' }}>{`${selectedWingLabel} · ${currentMonthLabel}`}</p>
         </div>
         <div className="header-actions">
           {isStudentView ? null : isLockedToWing ? (
@@ -369,27 +369,39 @@ export default function DailyCost() {
               <p className="daily-cost-scroll-hint">
                 <ChevronRight size={13} /> Swipe the table sideways to see every column.
               </p>
-              <section className="daily-cost-table-card">
+              <section className={`daily-cost-table-card ${isStudentView ? 'student-daily-cost-table-card' : ''}`}>
               <table>
                 <thead>
-                  <tr>
-                    <th rowSpan={2}>DATE</th>
-                    <th colSpan={isStudentView ? 1 : 3} className="th-breakfast">BREAKFAST</th>
-                    <th colSpan={isStudentView ? 1 : 3} className="th-lunch">LUNCH</th>
-                    <th colSpan={isStudentView ? 1 : 3} className="th-dinner">DINNER</th>
-                    <th rowSpan={2} className="th-total">TOTAL<br /><small style={{ fontWeight: 400, fontSize: '0.75em' }}>{costColumnLabel}</small></th>
-                  </tr>
-                  <tr>
-                    {!isStudentView && <th className="th-breakfast">Cost</th>}
-                    {!isStudentView && <th className="th-breakfast">Students</th>}
-                    <th className="th-breakfast">{costColumnLabel}</th>
-                    {!isStudentView && <th className="th-lunch">Cost</th>}
-                    {!isStudentView && <th className="th-lunch">Students</th>}
-                    <th className="th-lunch">{costColumnLabel}</th>
-                    {!isStudentView && <th className="th-dinner">Cost</th>}
-                    {!isStudentView && <th className="th-dinner">Students</th>}
-                    <th className="th-dinner">{costColumnLabel}</th>
-                  </tr>
+                  {isStudentView ? (
+                    <tr>
+                      <th>DATE</th>
+                      <th className="th-breakfast">BREAKFAST</th>
+                      <th className="th-lunch">LUNCH</th>
+                      <th className="th-dinner">DINNER</th>
+                      <th className="th-total">TOTAL</th>
+                    </tr>
+                  ) : (
+                    <>
+                      <tr>
+                        <th rowSpan={2}>DATE</th>
+                        <th colSpan={3} className="th-breakfast">BREAKFAST</th>
+                        <th colSpan={3} className="th-lunch">LUNCH</th>
+                        <th colSpan={3} className="th-dinner">DINNER</th>
+                        <th rowSpan={2} className="th-total">TOTAL<br /><small style={{ fontWeight: 400, fontSize: '0.75em' }}>{costColumnLabel}</small></th>
+                      </tr>
+                      <tr>
+                        <th className="th-breakfast">Cost</th>
+                        <th className="th-breakfast">Students</th>
+                        <th className="th-breakfast">{costColumnLabel}</th>
+                        <th className="th-lunch">Cost</th>
+                        <th className="th-lunch">Students</th>
+                        <th className="th-lunch">{costColumnLabel}</th>
+                        <th className="th-dinner">Cost</th>
+                        <th className="th-dinner">Students</th>
+                        <th className="th-dinner">{costColumnLabel}</th>
+                      </tr>
+                    </>
+                  )}
                 </thead>
                 <tbody>
                   {report.rows.map((row) => {

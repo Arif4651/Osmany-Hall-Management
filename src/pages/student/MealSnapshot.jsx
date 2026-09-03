@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDays } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
@@ -118,9 +119,12 @@ export default function MealSnapshot() {
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
       
-      <header>
-        <h1>Meal Snapshot</h1>
-        <p>Historical meal status and choices by date.</p>
+      <header style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+        <CalendarDays size={24} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+        <div>
+          <h1 style={{ margin: 0 }}>Meal Snapshot</h1>
+          <p style={{ margin: '0.15rem 0 0 0' }}>Historical meal status and choices by date</p>
+        </div>
       </header>
 
       {error && <div className="student-message student-message-error">{error}</div>}

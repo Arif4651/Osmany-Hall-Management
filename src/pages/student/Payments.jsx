@@ -112,11 +112,11 @@ export default function Payments() {
     <div className="financial-page">
       {isRefreshing && <div className="data-refreshing-bar" />}
       
-      <header style={{ display: 'flex', alignItems: 'center', gap: '0.62rem' }}>
-        <CreditCard size={28} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
+      <header style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+        <CreditCard size={24} style={{ color: 'var(--primary, #1e3a8a)', flexShrink: 0 }} />
         <div>
           <h1 style={{ margin: 0 }}>Payments</h1>
-          <p style={{ margin: '0.25rem 0 0 0' }}>Submit a payment for a specific billing month.</p>
+          <p style={{ margin: '0.15rem 0 0 0' }}>Submit and track your monthly payments</p>
         </div>
       </header>
 
