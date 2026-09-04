@@ -943,17 +943,52 @@ public sealed class MealsController(
         return NoContent();
     }
 
+    public sealed record UpdateGuestMealAdminRequest(int GuestCount);
+
+    [HttpPatch("admin/guest-meals/{id:guid}")]
+    [HttpPut("admin/guest-meals/{id:guid}")]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Edit, AltMenuKey = MenuKeys.AdminMealSheet)]
+    public async Task<IActionResult> UpdateGuestMealAsAdmin(
+        Guid id, [FromBody] UpdateGuestMealAdminRequest request, CancellationToken cancellationToken)
+    {
+        var entity = await db.GuestMealRequests.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+
+        var date = entity.Date;
+        var period = entity.MealPeriod;
+        var studentId = entity.StudentId;
+
+        if (request.GuestCount <= 0)
+        {
+            db.GuestMealRequests.Remove(entity);
+            await db.SaveChangesAsync(cancellationToken);
+            await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
+            return Ok(new { Id = id, GuestCount = 0, MealPeriod = period, Date = date, StudentId = studentId });
+        }
+
+        if (request.GuestCount > 20)
+        {
+            return BadRequest(new { message = "Guest count cannot exceed 20." });
+        }
+
+        entity.GuestCount = request.GuestCount;
+        await db.SaveChangesAsync(cancellationToken);
+        await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
+        return Ok(new { Id = entity.Id, GuestCount = entity.GuestCount, MealPeriod = entity.MealPeriod, Date = entity.Date, StudentId = entity.StudentId });
+    }
+
     [HttpDelete("admin/guest-meals/{id:guid}")]
-    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Delete)]
+    [RequirePermission(MenuKeys.AdminMeals, PermissionActions.Delete, AltMenuKey = MenuKeys.AdminMealSheet)]
     public async Task<IActionResult> DeleteGuestMealAsAdmin(Guid id, CancellationToken cancellationToken)
     {
         // Admin override of DeleteMyGuestMeal: intentionally skips the cutoff check above, since
         // this is exactly the escape hatch students are pointed to once that cutoff has passed.
         var entity = await db.GuestMealRequests.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (entity is null) return NotFound();
+        var date = entity.Date;
         db.GuestMealRequests.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await billing.RecalculateForwardAsync(entity.Date.Month, entity.Date.Year, cancellationToken);
+        await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
         return NoContent();
     }
 

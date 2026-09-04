@@ -85,4 +85,76 @@ public sealed class BillingGuestMealTests
         Assert.Equal(130m, monthly[studentB.Id]);
         Assert.Equal(0m, guestBill[studentB.Id]);
     }
+
+    [Theory]
+    [InlineData(3, 2)]
+    [InlineData(2, 1)]
+    [InlineData(1, 0)]
+    public void GuestBillingTransitions_ProportionallyAdjustsCosts(int initialCount, int updatedCount)
+    {
+        var studentA = new Student { Id = Guid.NewGuid(), Gender = "Male", JoinDate = new DateOnly(2026, 1, 1), Status = MealResolutionContext.BillableStatus };
+        var beefId = Guid.NewGuid();
+        var date = new DateOnly(2026, 9, 1);
+
+        var preferences = new Dictionary<(Guid, string, DayOfWeek), List<MealPreferenceHistory>>
+        {
+            [(studentA.Id, "lunch", DayOfWeek.Tuesday)] = [new() { OptionItemId = beefId, EffectiveFrom = new DateOnly(2026, 1, 1) }]
+        };
+
+        var menuOptions = new Dictionary<(string Wing, DayOfWeek DayOfWeek, string MealPeriod), MealResolutionContext.MenuOptionConfig>
+        {
+            [("Male", DayOfWeek.Tuesday, "lunch")] = new([beefId], beefId)
+        };
+
+        var riceItem = new InventoryItem { Id = Guid.NewGuid(), Wing = "Male", Category = "Common", Item = "Rice" };
+        var beefItem = new InventoryItem { Id = beefId, Wing = "Male", Category = "Options", Item = "Beef" };
+
+        var transactions = new List<StockTransaction>
+        {
+            new() { Item = riceItem, MealPeriod = "lunch", Date = date, TotalCost = 100m },
+            new() { Item = beefItem, MealPeriod = "lunch", Date = date, TotalCost = 200m }
+        };
+
+        var statuses = new Dictionary<(Guid, string), List<MealStatusHistory>>
+        {
+            [(studentA.Id, "lunch")] = [new() { StudentId = studentA.Id, MealPeriod = "lunch", IsOn = true, EffectiveFrom = new DateOnly(2026, 1, 1) }]
+        };
+
+        // Calculation helper
+        decimal CalculateGuestBill(int count)
+        {
+            if (count == 0) return 0m;
+            var guestMeals = new Dictionary<(string, string, DateOnly), List<(Guid, int)>>
+            {
+                [("male", "lunch", date)] = [(studentA.Id, count)]
+            };
+            var ctx = new MealResolutionContext([studentA], [], statuses, preferences, menuOptions, null, guestMeals);
+            var guestTotal = 0m;
+            foreach (var tx in transactions)
+            {
+                var studentParticipants = ctx.Participants(tx.Item, tx.MealPeriod, tx.Date, null);
+                var guestParticipants = ctx.GuestParticipants(tx.Item, tx.MealPeriod, tx.Date);
+                var totalHeadcount = studentParticipants.Count + guestParticipants.Sum(x => x.GuestCount);
+                var share = tx.TotalCost / totalHeadcount;
+                foreach (var g in guestParticipants)
+                {
+                    guestTotal += share * g.GuestCount;
+                }
+            }
+            return guestTotal;
+        }
+
+        var initialGuestBill = CalculateGuestBill(initialCount);
+        var updatedGuestBill = CalculateGuestBill(updatedCount);
+
+        Assert.True(initialGuestBill > updatedGuestBill);
+        if (updatedCount == 0)
+        {
+            Assert.Equal(0m, updatedGuestBill);
+        }
+        else
+        {
+            Assert.True(updatedGuestBill > 0m);
+        }
+    }
 }
