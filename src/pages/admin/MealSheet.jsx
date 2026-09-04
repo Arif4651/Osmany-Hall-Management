@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download, X, TriangleAlert } from 'lucide-react';
+import { Calendar, Coffee, FileSpreadsheet, FileText, Printer, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download, X, TriangleAlert, Minus } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import { adminDataService } from '../../services/adminDataService';
 import { useAuth } from '../../context/AuthContext';
@@ -43,14 +43,14 @@ const MealIndicator = ({ label, isOn }) => (
   </span>
 );
 
-// A single B/L/D guest meal booking, with an admin-only remove button — this is the escape hatch
-// for a booking a student can no longer remove themselves once their own cutoff has passed.
-const GuestMealChip = ({ label, count, id, periodLabel, studentName, onRemove }) => (
+// A single B/L/D guest meal booking, with admin controls to reduce count or remove booking —
+// this is the escape hatch for a booking a student can no longer change themselves once cutoff has passed.
+const GuestMealChip = ({ label, count, id, periodLabel, studentName, onManage }) => (
   <span
     style={{
       display: 'inline-flex',
       alignItems: 'center',
-      gap: '0.35rem',
+      gap: '0.3rem',
       background: '#fef3c7',
       color: '#d97706',
       padding: '0.2rem 0.35rem 0.2rem 0.55rem',
@@ -60,28 +60,58 @@ const GuestMealChip = ({ label, count, id, periodLabel, studentName, onRemove })
       border: '1px solid #fde68a',
     }}
   >
-    {label}: {count}
+    <span>{label}: {count}</span>
     {id ? (
-      <button
-        type="button"
-        onClick={() => onRemove(id, studentName, `${periodLabel} · ${count} guest${count === 1 ? '' : 's'}`)}
-        title={`Remove ${periodLabel} guest meal`}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '1rem',
-          height: '1rem',
-          padding: 0,
-          border: 0,
-          borderRadius: '50%',
-          background: 'transparent',
-          color: '#b45309',
-          cursor: 'pointer',
-        }}
-      >
-        <X size={11} />
-      </button>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.15rem' }}>
+        {count > 1 ? (
+          <button
+            type="button"
+            onClick={() => onManage({ id, studentName, periodLabel, count, mode: 'reduce' })}
+            title={`Reduce ${periodLabel} guest meal count (remove 1 or more)`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '1.15rem',
+              height: '1.15rem',
+              padding: 0,
+              border: 0,
+              borderRadius: '50%',
+              background: '#fde68a',
+              color: '#b45309',
+              cursor: 'pointer',
+              transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#fcd34d'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#fde68a'; }}
+          >
+            <Minus size={10} strokeWidth={2.5} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onManage({ id, studentName, periodLabel, count, mode: 'remove' })}
+          title={count > 1 ? `Remove all ${periodLabel} guest meals` : `Remove ${periodLabel} guest meal`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '1.15rem',
+            height: '1.15rem',
+            padding: 0,
+            border: 0,
+            borderRadius: '50%',
+            background: 'transparent',
+            color: '#b45309',
+            cursor: 'pointer',
+            transition: 'background 0.15s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#fde68a'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <X size={11} strokeWidth={2.5} />
+        </button>
+      </span>
     ) : null}
   </span>
 );
@@ -169,38 +199,69 @@ export default function MealSheet() {
 
   const error = fetchError || '';
 
-  // Holds the chip currently pending confirmation, e.g. { id, studentName, label }. Driving the
-  // remove-confirm dialog off state (rather than window.confirm) is what lets it be styled and
-  // animated like the rest of the app instead of the browser's native prompt.
-  const [pendingRemoval, setPendingRemoval] = useState(null);
-  const [isRemoving, setIsRemoving] = useState(false);
+  // Holds the guest meal chip currently pending action: { id, studentName, periodLabel, count, mode }
+  const [pendingGuestMeal, setPendingGuestMeal] = useState(null);
+  const [targetGuestCount, setTargetGuestCount] = useState(1);
+  const [isProcessingGuestMeal, setIsProcessingGuestMeal] = useState(false);
 
-  const requestRemoveGuestMeal = useCallback((id, studentName, label) => {
-    setPendingRemoval({ id, studentName, label });
+  const requestManageGuestMeal = useCallback(({ id, studentName, periodLabel, count, mode }) => {
+    setPendingGuestMeal({ id, studentName, periodLabel, count, mode });
+    setTargetGuestCount(Math.max(1, count - 1));
   }, []);
 
-  const cancelRemoveGuestMeal = useCallback(() => {
-    if (isRemoving) return;
-    setPendingRemoval(null);
-  }, [isRemoving]);
+  const closeGuestMealModal = useCallback(() => {
+    if (isProcessingGuestMeal) return;
+    setPendingGuestMeal(null);
+  }, [isProcessingGuestMeal]);
 
-  const confirmRemoveGuestMeal = useCallback(async () => {
-    if (!pendingRemoval) return;
-    setIsRemoving(true);
+  const invalidateGuestDependentCaches = useCallback(() => {
+    queryCache.invalidate('mealsheet-');
+    queryCache.invalidate('guest-meals-');
+    queryCache.invalidate('meal-snapshot-');
+    queryCache.invalidate('billing-');
+    queryCache.invalidate('admin-billing-');
+    queryCache.invalidate('daily-cost-');
+    queryCache.invalidate('meal-counts');
+  }, []);
+
+  const confirmUpdateGuestCount = useCallback(async () => {
+    if (!pendingGuestMeal) return;
+    setIsProcessingGuestMeal(true);
     try {
-      await adminDataService.deleteGuestMealAsAdmin(pendingRemoval.id);
-      toast.success('Guest meal removed', `${pendingRemoval.label} was removed and the bill was recalculated.`);
-      // The "All" gender view fetches and caches Male/Female separately from the merged key
-      // `refresh()` targets, so a plain refresh would still serve the stale sub-cache.
-      queryCache.invalidate('mealsheet-');
+      await adminDataService.updateGuestMealAsAdmin(pendingGuestMeal.id, targetGuestCount);
+      const diff = pendingGuestMeal.count - targetGuestCount;
+      toast.success(
+        'Guest meal updated',
+        `${diff} guest meal${diff > 1 ? 's' : ''} removed for ${pendingGuestMeal.studentName}. ${targetGuestCount} remaining will be counted and billed.`
+      );
+      invalidateGuestDependentCaches();
       refresh();
-      setPendingRemoval(null);
+      setPendingGuestMeal(null);
+    } catch (err) {
+      toast.error('Could not update guest meal', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setIsProcessingGuestMeal(false);
+    }
+  }, [pendingGuestMeal, targetGuestCount, invalidateGuestDependentCaches, refresh, toast]);
+
+  const confirmRemoveAllGuestMeals = useCallback(async () => {
+    if (!pendingGuestMeal) return;
+    setIsProcessingGuestMeal(true);
+    try {
+      await adminDataService.deleteGuestMealAsAdmin(pendingGuestMeal.id);
+      toast.success(
+        'Guest meal removed',
+        `All ${pendingGuestMeal.count} guest meal${pendingGuestMeal.count > 1 ? 's' : ''} for ${pendingGuestMeal.studentName} were removed and the bill was recalculated.`
+      );
+      invalidateGuestDependentCaches();
+      refresh();
+      setPendingGuestMeal(null);
     } catch (err) {
       toast.error('Could not remove guest meal', err instanceof Error ? err.message : 'Please try again.');
     } finally {
-      setIsRemoving(false);
+      setIsProcessingGuestMeal(false);
     }
-  }, [pendingRemoval, refresh, toast]);
+  }, [pendingGuestMeal, invalidateGuestDependentCaches, refresh, toast]);
 
   useEffect(() => {
     setPage(1);
@@ -919,7 +980,7 @@ export default function MealSheet() {
                                 id={row.breakfastGuestMealId}
                                 periodLabel="Breakfast"
                                 studentName={row.name}
-                                onRemove={requestRemoveGuestMeal}
+                                onManage={requestManageGuestMeal}
                               />
                             ) : null}
                             {row.lunchGuestCount > 0 ? (
@@ -929,7 +990,7 @@ export default function MealSheet() {
                                 id={row.lunchGuestMealId}
                                 periodLabel="Lunch"
                                 studentName={row.name}
-                                onRemove={requestRemoveGuestMeal}
+                                onManage={requestManageGuestMeal}
                               />
                             ) : null}
                             {row.dinnerGuestCount > 0 ? (
@@ -939,7 +1000,7 @@ export default function MealSheet() {
                                 id={row.dinnerGuestMealId}
                                 periodLabel="Dinner"
                                 studentName={row.name}
-                                onRemove={requestRemoveGuestMeal}
+                                onManage={requestManageGuestMeal}
                               />
                             ) : null}
                           </div>
@@ -1051,44 +1112,158 @@ export default function MealSheet() {
       </div>
 
       <Modal
-        isOpen={!!pendingRemoval}
-        onClose={cancelRemoveGuestMeal}
-        title="Remove Guest Meal"
+        isOpen={!!pendingGuestMeal}
+        onClose={closeGuestMealModal}
+        title={pendingGuestMeal?.count > 1 ? `Manage Guest Meal — ${pendingGuestMeal?.periodLabel}` : `Remove Guest Meal — ${pendingGuestMeal?.periodLabel}`}
         actions={(
           <>
-            <Button variant="secondary" onClick={cancelRemoveGuestMeal} disabled={isRemoving}>
+            <Button variant="secondary" onClick={closeGuestMealModal} disabled={isProcessingGuestMeal}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={confirmRemoveGuestMeal} disabled={isRemoving}>
-              {isRemoving ? 'Removing...' : 'Remove Booking'}
-            </Button>
+            {pendingGuestMeal?.count > 1 ? (
+              <>
+                <Button variant="danger" onClick={confirmRemoveAllGuestMeals} disabled={isProcessingGuestMeal}>
+                  {isProcessingGuestMeal ? 'Processing...' : `Remove All (${pendingGuestMeal.count})`}
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={confirmUpdateGuestCount}
+                  disabled={isProcessingGuestMeal || targetGuestCount >= pendingGuestMeal.count || targetGuestCount < 1}
+                >
+                  {isProcessingGuestMeal ? 'Updating...' : `Keep ${targetGuestCount} (Remove ${pendingGuestMeal.count - targetGuestCount})`}
+                </Button>
+              </>
+            ) : (
+              <Button variant="danger" onClick={confirmRemoveAllGuestMeals} disabled={isProcessingGuestMeal}>
+                {isProcessingGuestMeal ? 'Removing...' : 'Remove Booking'}
+              </Button>
+            )}
           </>
         )}
       >
-        {pendingRemoval ? (
-          <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
-            <span
-              style={{
-                display: 'grid',
-                placeItems: 'center',
-                flexShrink: 0,
-                width: '2.4rem',
-                height: '2.4rem',
-                borderRadius: '50%',
-                background: '#fef2f2',
-                color: 'var(--danger, #dc2626)',
-              }}
-            >
-              <TriangleAlert size={20} />
-            </span>
-            <div style={{ display: 'grid', gap: '0.3rem' }}>
-              <p style={{ margin: 0 }}>
-                Remove <strong>{pendingRemoval.label}</strong> for <strong>{pendingRemoval.studentName}</strong>?
-              </p>
-              <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
-                The student&apos;s bill for this month will be recalculated immediately. This cannot be undone.
-              </p>
+        {pendingGuestMeal ? (
+          <div style={{ display: 'grid', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <span
+                style={{
+                  display: 'grid',
+                  placeItems: 'center',
+                  flexShrink: 0,
+                  width: '2.4rem',
+                  height: '2.4rem',
+                  borderRadius: '50%',
+                  background: pendingGuestMeal.count > 1 ? '#fef3c7' : '#fef2f2',
+                  color: pendingGuestMeal.count > 1 ? '#d97706' : 'var(--danger, #dc2626)',
+                }}
+              >
+                {pendingGuestMeal.count > 1 ? (
+                  <Coffee size={20} />
+                ) : (
+                  <TriangleAlert size={20} />
+                )}
+              </span>
+              <div style={{ display: 'grid', gap: '0.25rem' }}>
+                <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>
+                  {pendingGuestMeal.studentName} · {pendingGuestMeal.periodLabel} Guest Meal
+                </p>
+                <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
+                  Currently booked: <strong>{pendingGuestMeal.count} guest meal{pendingGuestMeal.count > 1 ? 's' : ''}</strong>
+                </p>
+              </div>
             </div>
+
+            {pendingGuestMeal.count > 1 ? (
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '1rem',
+                  display: 'grid',
+                  gap: '0.75rem',
+                }}
+              >
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text, #1e293b)' }}>
+                  Reduce Guest Count:
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setTargetGuestCount((c) => Math.max(1, c - 1))}
+                    disabled={targetGuestCount <= 1 || isProcessingGuestMeal}
+                    style={{
+                      width: '2.4rem',
+                      height: '2.4rem',
+                      padding: 0,
+                      fontWeight: 'bold',
+                      fontSize: '1.2rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Minus size={16} strokeWidth={2.5} />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={pendingGuestMeal.count - 1}
+                    value={targetGuestCount}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) {
+                        setTargetGuestCount(Math.max(1, Math.min(pendingGuestMeal.count - 1, val)));
+                      }
+                    }}
+                    style={{
+                      width: '4.5rem',
+                      height: '2.4rem',
+                      textAlign: 'center',
+                      fontSize: '1.15rem',
+                      fontWeight: 700,
+                      borderRadius: '6px',
+                      border: '1.5px solid var(--border, #cbd5e1)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setTargetGuestCount((c) => Math.min(pendingGuestMeal.count - 1, c + 1))}
+                    disabled={targetGuestCount >= pendingGuestMeal.count - 1 || isProcessingGuestMeal}
+                    style={{
+                      width: '2.4rem',
+                      height: '2.4rem',
+                      padding: 0,
+                      fontWeight: 'bold',
+                      fontSize: '1.2rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    +
+                  </button>
+
+                  <div style={{ fontSize: '0.85rem', color: 'var(--muted)', display: 'grid', gap: '0.15rem' }}>
+                    <span style={{ color: '#d97706', fontWeight: 600 }}>
+                      Remove {pendingGuestMeal.count - targetGuestCount} guest meal{pendingGuestMeal.count - targetGuestCount > 1 ? 's' : ''}
+                    </span>
+                    <span>
+                      {targetGuestCount} guest meal{targetGuestCount > 1 ? 's' : ''} will remain &amp; be counted
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
+                This will remove the guest meal completely. The student&apos;s bill for this month will be recalculated immediately.
+              </p>
+            )}
+
+            <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.8rem' }}>
+              ℹ️ Any changes made here will immediately recalculate the student&apos;s bill for this month and update the mess meal sheet count.
+            </p>
           </div>
         ) : null}
       </Modal>

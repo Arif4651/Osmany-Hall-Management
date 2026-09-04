@@ -474,6 +474,12 @@ export default function MealManagement() {
 
   const loadGuestMeals = useCallback(() => {
     queryCache.invalidate('guest-meals-');
+    queryCache.invalidate('meal-snapshot-');
+    queryCache.invalidate('billing-');
+    queryCache.invalidate('admin-billing-');
+    queryCache.invalidate('daily-cost-');
+    queryCache.invalidate('meal-counts');
+    queryCache.invalidate('mealsheet-');
     refreshGuestMeals();
   }, [refreshGuestMeals]);
   const countdownLabel = useMemo(() => {
