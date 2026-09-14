@@ -22,6 +22,9 @@ const tomorrowLocal = () => {
   return new Intl.DateTimeFormat('en-CA').format(date);
 };
 
+const DAY_IDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const getTodayDayId = () => DAY_IDS[new Date().getDay()];
+
 const emptyOverride = {
   mealPeriod: 'breakfast',
   effectiveFrom: todayLocal(),
@@ -181,6 +184,8 @@ export default function AdminMealManagement() {
     optionalItems: [],
   });
   const [overrideForm, setOverrideForm] = useState(emptyOverride);
+
+  const todayDayId = getTodayDayId();
 
   const { invalidate } = useQueryCache();
   const toast = useToast();
@@ -688,8 +693,11 @@ export default function AdminMealManagement() {
                   <thead><tr><th>Day</th>{mealTypeOptions.map((mealType) => <th key={mealType.id}>{mealType.label}</th>)}</tr></thead>
                   <tbody>
                     {menuRows.map((row) => (
-                      <tr key={row.dayId}>
-                        <td><strong>{row.dayLabel}</strong></td>
+                      <tr key={row.dayId} className={row.dayId === todayDayId ? 'is-today-row' : ''}>
+                        <td>
+                          <strong>{row.dayLabel}</strong>
+                          {row.dayId === todayDayId && <span className="today-day-badge">Today</span>}
+                        </td>
                         {mealTypeOptions.map((mealType) => <td key={mealType.id}><MealCell meal={row.mealsByType[mealType.id]} onEdit={() => openMenuEditor(row.dayId, mealType.id)} /></td>)}
                       </tr>
                     ))}

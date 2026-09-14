@@ -5226,6 +5226,33 @@ button {
   font-size: .82rem;
 }
 
+/* ---- Today row highlight (shared by admin & student menu tables) ---- */
+.admin-meal-table tr.is-today-row > td {
+  background: #eff6ff !important;
+  border-top: 2px solid #3b82f6;
+  border-bottom: 2px solid #3b82f6;
+}
+
+.admin-meal-table tr.is-today-row:first-child > td {
+  border-top-color: #3b82f6;
+}
+
+.today-day-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.06rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 20px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .admin-meal-cost {
   display: grid;
   gap: .3rem;
@@ -9134,6 +9161,11 @@ button {
   box-shadow: 2px 0 6px rgba(0, 0, 0, 0.04);
 }
 
+/* Student view menu: today row highlight (sticky col needs its own override) */
+.student-view-menu-page .admin-meal-table tr.is-today-row > .sticky-day-col {
+  background: #eff6ff !important;
+}
+
 /* Option pills in both desktop table and mobile cards */
 .student-menu-option-pill {
   display: inline-flex;
@@ -9384,6 +9416,47 @@ button {
     font-weight: 700;
     color: #059669;
     margin-top: 0.15rem;
+  }
+
+  /* ---- Mobile: today's tab button ---- */
+  .student-menu-tab-btn.is-today-tab:not(.is-active) {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    background: #eff6ff;
+  }
+
+  .today-tab-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #3b82f6;
+    margin-left: 3px;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+
+  .student-menu-tab-btn.is-active .today-tab-dot {
+    background: #93c5fd;
+  }
+
+  /* ---- Mobile: today's day card ---- */
+  .student-menu-day-card.is-today-card {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15), 0 2px 6px rgba(0, 0, 0, 0.06);
+  }
+
+  .student-menu-day-card.is-today-card .student-menu-day-header {
+    background: #dbeafe;
+    border-bottom-color: #bfdbfe;
+    color: #1e3a8a;
+  }
+
+  /* Override badge inside mobile card header */
+  .student-menu-day-card.is-today-card .today-day-badge {
+    background: #1d4ed8;
+    color: #ffffff;
+    border-color: #1d4ed8;
   }
 }
 

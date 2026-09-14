@@ -27,6 +27,9 @@ const DAY_TABS = [
   { id: 'sat', short: 'Sat' },
 ];
 
+// Returns the day ID ('sun', 'mon', …) for today in local time.
+const getTodayDayId = () => DAY_TABS[new Date().getDay()].id;
+
 function StudentMealCell({ meal, isMobile = false }) {
   const hasItems = Boolean(meal?.commonItems?.length || meal?.optionalItems?.length);
   if (!hasItems) return <span className="meal-empty">Not configured</span>;
@@ -86,7 +89,8 @@ export default function ViewMenu() {
     mealsByType: Object.fromEntries(day.meals.map((meal) => [meal.mealTypeId, meal])),
   })), [moduleData]);
 
-  const [selectedDay, setSelectedDay] = useState('all');
+  const todayDayId = getTodayDayId();
+  const [selectedDay, setSelectedDay] = useState(todayDayId);
   const filteredMenuRows = useMemo(() => {
     if (selectedDay === 'all') return menuRows;
     return menuRows.filter((r) => r.dayId === selectedDay);
@@ -297,8 +301,11 @@ export default function ViewMenu() {
                   </thead>
                   <tbody>
                     {menuRows.map((row) => (
-                      <tr key={row.dayId}>
-                        <td className="sticky-day-col"><strong>{row.dayLabel}</strong></td>
+                      <tr key={row.dayId} className={row.dayId === todayDayId ? 'is-today-row' : ''}>
+                        <td className="sticky-day-col">
+                          <strong>{row.dayLabel}</strong>
+                          {row.dayId === todayDayId && <span className="today-day-badge">Today</span>}
+                        </td>
                         {mealTypes.map((mealType) => (
                           <td key={mealType.id}>
                             <StudentMealCell meal={row.mealsByType[mealType.id]} />
@@ -323,19 +330,21 @@ export default function ViewMenu() {
                   <button
                     key={day.id}
                     type="button"
-                    className={`student-menu-tab-btn ${selectedDay === day.id ? 'is-active' : ''}`}
+                    className={`student-menu-tab-btn ${selectedDay === day.id ? 'is-active' : ''} ${day.id === todayDayId ? 'is-today-tab' : ''}`}
                     onClick={() => setSelectedDay(day.id)}
                   >
                     {day.short}
+                    {day.id === todayDayId && <span className="today-tab-dot" aria-label="today" />}
                   </button>
                 ))}
               </div>
 
               <div className="student-menu-mobile-cards">
                 {filteredMenuRows.map((row) => (
-                  <div key={row.dayId} className="student-menu-day-card">
+                  <div key={row.dayId} className={`student-menu-day-card${row.dayId === todayDayId ? ' is-today-card' : ''}`}>
                     <div className="student-menu-day-header">
                       <strong>{row.dayLabel}</strong>
+                      {row.dayId === todayDayId && <span className="today-day-badge">Today</span>}
                     </div>
                     <div className="student-menu-day-meals">
                       {mealTypes.map((mealType) => (
