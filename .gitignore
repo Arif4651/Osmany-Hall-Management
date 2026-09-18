@@ -8,7 +8,8 @@
 appsettings.json
 appsettings.development.json
 appsettings.Development.json
-!appsettings.Example.json
+appsettings.Example.json
 
 # Scratch build-verification output; held a copy of the app config.
 .build-check/
+.aspnet-data-protection-keys/

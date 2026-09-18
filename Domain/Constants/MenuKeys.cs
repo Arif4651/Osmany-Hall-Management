@@ -13,6 +13,7 @@ public static class MenuKeys
     public const string AdminMealsSection = "admin.meals.section";
     public const string AdminMeals = "admin.meals";
     public const string AdminMealSheet = "admin.meal-sheet";
+    public const string AdminAttendanceSheet = "admin.attendance-sheet";
 
     /// <summary>Configure the optional-item catalogue (Tea, Milk…) and which wing may take each.</summary>
     public const string AdminAdditionalItems = "admin.additional-items";
@@ -39,6 +40,7 @@ public static class MenuKeys
     // ── Student sections ─────────────────────────────────────────────────────
     public const string StudentMealsSection = "student.meals.section";
     public const string StudentMeals = "student.meals";
+    public const string StudentAttendance = "student.attendance";
     public const string StudentMealSnapshot = "student.meal-snapshot";
     public const string StudentViewMenu = "student.view-menu";
 

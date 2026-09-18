@@ -6,10 +6,12 @@ using HallBackend.Application.Serialization;
 using HallBackend.Domain.Entities;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 
 var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
 if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
@@ -19,9 +21,27 @@ if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+if (builder.Environment.IsDevelopment())
+{
+    var dbHost = new NpgsqlConnectionStringBuilder(connectionString).Host;
+    var allowNonLocalDevelopmentDatabase = builder.Configuration.GetValue<bool>("DatabaseSafety:AllowNonLocalDevelopmentDatabase");
+    var isLocalHost = string.Equals(dbHost, "localhost", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(dbHost, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(dbHost, "::1", StringComparison.OrdinalIgnoreCase);
+
+    if (!isLocalHost && !allowNonLocalDevelopmentDatabase)
+    {
+        throw new InvalidOperationException(
+            "Development is configured with a non-local database host. Use a local PostgreSQL database, or set DatabaseSafety:AllowNonLocalDevelopmentDatabase=true only when you intentionally need that.");
+    }
+}
 var jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret is required.");
 if (jwtSecret.StartsWith("CHANGE_", StringComparison.OrdinalIgnoreCase))
@@ -30,6 +50,11 @@ if (jwtSecret.StartsWith("CHANGE_", StringComparison.OrdinalIgnoreCase))
 }
 
 builder.Services.AddDbContext<HallDbContext>(options => options.UseNpgsql(connectionString));
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, ".aspnet-data-protection-keys")));
+}
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddSingleton<LoginAttemptLimiter>();
@@ -41,6 +66,7 @@ builder.Services.AddScoped<MealHistoryService>();
 builder.Services.AddScoped<BillingCalculationService>();
 builder.Services.AddScoped<AdditionalMealService>();
 builder.Services.AddScoped<OthersBillService>();
+builder.Services.AddScoped<AttendanceService>();
 builder.Services.AddScoped<PermissionService>();
 builder.Services.AddScoped<DataSeeder>();
 builder.Services.AddScoped<AccessControlSeeder>();

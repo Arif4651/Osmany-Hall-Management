@@ -277,7 +277,7 @@ public sealed class BillingController(
                 : x.TotalApprovedPaid > 0m ? "Partial Paid" : "Unpaid";
         return new MonthlyBillDto(
             x.StudentId, x.Student?.StudentName ?? string.Empty, x.Student?.RollNumber ?? string.Empty,
-            x.Student?.HallId ?? string.Empty, x.Student?.Gender ?? string.Empty,
+            x.Student?.HallId ?? string.Empty, x.Student?.RoomNo ?? string.Empty, x.Student?.Gender ?? string.Empty,
             x.Month, x.Year, x.ServiceBill, x.MonthlyBill, x.DswSubsidy, x.GuestMealBill, x.CarriedDue, x.DueBill,
             x.TotalBill, status, overridden, false, x.OthersBill, x.Adjustment, x.TotalApprovedPaid);
     }

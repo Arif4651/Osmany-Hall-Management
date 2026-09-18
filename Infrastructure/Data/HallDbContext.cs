@@ -38,6 +38,9 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
     public DbSet<AdditionalMealSelection> AdditionalMealSelections => Set<AdditionalMealSelection>();
     public DbSet<OthersBill> OthersBills => Set<OthersBill>();
     public DbSet<OthersBillAllocation> OthersBillAllocations => Set<OthersBillAllocation>();
+    public DbSet<AttendanceHallLocation> AttendanceHallLocations => Set<AttendanceHallLocation>();
+    public DbSet<AttendanceSession> AttendanceSessions => Set<AttendanceSession>();
+    public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -163,6 +166,48 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
             entity.HasIndex(x => x.Department);
             entity.HasIndex(x => x.Level);
             entity.HasIndex(x => new { x.Status, x.Gender }); // most common dual-filter
+        });
+
+        modelBuilder.Entity<AttendanceHallLocation>(entity =>
+        {
+            entity.ToTable("attendance_hall_locations", table =>
+            {
+                table.HasCheckConstraint("ck_attendance_hall_locations_latitude", "\"Latitude\" BETWEEN -90 AND 90");
+                table.HasCheckConstraint("ck_attendance_hall_locations_longitude", "\"Longitude\" BETWEEN -180 AND 180");
+                table.HasCheckConstraint("ck_attendance_hall_locations_radius", "\"RadiusMeters\" BETWEEN 20 AND 500");
+                table.HasCheckConstraint("ck_attendance_hall_locations_accuracy", "\"MaxAccuracyMeters\" BETWEEN 5 AND 250");
+            });
+            entity.HasIndex(x => x.HallId).IsUnique();
+            entity.Property(x => x.HallId).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.HallName).HasMaxLength(120).IsRequired();
+        });
+
+        modelBuilder.Entity<AttendanceSession>(entity =>
+        {
+            entity.ToTable("attendance_sessions", table =>
+                table.HasCheckConstraint("ck_attendance_sessions_time_window", "\"EndTime\" > \"StartTime\""));
+            entity.HasIndex(x => new { x.HallId, x.IsActive });
+            entity.Property(x => x.HallId).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.HallName).HasMaxLength(120).IsRequired();
+            entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AttendanceRecord>(entity =>
+        {
+            entity.ToTable("attendance_records", table =>
+            {
+                table.HasCheckConstraint("ck_attendance_records_status", "\"Status\" IN ('Present')");
+                table.HasCheckConstraint("ck_attendance_records_latitude", "\"Latitude\" BETWEEN -90 AND 90");
+                table.HasCheckConstraint("ck_attendance_records_longitude", "\"Longitude\" BETWEEN -180 AND 180");
+                table.HasCheckConstraint("ck_attendance_records_accuracy", "\"AccuracyMeters\" > 0");
+                table.HasCheckConstraint("ck_attendance_records_distance", "\"DistanceFromHallMeters\" >= 0");
+            });
+            entity.HasIndex(x => new { x.SessionId, x.StudentId, x.AttendanceDate }).IsUnique();
+            entity.HasIndex(x => new { x.AttendanceDate, x.SessionId });
+            entity.HasIndex(x => x.StudentId);
+            entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.HasOne(x => x.Session).WithMany(x => x.Records).HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MealType>(entity =>

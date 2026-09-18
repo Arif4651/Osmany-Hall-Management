@@ -30,6 +30,7 @@ public sealed class AccessControlSeeder(HallDbContext db)
         Section(MenuKeys.AdminMealsSection, "Meal Control", "admin",
             Page(MenuKeys.AdminMeals, "Meal Management", "/admin/meals", "admin"),
             Page(MenuKeys.AdminMealSheet, "Meal Sheet", "/admin/meal-sheet", "admin"),
+            Page(MenuKeys.AdminAttendanceSheet, "Attendance Sheet", "/admin/attendance-sheet", "admin"),
             Page(MenuKeys.AdminAdditionalItems, "Additional Meal Items", "/admin/meals", "admin")),
 
         Section(MenuKeys.AdminInventorySection, "Inventory", "admin",
@@ -51,6 +52,7 @@ public sealed class AccessControlSeeder(HallDbContext db)
 
         Section(MenuKeys.StudentMealsSection, "Meals", "student",
             Page(MenuKeys.StudentMeals, "Meal Preferences", "/student/meals", "student"),
+            Page(MenuKeys.StudentAttendance, "Attendance", "/student/attendance", "student"),
             Page(MenuKeys.StudentMealSnapshot, "Meal Snapshot", "/student/meal-snapshot", "student"),
             Page(MenuKeys.StudentViewMenu, "View Menu", "/student/view-menu", "student"),
             Page(MenuKeys.StudentAdditionalPreferences, "Additional Preferences", "/student/meals", "student")),
@@ -178,7 +180,7 @@ public sealed class AccessControlSeeder(HallDbContext db)
         string[] wingAdminFull =
         [
             MenuKeys.AdminStudentsSection, MenuKeys.AdminStudents,
-            MenuKeys.AdminMealsSection, MenuKeys.AdminMeals, MenuKeys.AdminMealSheet,
+            MenuKeys.AdminMealsSection, MenuKeys.AdminMeals, MenuKeys.AdminMealSheet, MenuKeys.AdminAttendanceSheet,
             MenuKeys.AdminInventorySection, MenuKeys.AdminInventory,
             MenuKeys.AdminFinanceSection, MenuKeys.AdminBilling, MenuKeys.AdminDue,
             MenuKeys.AdminPayments, MenuKeys.AdminDailyCost,
@@ -198,7 +200,7 @@ public sealed class AccessControlSeeder(HallDbContext db)
         string[] studentViewOnly =
         [
             MenuKeys.StudentMealsSection, MenuKeys.StudentMeals, MenuKeys.StudentMealSnapshot,
-            MenuKeys.StudentViewMenu, MenuKeys.StudentFinanceSection, MenuKeys.StudentBilling,
+            MenuKeys.StudentAttendance, MenuKeys.StudentViewMenu, MenuKeys.StudentFinanceSection, MenuKeys.StudentBilling,
             MenuKeys.StudentPayments, MenuKeys.StudentDailyCost,
             MenuKeys.StudentCommsSection, MenuKeys.StudentNoticeBoard,
         ];
@@ -262,6 +264,10 @@ public sealed class AccessControlSeeder(HallDbContext db)
             studentGrants,
             Applicable(Roles.Student, [MenuKeys.StudentMeals]),
             true, true, true, true);
+        Grant(
+            studentGrants,
+            Applicable(Roles.Student, [MenuKeys.StudentAttendance]),
+            true, true, false, false);
         Grant(
             studentGrants,
             Applicable(Roles.Student, [MenuKeys.StudentPayments]),
