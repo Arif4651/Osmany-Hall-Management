@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -20,14 +20,16 @@ import { useToast } from '../../context/ToastContext';
 
 const now = new Date();
 const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All' };
-const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
+const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Room No', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
 const tailHeaders = ['Due Bill', 'Total Bill', 'Status'];
 const emptySubsidyForm = { wing: 'Male', subsidyAmount: '', date: todayLocal(), mealPeriod: 'breakfast', notes: '' };
+const BILLING_STICKY_HEADER_TOP = 70;
 
 const HEADER_KEY_MAP = {
   'Student Name': 'studentName',
   'Roll': 'rollNumber',
   'Hall ID': 'hallId',
+  'Room No': 'roomNo',
   'Service Bill': 'serviceBill',
   'Monthly Bill': 'monthlyBill',
   'DSW Subsidy': 'dswSubsidy',
@@ -169,6 +171,16 @@ export default function BillingManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState('studentName');
   const [sortAsc, setSortAsc] = useState(true);
+  const billingTableScrollRef = useRef(null);
+  const billingHeaderRowRef = useRef(null);
+  const [billingStickyHeader, setBillingStickyHeader] = useState({
+    visible: false,
+    left: 0,
+    width: 0,
+    scrollLeft: 0,
+    tableWidth: 0,
+    colWidths: [],
+  });
 
   const toggleSort = (field) => {
     if (sortField === field) {
@@ -178,6 +190,85 @@ export default function BillingManagement() {
       setSortAsc(true);
     }
   };
+
+  const renderBillingHeaderCells = () => headers.map((header) => {
+    const fieldKey = HEADER_KEY_MAP[header] || header;
+    return (
+      <th
+        key={header}
+        onClick={() => toggleSort(fieldKey)}
+        style={{
+          textAlign: getAlign(header),
+          padding: '0.75rem',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+        title={'Sort by ' + header}
+      >
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          justifyContent: getAlign(header) === 'right' ? 'flex-end' : getAlign(header) === 'center' ? 'center' : 'flex-start',
+          width: '100%',
+        }}>
+          {header}
+          <ArrowUpDown size={12} style={{ opacity: sortField === fieldKey ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
+  });
+
+  const updateBillingStickyHeader = useCallback(() => {
+    const scrollEl = billingTableScrollRef.current;
+    const headerRow = billingHeaderRowRef.current;
+    if (!scrollEl || !headerRow) {
+      setBillingStickyHeader((current) => (current.visible ? { ...current, visible: false } : current));
+      return;
+    }
+
+    const headerRect = headerRow.getBoundingClientRect();
+    const wrapperRect = scrollEl.getBoundingClientRect();
+    const table = headerRow.closest('table');
+    const colWidths = Array.from(headerRow.children).map((cell) => cell.getBoundingClientRect().width);
+    const next = {
+      visible: headerRect.top <= BILLING_STICKY_HEADER_TOP && wrapperRect.bottom > BILLING_STICKY_HEADER_TOP + headerRect.height,
+      left: wrapperRect.left,
+      width: wrapperRect.width,
+      scrollLeft: scrollEl.scrollLeft,
+      tableWidth: table?.getBoundingClientRect().width || wrapperRect.width,
+      colWidths,
+    };
+
+    setBillingStickyHeader((current) => {
+      const sameCols = current.colWidths.length === next.colWidths.length
+        && current.colWidths.every((width, index) => Math.abs(width - next.colWidths[index]) < 0.5);
+      if (
+        current.visible === next.visible
+        && Math.abs(current.left - next.left) < 0.5
+        && Math.abs(current.width - next.width) < 0.5
+        && Math.abs(current.scrollLeft - next.scrollLeft) < 0.5
+        && Math.abs(current.tableWidth - next.tableWidth) < 0.5
+        && sameCols
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    updateBillingStickyHeader();
+    const scrollEl = billingTableScrollRef.current;
+    window.addEventListener('scroll', updateBillingStickyHeader, { passive: true });
+    window.addEventListener('resize', updateBillingStickyHeader);
+    scrollEl?.addEventListener('scroll', updateBillingStickyHeader, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', updateBillingStickyHeader);
+      window.removeEventListener('resize', updateBillingStickyHeader);
+      scrollEl?.removeEventListener('scroll', updateBillingStickyHeader);
+    };
+  }, [updateBillingStickyHeader, rows.length, headers.length]);
 
   const filteredAndSortedRows = useMemo(() => {
     let list = [...rows];
@@ -189,6 +280,7 @@ export default function BillingManagement() {
         r.studentName?.toLowerCase().includes(q) ||
         r.rollNumber?.toLowerCase().includes(q) ||
         r.hallId?.toLowerCase().includes(q) ||
+        r.roomNo?.toLowerCase().includes(q) ||
         String(r.status || '').toLowerCase().includes(q)
       );
     }
@@ -207,7 +299,7 @@ export default function BillingManagement() {
       }
 
       // Numeric ID sort if parseable
-      if (sortField === 'hallId' || sortField === 'rollNumber') {
+      if (sortField === 'hallId' || sortField === 'rollNumber' || sortField === 'roomNo') {
         const numA = parseInt(valA, 10);
         const numB = parseInt(valB, 10);
         if (!isNaN(numA) && !isNaN(numB)) {
@@ -342,6 +434,7 @@ export default function BillingManagement() {
     'Student Name': row.studentName,
     Roll: row.rollNumber,
     'Hall ID': row.hallId,
+    'Room No': row.roomNo,
     'Service Bill': row.serviceBill,
     'Monthly Bill': row.monthlyBill,
     'DSW Subsidy': row.dswSubsidy || 0,
@@ -376,6 +469,7 @@ export default function BillingManagement() {
         row.studentName,
         row.rollNumber,
         row.hallId,
+        row.roomNo,
         row.serviceBill,
         row.monthlyBill,
         row.dswSubsidy || 0,
@@ -768,41 +862,40 @@ export default function BillingManagement() {
               : `Showing: ${filteredAndSortedRows.length} of ${rows.length} students`}
           </div>
         </div>
+        {billingStickyHeader.visible && (
+          <div
+            className="billing-sticky-header-clone"
+            style={{
+              top: BILLING_STICKY_HEADER_TOP,
+              left: billingStickyHeader.left,
+              width: billingStickyHeader.width,
+            }}
+          >
+            <div className="billing-sticky-header-window">
+              <div style={{ transform: 'translateX(-' + billingStickyHeader.scrollLeft + 'px)', width: billingStickyHeader.tableWidth }}>
+                <table className="data-table billing-data-table" style={{ width: billingStickyHeader.tableWidth }}>
+                  <colgroup>
+                    {billingStickyHeader.colWidths.map((width, index) => (
+                      <col key={index} style={{ width }} />
+                    ))}
+                  </colgroup>
+                  <thead>
+                    <tr>{renderBillingHeaderCells()}</tr>
+                  </thead>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading && !rows.length ? (
           <TableSkeleton rows={8} cols={headers.length} />
         ) : (
-          <div className="table-wrap sticky-page-table billing-table-scroll">
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div ref={billingTableScrollRef} className="table-wrap sticky-page-table billing-table-scroll">
+            <table className="data-table billing-data-table" style={{ width: '100%' }}>
               <thead>
-                <tr>
-                  {headers.map((header) => {
-                    const fieldKey = HEADER_KEY_MAP[header] || header;
-                    return (
-                      <th
-                        key={header}
-                        onClick={() => toggleSort(fieldKey)}
-                        style={{
-                          textAlign: getAlign(header),
-                          padding: '0.75rem',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                        }}
-                        title={`Sort by ${header}`}
-                      >
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          justifyContent: getAlign(header) === 'right' ? 'flex-end' : getAlign(header) === 'center' ? 'center' : 'flex-start',
-                          width: '100%',
-                        }}>
-                          {header}
-                          <ArrowUpDown size={12} style={{ opacity: sortField === fieldKey ? 1 : 0.35, flexShrink: 0 }} />
-                        </span>
-                      </th>
-                    );
-                  })}
+                <tr ref={billingHeaderRowRef}>
+                  {renderBillingHeaderCells()}
                 </tr>
               </thead>
               <tbody>
@@ -823,9 +916,10 @@ export default function BillingManagement() {
 
                   return (
                     <tr key={row.studentId} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>{row.studentName}</td>
+                      <td className="billing-sticky-name" style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600', color: 'var(--primary)' }}>{row.studentName}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>{row.rollNumber}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.9rem' }}>{row.hallId}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '500' }}>{row.roomNo || '-'}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.serviceBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.monthlyBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'right', color: '#047857', fontWeight: '700' }}>{formatCurrency(row.dswSubsidy || 0)}</td>
@@ -1034,3 +1128,9 @@ export default function BillingManagement() {
     </div>
   );
 }
+
+
+
+
+
+

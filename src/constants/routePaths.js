@@ -5,6 +5,7 @@ export const ROUTE_PATHS = {
   changePassword: '/change-password',
 
   studentMeals: '/student/meals',
+  studentAttendance: '/student/attendance',
   studentMealSnapshot: '/student/meal-snapshot',
   studentViewMenu: '/student/view-menu',
   studentBilling: '/student/billing',
@@ -18,6 +19,7 @@ export const ROUTE_PATHS = {
   adminStudents: '/admin/students',
   adminMeals: '/admin/meals',
   adminMealSheet: '/admin/meal-sheet',
+  adminAttendanceSheet: '/admin/attendance-sheet',
   adminBilling: '/admin/billing',
   adminPayments: '/admin/payments',
   adminInventory: '/admin/inventory',

@@ -25,6 +25,7 @@ export const MENU_KEYS = {
   adminStudents: 'admin.students',
   adminMeals: 'admin.meals',
   adminMealSheet: 'admin.meal-sheet',
+  adminAttendanceSheet: 'admin.attendance-sheet',
   adminAdditionalItems: 'admin.additional-items',
   adminInventory: 'admin.inventory',
   adminBilling: 'admin.billing',
@@ -37,6 +38,7 @@ export const MENU_KEYS = {
   adminRolePermissions: 'admin.role-permissions',
 
   studentMeals: 'student.meals',
+  studentAttendance: 'student.attendance',
   studentMealSnapshot: 'student.meal-snapshot',
   studentViewMenu: 'student.view-menu',
   studentAdditionalPreferences: 'student.additional-preferences',

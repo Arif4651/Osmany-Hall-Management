@@ -18,6 +18,7 @@ import NotFoundPage from '../pages/system/NotFoundPage';
 
 // ── Lazy-loaded student pages ─────────────────────────────────────────────────
 const MealManagement    = lazy(() => import('../pages/student/MealManagement'));
+const StudentAttendance = lazy(() => import('../pages/student/Attendance'));
 const MealSnapshot      = lazy(() => import('../pages/student/MealSnapshot'));
 const ViewMenu          = lazy(() => import('../pages/student/ViewMenu'));
 const Billing           = lazy(() => import('../pages/student/Billing'));
@@ -28,6 +29,7 @@ const StudentNoticeBoard = lazy(() => import('../pages/student/StudentNoticeBoar
 const StudentManagement  = lazy(() => import('../pages/admin/StudentManagement'));
 const AdminMealManagement = lazy(() => import('../pages/admin/AdminMealManagement'));
 const MealSheet          = lazy(() => import('../pages/admin/MealSheet'));
+const AttendanceSheet    = lazy(() => import('../pages/admin/AttendanceSheet'));
 const BillingManagement  = lazy(() => import('../pages/admin/BillingManagement'));
 const PaymentVerification = lazy(() => import('../pages/admin/PaymentVerification'));
 const Inventory          = lazy(() => import('../pages/admin/Inventory'));
@@ -81,6 +83,7 @@ export default function AppRouter() {
         >
           <Route index element={<Navigate to={DEFAULT_REDIRECTS.student} replace />} />
           <Route path="meals"           element={guard(MENU_KEYS.studentMeals, <MealManagement />)} />
+          <Route path="attendance"      element={guard(MENU_KEYS.studentAttendance, <StudentAttendance />)} />
           <Route path="meal-snapshot"   element={guard(MENU_KEYS.studentMealSnapshot, <MealSnapshot />)} />
           <Route path="view-menu"       element={guard(MENU_KEYS.studentViewMenu, <ViewMenu />)} />
           <Route path="billing"         element={guard(MENU_KEYS.studentBilling, <Billing />)} />
@@ -102,6 +105,7 @@ export default function AppRouter() {
           <Route path="students"    element={guard(MENU_KEYS.adminStudents, <StudentManagement />)} />
           <Route path="meals"       element={guard(MENU_KEYS.adminMeals, <AdminMealManagement />)} />
           <Route path="meal-sheet"  element={guard(MENU_KEYS.adminMealSheet, <MealSheet />)} />
+          <Route path="attendance-sheet" element={guard(MENU_KEYS.adminAttendanceSheet, <AttendanceSheet />)} />
           <Route path="billing"     element={guard(MENU_KEYS.adminBilling, <BillingManagement />)} />
           <Route path="payments"    element={guard(MENU_KEYS.adminPayments, <PaymentVerification />)} />
           <Route path="inventory"   element={guard(MENU_KEYS.adminInventory, <Inventory />)} />
@@ -117,4 +121,3 @@ export default function AppRouter() {
     </Suspense>
   );
 }
-

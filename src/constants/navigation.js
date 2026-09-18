@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone, Terminal } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone, Terminal } from 'lucide-react';
 import { ROUTE_PATHS } from './routePaths';
 
 import { MENU_KEYS } from '../services/permissionService';
@@ -7,6 +7,7 @@ import { MENU_KEYS } from '../services/permissionService';
 // visible (they carry no privileged data); everything else is filtered by the signed-in grants.
 export const STUDENT_NAV_ITEMS = [
   { key: 'meal-preferences', label: 'Meal Preferences', path: ROUTE_PATHS.studentMeals, icon: Soup, menuKey: MENU_KEYS.studentMeals },
+  { key: 'attendance', label: 'Attendance', path: ROUTE_PATHS.studentAttendance, icon: ClipboardCheck, menuKey: MENU_KEYS.studentAttendance },
   { key: 'meal-snapshot', label: 'Meal Snapshot', path: ROUTE_PATHS.studentMealSnapshot, icon: CalendarDays, menuKey: MENU_KEYS.studentMealSnapshot },
   { key: 'view-menu', label: 'View Menu', path: ROUTE_PATHS.studentViewMenu, icon: ClipboardList, menuKey: MENU_KEYS.studentViewMenu },
   { key: 'billing', label: 'Billing', path: ROUTE_PATHS.studentBilling, icon: Receipt, menuKey: MENU_KEYS.studentBilling },
@@ -20,6 +21,7 @@ export const ADMIN_NAV_ITEMS = [
   { key: 'students', label: 'Student Management', path: ROUTE_PATHS.adminStudents, icon: Users, menuKey: MENU_KEYS.adminStudents },
   { key: 'meals', label: 'Meal Management', path: ROUTE_PATHS.adminMeals, icon: Soup, menuKey: MENU_KEYS.adminMeals },
   { key: 'meal-sheet', label: 'Meal Sheet', path: ROUTE_PATHS.adminMealSheet, icon: ClipboardList, menuKey: MENU_KEYS.adminMealSheet },
+  { key: 'attendance-sheet', label: 'Attendance Sheet', path: ROUTE_PATHS.adminAttendanceSheet, icon: ClipboardCheck, menuKey: MENU_KEYS.adminAttendanceSheet },
   { key: 'inventory', label: 'Inventory', path: ROUTE_PATHS.adminInventory, icon: Package, menuKey: MENU_KEYS.adminInventory },
   { key: 'billing', label: 'Bill Management', path: ROUTE_PATHS.adminBilling, icon: ClipboardList, menuKey: MENU_KEYS.adminBilling },
   { key: 'due', label: 'Due Bill', path: ROUTE_PATHS.adminDue, icon: WalletCards, menuKey: MENU_KEYS.adminDue },
