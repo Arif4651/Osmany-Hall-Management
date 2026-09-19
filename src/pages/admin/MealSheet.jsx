@@ -12,6 +12,7 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { queryCache } from '../../services/queryCache';
 import TableSkeleton from '../../components/ui/TableSkeleton';
 import AdditionalItemsSheet from '../../components/admin/AdditionalItemsSheet';
+import MonthlyMealAnalysis from '../../components/admin/MonthlyMealAnalysis';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
 import { MENU_KEYS } from '../../services/permissionService';
@@ -1110,6 +1111,9 @@ export default function MealSheet() {
       </>
       )}
       </div>
+
+      {/* Monthly Meal-Off Analysis — self-contained section, independent month picker */}
+      <MonthlyMealAnalysis activeWing={activeWing} isWingAdmin={isWingAdmin} />
 
       <Modal
         isOpen={!!pendingGuestMeal}

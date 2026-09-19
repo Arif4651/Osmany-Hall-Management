@@ -66,4 +66,11 @@ export const adminDataService = {
   getAdminAccounts: async () => apiRequest('/admin-settings/admins'),
   createAdminAccount: async (payload) => apiRequest('/admin-settings/admins', { method: 'POST', body: JSON.stringify(payload) }),
   updateAdminAccount: async (id, payload) => apiRequest(`/admin-settings/admins/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  // ── Monthly Meal-Off Analysis ──────────────────────────────────────────────
+  // Paginated ranking: which students kept meals OFF most this month.
+  getMonthlyMealAnalysis: async (params) => apiRequest(`/meals/monthly-analysis${toQueryString(params)}`),
+  // Full month detail for a single student (counts + daily breakdown).
+  getStudentMonthlyMealDetail: async (studentRecordId, month, year, wing) =>
+    apiRequest(`/meals/monthly-analysis/student/${studentRecordId}${toQueryString({ month, year, wing })}`),
 };
