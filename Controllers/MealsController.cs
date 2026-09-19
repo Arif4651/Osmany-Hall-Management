@@ -1442,4 +1442,285 @@ public sealed class MealsController(
         return Ok(new ApplyDefaultsResultDto(assigned, skipped, target));
     }
 
+    // ── Monthly Meal-Off Analysis ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Paginated monthly OFF-meal ranking.
+    /// Returns summary cards + a ranked list of students ordered by total OFF meals DESC.
+    /// All aggregation is done in-memory after a single DB load; no N+1 queries.
+    /// </summary>
+    [HttpGet("monthly-analysis")]
+    [RequirePermission(MenuKeys.AdminMealSheet, PermissionActions.View)]
+    public async Task<ActionResult<MonthlyMealOffRankingDto>> GetMonthlyAnalysis(
+        [FromQuery] int? month,
+        [FromQuery] int? year,
+        [FromQuery] string? wing,
+        [FromQuery] string? hall,
+        [FromQuery] string? department,
+        [FromQuery] string? level,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] bool sortAsc = false,
+        CancellationToken cancellationToken = default)
+    {
+        var today = HallClock.Today;
+        var targetMonth = month ?? today.Month;
+        var targetYear = year ?? today.Year;
+        if (targetMonth < 1 || targetMonth > 12)
+            return BadRequest(new { message = "Month must be between 1 and 12." });
+        if (targetYear < 2020 || targetYear > today.Year + 1)
+            return BadRequest(new { message = "Year is out of range." });
+
+        var from = new DateOnly(targetYear, targetMonth, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+
+        // Resolve wing scope — wing admins are locked to their own wing.
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        string? effectiveWing = !string.IsNullOrWhiteSpace(adminWing) ? adminWing : wing;
+
+        // Build student query with all filters applied in the database.
+        var studentQuery = db.Students.AsNoTracking()
+            .Where(x => x.Status == MealResolutionContext.BillableStatus);
+
+        if (!string.IsNullOrWhiteSpace(effectiveWing))
+            studentQuery = studentQuery.Where(x => x.Gender == effectiveWing);
+        if (!string.IsNullOrWhiteSpace(hall) && hall != "All")
+            studentQuery = studentQuery.Where(x => x.HallName == hall);
+        if (!string.IsNullOrWhiteSpace(department) && department != "all")
+            studentQuery = studentQuery.Where(x => x.Department == department);
+        if (!string.IsNullOrWhiteSpace(level) && level != "all")
+            studentQuery = studentQuery.Where(x => x.Level == level);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = SearchPattern.Contains(search);
+            studentQuery = studentQuery.Where(x =>
+                EF.Functions.ILike(x.StudentName, pattern, SearchPattern.EscapeCharacter) ||
+                EF.Functions.ILike(x.StudentId, pattern, SearchPattern.EscapeCharacter));
+        }
+
+        var students = await studentQuery
+            .OrderBy(x => x.StudentName)
+            .ToListAsync(cancellationToken);
+
+        if (students.Count == 0)
+        {
+            var empty = new MonthlyMealOffSummaryDto(0, 0, 0, 0m);
+            return new MonthlyMealOffRankingDto(empty, [], 0, page, pageSize, 0, targetMonth, targetYear);
+        }
+
+        var studentIds = students.Select(x => x.Id).ToList();
+
+        // Load the relevant wings to fetch overrides.
+        var wings = students.Select(x => x.Gender).Distinct().ToList();
+
+        // Single-pass DB load for status and override rows covering the month.
+        var statusRows = await db.MealStatusHistory.AsNoTracking()
+            .Where(x => studentIds.Contains(x.StudentId)
+                && x.EffectiveFrom <= to
+                && (x.EffectiveTo == null || x.EffectiveTo >= from))
+            .ToListAsync(cancellationToken);
+
+        var overrideRows = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => wings.Contains(x.Wing)
+                && x.EffectiveFrom <= to
+                && x.EffectiveTo >= from)
+            .ToListAsync(cancellationToken);
+
+        // Pre-group into dictionaries for O(1) lookup inside the day loop.
+        var statusByStudentAndPeriod = statusRows
+            .GroupBy(x => (x.StudentId, x.MealPeriod))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var overridesByWingAndPeriod = overrideRows
+            .GroupBy(x => (x.Wing, x.MealPeriod))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Aggregate per student over all applicable days.
+        var aggregated = new List<(Student Student, int BOn, int BOff, int LOn, int LOff, int DOn, int DOff, int TotalApplicable)>();
+
+        foreach (var student in students)
+        {
+            int bOn = 0, bOff = 0, lOn = 0, lOff = 0, dOn = 0, dOff = 0, applicable = 0;
+
+            for (var date = from; date <= to; date = date.AddDays(1))
+            {
+                // Student must have joined by this date.
+                if (!MealResolutionContext.HasJoinedBy(student, date)) continue;
+                applicable += 3;
+
+                foreach (var period in MealHistoryService.MealPeriods)
+                {
+                    statusByStudentAndPeriod.TryGetValue((student.Id, period), out var sList);
+                    overridesByWingAndPeriod.TryGetValue((student.Gender, period), out var oList);
+
+                    var isOn = MealHistoryService.GetEffectiveStatus(
+                        student.Id, student.Gender, period, date,
+                        sList ?? [],
+                        oList ?? []);
+
+                    if (period == "breakfast") { if (isOn) bOn++; else bOff++; }
+                    else if (period == "lunch") { if (isOn) lOn++; else lOff++; }
+                    else { if (isOn) dOn++; else dOff++; }
+                }
+            }
+
+            aggregated.Add((student, bOn, bOff, lOn, lOff, dOn, dOff, applicable));
+        }
+
+        // Summary cards — computed over all matching students (not just the current page).
+        var totalStudents = aggregated.Count;
+        var totalOffMeals = aggregated.Sum(x => x.BOff + x.LOff + x.DOff);
+        var studentsWithOff = aggregated.Count(x => x.BOff + x.LOff + x.DOff > 0);
+        var avgOff = totalStudents > 0 ? Math.Round((decimal)totalOffMeals / totalStudents, 2) : 0m;
+
+        var summary = new MonthlyMealOffSummaryDto(totalStudents, studentsWithOff, totalOffMeals, avgOff);
+
+        // Sort.
+        IEnumerable<(Student Student, int BOn, int BOff, int LOn, int LOff, int DOn, int DOff, int TotalApplicable)> sorted = sortBy switch
+        {
+            "breakfastOff" => sortAsc ? aggregated.OrderBy(x => x.BOff) : aggregated.OrderByDescending(x => x.BOff),
+            "lunchOff"     => sortAsc ? aggregated.OrderBy(x => x.LOff) : aggregated.OrderByDescending(x => x.LOff),
+            "dinnerOff"    => sortAsc ? aggregated.OrderBy(x => x.DOff) : aggregated.OrderByDescending(x => x.DOff),
+            "offPercent"   => sortAsc
+                ? aggregated.OrderBy(x => x.TotalApplicable > 0 ? (double)(x.BOff + x.LOff + x.DOff) / x.TotalApplicable : 0)
+                : aggregated.OrderByDescending(x => x.TotalApplicable > 0 ? (double)(x.BOff + x.LOff + x.DOff) / x.TotalApplicable : 0),
+            "name"         => sortAsc ? aggregated.OrderBy(x => x.Student.StudentName) : aggregated.OrderByDescending(x => x.Student.StudentName),
+            _              => sortAsc
+                ? aggregated.OrderBy(x => x.BOff + x.LOff + x.DOff)
+                : aggregated.OrderByDescending(x => x.BOff + x.LOff + x.DOff),
+        };
+
+        var sortedList = sorted.ToList();
+        var totalRows = sortedList.Count;
+        var clampedPage = Math.Max(1, page);
+        var clampedPageSize = Math.Clamp(pageSize, 5, 100);
+        var totalPages = (int)Math.Ceiling((double)totalRows / clampedPageSize);
+
+        var pageRows = sortedList
+            .Skip((clampedPage - 1) * clampedPageSize)
+            .Take(clampedPageSize)
+            .Select((entry, idx) =>
+            {
+                var totalOff = entry.BOff + entry.LOff + entry.DOff;
+                var offPct = entry.TotalApplicable > 0
+                    ? Math.Round((decimal)totalOff / entry.TotalApplicable * 100, 2)
+                    : 0m;
+                var globalRank = (clampedPage - 1) * clampedPageSize + idx + 1;
+                return new MonthlyMealOffRankRow(
+                    globalRank,
+                    entry.Student.Id,
+                    entry.Student.StudentId,
+                    entry.Student.StudentName,
+                    entry.Student.HallId,
+                    entry.Student.HallName,
+                    entry.Student.RoomNo,
+                    entry.Student.Gender,
+                    entry.Student.Department,
+                    entry.Student.Level,
+                    entry.BOff,
+                    entry.LOff,
+                    entry.DOff,
+                    totalOff,
+                    entry.TotalApplicable,
+                    offPct);
+            })
+            .ToList();
+
+        return new MonthlyMealOffRankingDto(summary, pageRows, totalRows, clampedPage, clampedPageSize, totalPages, targetMonth, targetYear);
+    }
+
+    /// <summary>
+    /// Full monthly meal detail for a single student:
+    /// per-period ON/OFF counts, total, OFF%, and a day-by-day breakdown.
+    /// </summary>
+    [HttpGet("monthly-analysis/student/{studentRecordId:guid}")]
+    [RequirePermission(MenuKeys.AdminMealSheet, PermissionActions.View)]
+    public async Task<ActionResult<StudentMonthlyMealDetailDto>> GetStudentMonthlyAnalysis(
+        Guid studentRecordId,
+        [FromQuery] int? month,
+        [FromQuery] int? year,
+        [FromQuery] string? wing,
+        CancellationToken cancellationToken)
+    {
+        var today = HallClock.Today;
+        var targetMonth = month ?? today.Month;
+        var targetYear = year ?? today.Year;
+        if (targetMonth < 1 || targetMonth > 12)
+            return BadRequest(new { message = "Month must be between 1 and 12." });
+
+        var from = new DateOnly(targetYear, targetMonth, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+
+        var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
+        var effectiveWing = !string.IsNullOrWhiteSpace(adminWing) ? adminWing : wing;
+
+        var student = await db.Students.AsNoTracking()
+            .FirstOrDefaultAsync(x =>
+                x.Id == studentRecordId &&
+                x.Status == MealResolutionContext.BillableStatus &&
+                (string.IsNullOrWhiteSpace(effectiveWing) || x.Gender == effectiveWing),
+                cancellationToken);
+
+        if (student is null)
+            return NotFound(new { message = "Student not found or not active in the selected wing." });
+
+        // Single DB load for this student's data over the month.
+        var statusRows = await db.MealStatusHistory.AsNoTracking()
+            .Where(x => x.StudentId == student.Id
+                && x.EffectiveFrom <= to
+                && (x.EffectiveTo == null || x.EffectiveTo >= from))
+            .ToListAsync(cancellationToken);
+
+        var overrideRows = await db.GlobalMealOverrides.AsNoTracking()
+            .Where(x => x.Wing == student.Gender
+                && x.EffectiveFrom <= to
+                && x.EffectiveTo >= from)
+            .ToListAsync(cancellationToken);
+
+        int bOn = 0, bOff = 0, lOn = 0, lOff = 0, dOn = 0, dOff = 0, applicable = 0;
+        var dailyBreakdown = new List<StudentMonthlyDayDto>();
+
+        for (var date = from; date <= to; date = date.AddDays(1))
+        {
+            if (!MealResolutionContext.HasJoinedBy(student, date)) continue;
+            applicable += 3;
+
+            var breakfastOn = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "breakfast", date, statusRows, overrideRows);
+            var lunchOn     = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "lunch",     date, statusRows, overrideRows);
+            var dinnerOn    = MealHistoryService.GetEffectiveStatus(student.Id, student.Gender, "dinner",    date, statusRows, overrideRows);
+
+            if (breakfastOn) bOn++; else bOff++;
+            if (lunchOn)     lOn++; else lOff++;
+            if (dinnerOn)    dOn++; else dOff++;
+
+            dailyBreakdown.Add(new StudentMonthlyDayDto(date, breakfastOn, lunchOn, dinnerOn));
+        }
+
+        var totalOn = bOn + lOn + dOn;
+        var totalOff = bOff + lOff + dOff;
+        var offPct = applicable > 0 ? Math.Round((decimal)totalOff / applicable * 100, 2) : 0m;
+
+        return new StudentMonthlyMealDetailDto(
+            student.Id,
+            student.StudentId,
+            student.StudentName,
+            student.HallId,
+            student.HallName,
+            student.RoomNo,
+            student.Gender,
+            student.Department,
+            student.Level,
+            targetMonth,
+            targetYear,
+            bOn, bOff,
+            lOn, lOff,
+            dOn, dOff,
+            totalOn, totalOff,
+            applicable,
+            offPct,
+            dailyBreakdown);
+    }
+
 }

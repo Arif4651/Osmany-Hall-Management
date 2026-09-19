@@ -121,3 +121,85 @@ public sealed record MealSheetDto(
     int DinnerCount,
     IReadOnlyList<MealSheetRowDto> Rows,
     bool IsAvailable = true);
+
+// ── Monthly Meal-Off Analysis DTOs ────────────────────────────────────────────
+
+/// <summary>
+/// Aggregate summary cards shown at the top of the monthly analysis section.
+/// </summary>
+public sealed record MonthlyMealOffSummaryDto(
+    int TotalStudents,
+    int StudentsWithAtLeastOneOff,
+    int TotalOffMeals,
+    decimal AverageOffPerStudent);
+
+/// <summary>
+/// One row in the monthly OFF-meal ranking table, ordered by TotalOff DESC.
+/// </summary>
+public sealed record MonthlyMealOffRankRow(
+    int Rank,
+    Guid StudentRecordId,
+    string StudentId,
+    string StudentName,
+    string HallId,
+    string HallName,
+    string RoomNo,
+    string Gender,
+    string Department,
+    string Level,
+    int BreakfastOff,
+    int LunchOff,
+    int DinnerOff,
+    int TotalOff,
+    int TotalApplicable,
+    decimal OffPercent);
+
+/// <summary>
+/// Paginated ranking result returned by GET /api/meals/monthly-analysis.
+/// </summary>
+public sealed record MonthlyMealOffRankingDto(
+    MonthlyMealOffSummaryDto Summary,
+    IReadOnlyList<MonthlyMealOffRankRow> Rows,
+    int TotalRows,
+    int Page,
+    int PageSize,
+    int TotalPages,
+    int Month,
+    int Year);
+
+/// <summary>
+/// Meal status for a single calendar day in the student's monthly breakdown.
+/// </summary>
+public sealed record StudentMonthlyDayDto(
+    DateOnly Date,
+    bool BreakfastOn,
+    bool LunchOn,
+    bool DinnerOn);
+
+/// <summary>
+/// Full monthly meal detail for a single student returned by
+/// GET /api/meals/monthly-analysis/student/{studentRecordId}.
+/// </summary>
+public sealed record StudentMonthlyMealDetailDto(
+    Guid StudentRecordId,
+    string StudentId,
+    string StudentName,
+    string HallId,
+    string HallName,
+    string RoomNo,
+    string Gender,
+    string Department,
+    string Level,
+    int Month,
+    int Year,
+    int BreakfastOn,
+    int BreakfastOff,
+    int LunchOn,
+    int LunchOff,
+    int DinnerOn,
+    int DinnerOff,
+    int TotalOn,
+    int TotalOff,
+    int TotalApplicable,
+    decimal OffPercent,
+    IReadOnlyList<StudentMonthlyDayDto> DailyBreakdown);
