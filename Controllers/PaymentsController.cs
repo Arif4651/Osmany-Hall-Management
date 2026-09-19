@@ -18,8 +18,12 @@ public sealed class PaymentsController(
     HallDbContext db,
     CurrentUserService currentUser,
     BillingCalculationService billing,
-    ILogger<PaymentsController> logger) : ControllerBase
+    ILogger<PaymentsController> logger,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.PaymentVerification, ct);
     [HttpGet("categories")]
     public async Task<IReadOnlyList<PaymentCategoryDto>> GetCategories([FromQuery] bool includeInactive = false, CancellationToken cancellationToken = default)
         => await db.PaymentCategories.AsNoTracking()
@@ -221,6 +225,14 @@ public sealed class PaymentsController(
         }
 
         var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        var auditAction = action == "approve" ? AuditActions.Approve : AuditActions.Reject;
+        _ = audit.LogAsync(ctx, auditAction, "PaymentSubmission", row.Id.ToString(),
+            $"{auditAction} payment of {(row.ApprovedAmount ?? row.SubmittedAmount):F2} BDT (TxID: {row.TransactionId}) for {saved.Student?.StudentName} ({saved.Student?.RollNumber})",
+            newValues: new { Status = row.Status, ApprovedAmount = row.ApprovedAmount, TransactionId = row.TransactionId },
+            cancellationToken: CancellationToken.None);
+
         return ToDto(saved);
     }
 

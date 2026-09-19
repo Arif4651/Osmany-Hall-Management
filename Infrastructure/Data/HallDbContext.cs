@@ -297,10 +297,24 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
         {
             entity.ToTable("audit_logs");
             entity.Property(x => x.Actor).HasMaxLength(160).IsRequired();
-            entity.Property(x => x.Action).HasMaxLength(240).IsRequired();
+            entity.Property(x => x.ActorRole).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Action).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Module).HasMaxLength(80).IsRequired();
-            // Performance index: chronological audit log pagination
+            entity.Property(x => x.EntityType).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.EntityId).HasMaxLength(160);
+            entity.Property(x => x.Description).HasMaxLength(1000).IsRequired();
+            entity.Property(x => x.OldValues).HasColumnType("text");
+            entity.Property(x => x.NewValues).HasColumnType("text");
+            entity.Property(x => x.IpAddress).HasMaxLength(64);
+            entity.Property(x => x.UserAgent).HasMaxLength(300);
+            entity.HasOne(x => x.ActorUser).WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.SetNull);
+            // Performance indexes for filter/sort patterns
             entity.HasIndex(x => x.CreatedAtUtc);
+            entity.HasIndex(x => x.Module);
+            entity.HasIndex(x => x.Action);
+            entity.HasIndex(x => x.ActorUserId);
+            entity.HasIndex(x => x.IsSuccess);
+            entity.HasIndex(x => x.EntityType);
         });
 
         ConfigureFinancialModel(modelBuilder);

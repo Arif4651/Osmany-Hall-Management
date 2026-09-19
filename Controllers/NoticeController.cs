@@ -13,7 +13,11 @@ namespace HallBackend.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/notices")]
-public sealed class NoticeController(HallDbContext db, CurrentUserService currentUser, Microsoft.AspNetCore.OutputCaching.IOutputCacheStore cacheStore) : ControllerBase
+public sealed class NoticeController(
+    HallDbContext db,
+    CurrentUserService currentUser,
+    AuditLogService audit,
+    Microsoft.AspNetCore.OutputCaching.IOutputCacheStore cacheStore) : ControllerBase
 {
     [HttpGet]
     [Microsoft.AspNetCore.OutputCaching.OutputCache(PolicyName = "notices-cache", Tags = ["notices"])]
@@ -103,6 +107,10 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
 
         var creatorName = user.FullName;
+        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+            AuditModules.NoticeBoard, AuditActions.Create, "Notice", notice.Id.ToString(),
+            $"Created notice '{notice.Title}' targeting {notice.TargetWing} wing",
+            newValues: new { notice.Title, notice.TargetWing }, cancellationToken: CancellationToken.None);
 
         return CreatedAtAction(nameof(Get), new { id = notice.Id }, new NoticeDto(
             notice.Id,
@@ -157,6 +165,12 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
 
         await db.SaveChangesAsync(cancellationToken);
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
+
+        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+            AuditModules.NoticeBoard, AuditActions.Update, "Notice", id.ToString(),
+            $"Updated notice '{notice.Title}'",
+            cancellationToken: CancellationToken.None);
+
         return NoContent();
     }
 
@@ -184,6 +198,12 @@ public sealed class NoticeController(HallDbContext db, CurrentUserService curren
         db.Notices.Remove(notice);
         await db.SaveChangesAsync(cancellationToken);
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
+
+        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+            AuditModules.NoticeBoard, AuditActions.Delete, "Notice", id.ToString(),
+            $"Deleted notice '{notice.Title}' ({notice.TargetWing} wing)",
+            cancellationToken: CancellationToken.None);
+
         return NoContent();
     }
 }

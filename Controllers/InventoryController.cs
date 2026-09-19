@@ -18,8 +18,13 @@ public sealed class InventoryController(
     CurrentUserService currentUser,
     InventoryTransactionService inventory,
     ItemCatalogService catalog,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.Inventory, ct);
+
     private static readonly string[] Categories = ["Common", "Options", "Others"];
     private static readonly string[] MealPeriods = ["breakfast", "lunch", "dinner"];
 
@@ -81,6 +86,13 @@ public sealed class InventoryController(
         }
         await catalog.RelinkMealItemsAsync(item, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Create, "InventoryItem", item.Id.ToString(),
+            $"Created inventory item '{item.Item}' ({item.Category}) for {selectedWing} wing",
+            newValues: new { item.Item, item.Category, item.Unit, item.Wing, item.IsStored },
+            cancellationToken: CancellationToken.None);
+
         return CreatedAtAction(nameof(GetItems), ToDto(item));
     }
 
@@ -94,12 +106,23 @@ public sealed class InventoryController(
         if (item.Wing != selectedWing) return Forbid();
         var error = await ValidateItemAsync(request, selectedWing, id, cancellationToken);
         if (error is not null) return BadRequest(new { message = error });
+
+        var oldValues = new { item.Item, item.Category, item.Unit, item.IsStored };
+
         item.Item = request.Name.Trim();
         item.Category = request.Category;
         item.Unit = request.Unit.Trim();
         item.LinkedOptionId = request.Category == "Others" ? request.LinkedOptionId : null;
         item.IsStored = request.IsStored;
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Update, "InventoryItem", item.Id.ToString(),
+            $"Updated inventory item '{item.Item}'",
+            oldValues: oldValues,
+            newValues: new { item.Item, item.Category, item.Unit, item.IsStored },
+            cancellationToken: CancellationToken.None);
+
         return ToDto(item);
     }
 
@@ -130,6 +153,12 @@ public sealed class InventoryController(
             db.InventoryItems.Remove(item);
         }
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Delete, "InventoryItem", item.Id.ToString(),
+            $"{(hasHistory ? "Archived" : "Deleted")} inventory item '{item.Item}'",
+            cancellationToken: CancellationToken.None);
+
         return Ok(new { archived = hasHistory });
     }
 
@@ -299,6 +328,14 @@ public sealed class InventoryController(
             await transaction.CommitAsync(cancellationToken);
             await billing.RecalculateForwardAsync(updatedRequest.Date.Month, updatedRequest.Date.Year, cancellationToken);
             await db.Entry(row).Reference(x => x.Item).LoadAsync(cancellationToken);
+
+            var ctx = await BuildCtxAsync(cancellationToken);
+            var action = row.TransactionType == "in" ? AuditActions.StockIn : AuditActions.StockOut;
+            _ = audit.LogAsync(ctx, action, "StockTransaction", row.Id.ToString(),
+                $"{action} {row.Quantity} {item.Unit} of '{item.Item}' ({row.Date:yyyy-MM-dd})",
+                newValues: new { row.ItemId, row.Quantity, row.Rate, row.TotalCost, row.TransactionType, row.Date },
+                cancellationToken: CancellationToken.None);
+
             return CreatedAtAction(nameof(GetTransactions), ToDto(row, false));
         }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
@@ -407,6 +444,11 @@ public sealed class InventoryController(
             foreach (var (month, year) in months)
                 await billing.RecalculateForwardAsync(month, year, cancellationToken);
 
+            var ctx = await BuildCtxAsync(cancellationToken);
+            _ = audit.LogAsync(ctx, AuditActions.StockOut, "StockTransaction", null,
+                $"Bulk stock transaction recorded {computed.Count} item(s) for {selectedWing} wing",
+                cancellationToken: CancellationToken.None);
+
             return Ok(new BulkTransactionResult(computed.Count, []));
         }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
@@ -479,6 +521,13 @@ public sealed class InventoryController(
             await transaction.CommitAsync(cancellationToken);
             var first = oldDate.Year * 12 + oldDate.Month <= updatedRequest.Date.Year * 12 + updatedRequest.Date.Month ? oldDate : updatedRequest.Date;
             await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
+
+            var ctx = await BuildCtxAsync(cancellationToken);
+            _ = audit.LogAsync(ctx, AuditActions.Update, "StockTransaction", row.Id.ToString(),
+                $"Updated stock transaction {id} for item '{item.Item}'",
+                newValues: new { row.ItemId, row.Quantity, row.Rate, row.TotalCost, row.TransactionType, row.Date },
+                cancellationToken: CancellationToken.None);
+
             return ToDto(row, false);
         }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
@@ -516,11 +565,18 @@ public sealed class InventoryController(
         {
             var itemId = row.ItemId;
             var date = row.Date;
+            var itemName = row.Item?.Item;
             db.StockTransactions.Remove(row);
             await db.SaveChangesAsync(cancellationToken);
             await inventory.RebuildItemAsync(itemId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
+
+            var ctx = await BuildCtxAsync(cancellationToken);
+            _ = audit.LogAsync(ctx, AuditActions.Delete, "StockTransaction", id.ToString(),
+                $"Deleted stock transaction {id} for item '{itemName}'",
+                cancellationToken: CancellationToken.None);
+
             return NoContent();
         }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }

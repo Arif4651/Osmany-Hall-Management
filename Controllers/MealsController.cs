@@ -17,8 +17,13 @@ public sealed class MealsController(
     HallDbContext db,
     CurrentUserService currentUser,
     MealHistoryService history,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.MealManagement, ct);
+
     [HttpGet("module")]
     public async Task<ActionResult<MealModuleDto>> GetModule([FromQuery] string? wing, CancellationToken cancellationToken)
     {
@@ -78,6 +83,13 @@ public sealed class MealsController(
         }
         setting.CutoffTime = request.CutoffTime;
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.ConfigurationChange, "MealSetting", setting.Id.ToString(),
+            $"Updated meal cutoff time to {request.CutoffTime} for {selectedWing} wing",
+            newValues: new { CutoffTime = request.CutoffTime, Wing = selectedWing },
+            cancellationToken: CancellationToken.None);
+
         return await GetModule(selectedWing, cancellationToken);
     }
 
@@ -186,6 +198,13 @@ public sealed class MealsController(
 
         db.MealItems.AddRange(nextItems);
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Update, "MealConfiguration", config.Id.ToString(),
+            $"Updated meal menu configuration for {request.DayId} {request.MealTypeId} ({selectedWing} wing)",
+            newValues: new { request.DayId, request.MealTypeId, Wing = selectedWing, ItemCount = nextItems.Count },
+            cancellationToken: CancellationToken.None);
+
         return await GetModule(selectedWing, cancellationToken);
     }
 
@@ -414,6 +433,13 @@ public sealed class MealsController(
             // This changes who is billed for the meal, same as a student's own preference change —
             // without this the admin's change never reaches any bill.
             await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
+
+            var ctx = await BuildCtxAsync(cancellationToken);
+            _ = audit.LogAsync(ctx, AuditActions.StatusChange, "MealStatus", student.Id.ToString(),
+                $"Changed meal status for student {student.StudentName} ({student.StudentId}) on {request.EffectiveFrom:yyyy-MM-dd} {request.MealPeriod} to {(request.IsOn ? "ON" : "OFF")}",
+                newValues: new { request.StudentRecordId, request.MealPeriod, request.IsOn, request.OptionItemId, EffectiveFrom = request.EffectiveFrom.ToString("yyyy-MM-dd") },
+                cancellationToken: CancellationToken.None);
+
             return await BuildStudentMealControlAsync(student, selectedWing, request.EffectiveFrom, cancellationToken);
         }
         catch (InvalidOperationException ex)

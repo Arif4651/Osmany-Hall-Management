@@ -17,8 +17,12 @@ public sealed class DueController(
     HallDbContext db,
     CurrentUserService currentUser,
     BillingCalculationService billing,
-    ILogger<DueController> logger) : ControllerBase
+    ILogger<DueController> logger,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.DueBill, ct);
     /// <summary>
     /// Serializes the read-then-write in <see cref="Adjust"/> per student/month: two admins
     /// correcting the same due at once both read the same "previous" figure before either had
@@ -77,12 +81,21 @@ public sealed class DueController(
         // A negative target is allowed: it grants the student a credit, the same balance an
         // overpayment produces. Only the period is genuinely constrained.
         if (request.BillingMonth is < 1 or > 12) return BadRequest(new { message = "Invalid due adjustment." });
-        var studentWing = await db.Students.AsNoTracking()
+        var student = await db.Students.AsNoTracking()
             .Where(x => x.Id == request.StudentId)
-            .Select(x => x.Gender)
+            .Select(x => new
+            {
+                x.Id,
+                x.StudentName,
+                x.StudentId,
+                x.RoomNo,
+                x.Department,
+                x.HallId,
+                x.Gender
+            })
             .FirstOrDefaultAsync(cancellationToken);
-        if (studentWing is null) return NotFound(new { message = "Student not found." });
-        if (!await currentUser.CanManageOwnWingFinanceAsync(studentWing, cancellationToken)) return Forbid();
+        if (student is null) return NotFound(new { message = "Student not found." });
+        if (!await currentUser.CanManageOwnWingFinanceAsync(student.Gender, cancellationToken)) return Forbid();
 
         var gate = LockFor(request.StudentId, request.BillingMonth, request.BillingYear);
         await gate.WaitAsync(cancellationToken);
@@ -104,6 +117,32 @@ public sealed class DueController(
                 AdjustedById = currentUser.UserId,
             });
             await db.SaveChangesAsync(cancellationToken);
+
+            var ctx = await BuildCtxAsync(cancellationToken);
+            _ = audit.LogAsync(ctx, AuditActions.DueAdjustment, "DueAdjustment", request.StudentId.ToString(),
+                $"Adjusted due for student {student.StudentName} (ID: {student.StudentId}, Room: {student.RoomNo ?? "N/A"}, Dept: {student.Department ?? "N/A"}) to {request.AdjustedAmount:F2} BDT (previous: {previous:F2} BDT) for {request.BillingMonth:D2}/{request.BillingYear}",
+                oldValues: new
+                {
+                    StudentName = student.StudentName,
+                    StudentId = student.StudentId,
+                    RoomNo = student.RoomNo,
+                    Department = student.Department,
+                    HallId = student.HallId,
+                    BillingPeriod = $"{request.BillingMonth:D2}/{request.BillingYear}",
+                    PreviousDue = previous
+                },
+                newValues: new
+                {
+                    StudentName = student.StudentName,
+                    StudentId = student.StudentId,
+                    RoomNo = student.RoomNo,
+                    Department = student.Department,
+                    HallId = student.HallId,
+                    BillingPeriod = $"{request.BillingMonth:D2}/{request.BillingYear}",
+                    AdjustedDue = request.AdjustedAmount,
+                    Note = request.Note
+                },
+                cancellationToken: CancellationToken.None);
 
             // The adjustment is committed by this point, so a failure rebuilding the derived bills is
             // not a failure of the adjustment — reporting it as one told the admin their change had

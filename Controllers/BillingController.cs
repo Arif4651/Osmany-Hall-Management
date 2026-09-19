@@ -16,8 +16,12 @@ namespace HallBackend.Controllers;
 public sealed class BillingController(
     HallDbContext db,
     CurrentUserService currentUser,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.BillManagement, ct);
     [HttpGet("monthly")]
     [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<MonthlyBillDto>>> GetMonthly(
@@ -62,6 +66,12 @@ public sealed class BillingController(
         // Forward, not just this month — otherwise later months keep a stale carried-due figure
         // that this recalculation never touches.
         await billing.RecalculateForwardAsync(month, year, cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.BillGeneration, "Billing", $"{month}/{year}",
+            $"Triggered bill recalculation for {month:D2}/{year}",
+            cancellationToken: CancellationToken.None);
+
         return NoContent();
     }
 

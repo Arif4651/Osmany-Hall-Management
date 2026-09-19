@@ -37,6 +37,9 @@ public static class MenuKeys
     public const string AdminSettings = "admin.settings";
     public const string AdminRolePermissions = "admin.role-permissions";
 
+    /// <summary>Super-admin-only audit log viewer. Not in the permission matrix — access is gated solely by the super_admin role.</summary>
+    public const string AdminLogs = "admin.logs";
+
     // ── Student sections ─────────────────────────────────────────────────────
     public const string StudentMealsSection = "student.meals.section";
     public const string StudentMeals = "student.meals";

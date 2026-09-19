@@ -16,6 +16,7 @@ public sealed class AuthController(
     PasswordService passwords,
     JwtTokenService tokens,
     LoginAttemptLimiter loginAttempts,
+    AuditLogService audit,
     IWebHostEnvironment env,
     ILogger<AuthController> logger) : ControllerBase
 {
@@ -128,6 +129,18 @@ public sealed class AuthController(
             tokenCreateMs,
             totalTimer.Elapsed.TotalMilliseconds);
 
+        // Audit log: login success
+        _ = audit.LogAsync(
+            actorName: user.FullName,
+            actorUserId: user.Id,
+            actorRole: user.Role,
+            module: AuditModules.Authentication,
+            action: AuditActions.Login,
+            entityType: "AppUser",
+            entityId: user.Id.ToString(),
+            description: $"{user.FullName} ({user.Role}) logged in",
+            cancellationToken: CancellationToken.None);
+
         return Ok(loginSuccess);
     }
 
@@ -150,6 +163,18 @@ public sealed class AuthController(
             SameSite = GetAuthCookieSameSiteMode(),
             Path = "/",
         });
+
+        // Audit log: logout (fire-and-forget, no cancellation token needed)
+        var idClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(idClaim, out var logoutUserId))
+        {
+            var actorName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
+            var actorRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? string.Empty;
+            _ = audit.LogAsync(actorName, logoutUserId, actorRole,
+                AuditModules.Authentication, AuditActions.Logout, "AppUser", logoutUserId.ToString(),
+                $"{actorName} logged out", cancellationToken: CancellationToken.None);
+        }
+
         return NoContent();
     }
 
@@ -194,6 +219,11 @@ public sealed class AuthController(
         var refreshedUser = new AuthUserDto(user.Id, user.FullName, user.Email, user.UserName, user.Role, user.Designation, gender, user.StudentId, false);
         var (tokenString, loginSuccess) = tokens.CreateToken(refreshedUser);
         WriteAuthCookie(tokenString, loginSuccess.ExpiresAtUtc);
+
+        // Audit log: password change
+        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+            AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
+            $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
 
         return NoContent();
     }

@@ -3,17 +3,20 @@ using System;
 using HallBackend.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace HallBackend.Migrations
+namespace HallBackend.Infrastructure.Migrations
 {
     [DbContext(typeof(HallDbContext))]
-    partial class HallDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260919173022_AddAuditLogEnrichment")]
+    partial class AddAuditLogEnrichment
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -461,21 +464,13 @@ namespace HallBackend.Migrations
 
                     b.Property<string>("Action")
                         .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
 
                     b.Property<string>("Actor")
                         .IsRequired()
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
-
-                    b.Property<string>("ActorRole")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<Guid?>("ActorUserId")
-                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -483,58 +478,17 @@ namespace HallBackend.Migrations
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("EntityId")
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.Property<string>("EntityType")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<bool>("IsSuccess")
-                        .HasColumnType("boolean");
-
                     b.Property<string>("Module")
                         .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
-                    b.Property<string>("NewValues")
-                        .HasColumnType("text");
-
-                    b.Property<string>("OldValues")
-                        .HasColumnType("text");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("Action");
-
-                    b.HasIndex("ActorUserId");
-
                     b.HasIndex("CreatedAtUtc");
-
-                    b.HasIndex("EntityType");
-
-                    b.HasIndex("IsSuccess");
-
-                    b.HasIndex("Module");
 
                     b.ToTable("audit_logs", (string)null);
                 });
@@ -2001,16 +1955,6 @@ namespace HallBackend.Migrations
                         .IsRequired();
 
                     b.Navigation("CreatedBy");
-                });
-
-            modelBuilder.Entity("HallBackend.Domain.Entities.AuditLog", b =>
-                {
-                    b.HasOne("HallBackend.Domain.Entities.AppUser", "ActorUser")
-                        .WithMany()
-                        .HasForeignKey("ActorUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("ActorUser");
                 });
 
             modelBuilder.Entity("HallBackend.Domain.Entities.BillingPeriod", b =>

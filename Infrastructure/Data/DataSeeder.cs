@@ -68,6 +68,56 @@ public sealed class DataSeeder(
                 }
                 await db.SaveChangesAsync(cancellationToken);
             }
+
+            // Enriches legacy due adjustment audit logs with student details
+            var dueAdjustmentLogs = await db.AuditLogs
+                .Where(x => x.Action == "DUE_ADJUSTMENT" && x.Description.Contains("Adjusted due for student to"))
+                .ToListAsync(cancellationToken);
+            if (dueAdjustmentLogs.Count > 0)
+            {
+                foreach (var dueLog in dueAdjustmentLogs)
+                {
+                    if (Guid.TryParse(dueLog.EntityId, out var targetStudentId))
+                    {
+                        var studentObj = await db.Students.AsNoTracking()
+                            .FirstOrDefaultAsync(s => s.Id == targetStudentId, cancellationToken);
+                        if (studentObj is not null)
+                        {
+                            dueLog.Description = dueLog.Description.Replace(
+                                "Adjusted due for student to",
+                                $"Adjusted due for student {studentObj.StudentName} (ID: {studentObj.StudentId}, Room: {studentObj.RoomNo ?? "N/A"}, Dept: {studentObj.Department ?? "N/A"}) to");
+
+                            try
+                            {
+                                var oldDoc = string.IsNullOrWhiteSpace(dueLog.OldValues)
+                                    ? new System.Text.Json.Nodes.JsonObject()
+                                    : System.Text.Json.Nodes.JsonNode.Parse(dueLog.OldValues)?.AsObject() ?? new System.Text.Json.Nodes.JsonObject();
+                                oldDoc["studentName"] = studentObj.StudentName;
+                                oldDoc["studentId"] = studentObj.StudentId;
+                                oldDoc["hallId"] = studentObj.HallId;
+                                oldDoc["roomNo"] = studentObj.RoomNo;
+                                oldDoc["department"] = studentObj.Department;
+                                dueLog.OldValues = oldDoc.ToJsonString();
+
+                                var newDoc = string.IsNullOrWhiteSpace(dueLog.NewValues)
+                                    ? new System.Text.Json.Nodes.JsonObject()
+                                    : System.Text.Json.Nodes.JsonNode.Parse(dueLog.NewValues)?.AsObject() ?? new System.Text.Json.Nodes.JsonObject();
+                                newDoc["studentName"] = studentObj.StudentName;
+                                newDoc["studentId"] = studentObj.StudentId;
+                                newDoc["hallId"] = studentObj.HallId;
+                                newDoc["roomNo"] = studentObj.RoomNo;
+                                newDoc["department"] = studentObj.Department;
+                                dueLog.NewValues = newDoc.ToJsonString();
+                            }
+                            catch
+                            {
+                                // Non-fatal JSON parse fallback
+                            }
+                        }
+                    }
+                }
+                await db.SaveChangesAsync(cancellationToken);
+            }
             var inventoryItems = await db.InventoryItems.ToListAsync(cancellationToken);
             if (inventoryItems.Count > 0)
             {

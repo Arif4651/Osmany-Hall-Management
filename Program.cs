@@ -68,6 +68,7 @@ builder.Services.AddScoped<AdditionalMealService>();
 builder.Services.AddScoped<OthersBillService>();
 builder.Services.AddScoped<AttendanceService>();
 builder.Services.AddScoped<PermissionService>();
+builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<DataSeeder>();
 builder.Services.AddScoped<AccessControlSeeder>();
 

@@ -14,7 +14,11 @@ namespace HallBackend.Controllers;
 [Authorize]
 [RequirePermission(MenuKeys.AdminSettings, PermissionActions.View)]
 [Route("api/admin-settings")]
-public sealed class AdminSettingsController(HallDbContext db, PasswordService passwords) : ControllerBase
+public sealed class AdminSettingsController(
+    HallDbContext db,
+    PasswordService passwords,
+    AuditLogService audit,
+    IHttpContextAccessor http) : ControllerBase
 {
     private static readonly string[] ManagedRoles = [Roles.MaleWingAdmin, Roles.FemaleWingAdmin];
 
@@ -59,6 +63,13 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
         };
         db.Users.Add(user);
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        await audit.LogAsync(ctx, AuditActions.Create, "AppUser", user.Id.ToString(),
+            $"Created admin account '{user.FullName}' ({user.Role})",
+            newValues: new { user.FullName, user.Email, user.Role, user.Wing, user.Designation, user.IsActive },
+            cancellationToken: cancellationToken);
+
         return CreatedAtAction(nameof(GetAdmins), ToDto(user));
     }
 
@@ -76,6 +87,9 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
         if (await db.Users.AnyAsync(x => x.Id != id && (x.NormalizedEmail == normalizedEmail || x.NormalizedUserName == normalizedUserName), cancellationToken))
             return Conflict(new { message = "An account with this email or username already exists." });
 
+        var oldValues = new { user.FullName, user.Email, user.Role, user.Wing, user.Designation, user.IsActive };
+
+        var passwordChanged = !string.IsNullOrWhiteSpace(request.Password);
         user.FullName = request.FullName.Trim();
         user.Email = request.Email.Trim();
         user.NormalizedEmail = normalizedEmail;
@@ -85,14 +99,28 @@ public sealed class AdminSettingsController(HallDbContext db, PasswordService pa
         user.Wing = WingForRole(request.Role);
         user.Designation = request.Designation.Trim();
         user.IsActive = request.IsActive;
-        if (!string.IsNullOrWhiteSpace(request.Password))
+        if (passwordChanged)
         {
-            user.PasswordHash = passwords.Hash(request.Password);
+            user.PasswordHash = passwords.Hash(request.Password!);
             user.MustChangePassword = true;
         }
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        var action = passwordChanged ? AuditActions.PasswordChange : AuditActions.Update;
+        var desc = passwordChanged
+            ? $"Updated and reset password for admin '{user.FullName}'"
+            : $"Updated admin account '{user.FullName}'";
+        await audit.LogAsync(ctx, action, "AppUser", id.ToString(), desc,
+            oldValues: oldValues,
+            newValues: new { user.FullName, user.Email, user.Role, user.Wing, user.Designation, user.IsActive },
+            cancellationToken: cancellationToken);
+
         return ToDto(user);
     }
+
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(http, db, AuditModules.UserRoleManagement, ct);
 
     private static string? Validate(SaveAdminAccountRequest request, bool passwordRequired)
     {

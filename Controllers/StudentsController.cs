@@ -19,8 +19,13 @@ public sealed class StudentsController(
     HallDbContext db,
     PasswordService passwords,
     CurrentUserService currentUser,
-    BillingCalculationService billing) : ControllerBase
+    BillingCalculationService billing,
+    AuditLogService audit,
+    IHttpContextAccessor httpContextAccessor) : ControllerBase
 {
+    private Task<AuditLogContext> BuildCtxAsync(CancellationToken ct)
+        => AuditLogContextFactory.BuildAsync(httpContextAccessor, db, AuditModules.StudentManagement, ct);
+
     private static readonly string[] ValidStatuses = ["active", "pending_clearance", "inactive", "graduated", "archived"];
     private static readonly string[] ValidLevels = ["Level-01", "Level-02", "Level-03", "Level-04", "Master's"];
     private static readonly Regex StudentCodeRegex = new("^[A-Za-z0-9-]{4,20}$", RegexOptions.Compiled);
@@ -153,6 +158,12 @@ public sealed class StudentsController(
         var today = HallClock.Today;
         await billing.RecalculateMonthAsync(today.Month, today.Year, cancellationToken);
 
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Create, "Student", student.Id.ToString(),
+            $"Created student {student.StudentName} ({student.StudentId})",
+            newValues: new { student.StudentName, student.StudentId, student.Department, student.Level, student.Gender, student.HallName },
+            cancellationToken: CancellationToken.None);
+
         return CreatedAtAction(nameof(GetStudent), new { id = student.Id }, new StudentCredentialDto(student.ToDto(), temporaryPassword));
     }
 
@@ -168,6 +179,8 @@ public sealed class StudentsController(
         var validation = await ValidateAsync(request, id, cancellationToken);
         if (validation.Count > 0) return BadRequest(new ValidationProblemDetails(validation));
 
+        var oldValues = new { student.StudentName, student.StudentId, student.Department, student.Level, student.Status };
+
         ApplyRequest(student, request);
         await ApplyStatusAsync(student, student.Status, cancellationToken);
         var user = await db.Users.FirstOrDefaultAsync(x => x.StudentId == student.Id, cancellationToken);
@@ -179,6 +192,14 @@ public sealed class StudentsController(
             user.NormalizedUserName = student.StudentId.ToUpperInvariant();
         }
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Update, "Student", student.Id.ToString(),
+            $"Updated student {student.StudentName} ({student.StudentId})",
+            oldValues: oldValues,
+            newValues: new { student.StudentName, student.StudentId, student.Department, student.Level, student.Status },
+            cancellationToken: CancellationToken.None);
+
         return student.ToDto();
     }
 
@@ -190,6 +211,12 @@ public sealed class StudentsController(
         if (student is null) return NotFound();
         await ApplyStatusAsync(student, "inactive", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Deactivate, "Student", student.Id.ToString(),
+            $"Marked student {student.StudentName} ({student.StudentId}) as inactive",
+            cancellationToken: CancellationToken.None);
+
         return student.ToDto();
     }
 
@@ -201,11 +228,18 @@ public sealed class StudentsController(
         if (student is null) return NotFound();
         if (!force && !student.PermanentDeleteEligible) return BadRequest(new { message = "Student is not eligible for permanent deletion." });
 
+        var studentInfo = $"{student.StudentName} ({student.StudentId})";
         await DetachStudentNotificationsAsync([student.Id], cancellationToken);
         await RemoveLoginAccountsAsync([student.Id], cancellationToken);
         db.Students.Remove(student);
         await db.SaveChangesAsync(cancellationToken);
         await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Delete, "Student", id.ToString(),
+            $"Permanently deleted student {studentInfo}",
+            cancellationToken: CancellationToken.None);
+
         return new BulkStudentResponse(0, [], 1, [id], []);
     }
 
@@ -241,6 +275,12 @@ public sealed class StudentsController(
         await ApplyStatusAsync(students, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Update, "Student", null,
+            $"Bulk updated {students.Count} students with fields: {string.Join(", ", request.UpdateFields.Keys)}",
+            cancellationToken: CancellationToken.None);
+
         return new BulkStudentResponse(students.Count, students.Select(x => x.Id).ToList());
     }
 
@@ -279,6 +319,11 @@ public sealed class StudentsController(
         await db.SaveChangesAsync(cancellationToken);
         if (eligible.Count > 0) await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
 
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.Delete, "Student", null,
+            $"Bulk permanently deleted {eligible.Count} students",
+            cancellationToken: CancellationToken.None);
+
         return new BulkStudentResponse(0, [], eligible.Count, eligible.Select(x => x.Id).ToList(), skipped);
     }
 
@@ -314,6 +359,11 @@ public sealed class StudentsController(
         user.PasswordHash = passwords.Hash(temporaryPassword);
         user.MustChangePassword = true;
         await db.SaveChangesAsync(cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        _ = audit.LogAsync(ctx, AuditActions.PasswordChange, "Student", student.Id.ToString(),
+            $"Reset password for student {student.StudentName} ({student.StudentId})",
+            cancellationToken: CancellationToken.None);
 
         return Ok(new { studentId = student.StudentId, temporaryPassword });
     }

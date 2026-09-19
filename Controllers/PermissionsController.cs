@@ -2,6 +2,7 @@ using System.Security.Claims;
 using HallBackend.Application.Dtos;
 using HallBackend.Application.Services;
 using HallBackend.Domain.Constants;
+using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,10 @@ namespace HallBackend.Controllers;
 [Route("api/permissions")]
 public sealed class PermissionsController(
     PermissionService permissions,
-    CurrentUserService currentUser) : ControllerBase
+    CurrentUserService currentUser,
+    AuditLogService audit,
+    IHttpContextAccessor http,
+    HallDbContext db) : ControllerBase
 {
     private string? CurrentRole => User.FindFirstValue(ClaimTypes.Role);
 
@@ -41,7 +45,15 @@ public sealed class PermissionsController(
     public async Task<IActionResult> CreateRole(SaveAppRoleRequest request, CancellationToken cancellationToken)
     {
         var error = await permissions.CreateRoleAsync(request, cancellationToken);
-        return error is null ? NoContent() : BadRequest(new { message = error });
+        if (error is not null) return BadRequest(new { message = error });
+
+        var ctx = await AuditLogContextFactory.BuildAsync(http, db, AuditModules.UserRoleManagement, cancellationToken);
+        await audit.LogAsync(ctx, AuditActions.Create, "AppRole", request.Key,
+            $"Created role '{request.Label}' ({request.Key})",
+            newValues: new { request.Key, request.Label, request.Area },
+            cancellationToken: cancellationToken);
+
+        return NoContent();
     }
 
     [HttpDelete("roles/{role}")]
@@ -49,7 +61,14 @@ public sealed class PermissionsController(
     public async Task<IActionResult> DeleteRole(string role, CancellationToken cancellationToken)
     {
         var error = await permissions.DeleteRoleAsync(role, cancellationToken);
-        return error is null ? NoContent() : BadRequest(new { message = error });
+        if (error is not null) return BadRequest(new { message = error });
+
+        var ctx = await AuditLogContextFactory.BuildAsync(http, db, AuditModules.UserRoleManagement, cancellationToken);
+        await audit.LogAsync(ctx, AuditActions.Delete, "AppRole", role,
+            $"Deleted role '{role}'",
+            cancellationToken: cancellationToken);
+
+        return NoContent();
     }
 
     /// <summary>The full menu tree with one role's grants folded in — the editor's data source.</summary>
@@ -70,6 +89,14 @@ public sealed class PermissionsController(
     {
         var error = await permissions.SaveMatrixAsync(
             role, request.Permissions ?? [], currentUser.UserId, cancellationToken);
-        return error is null ? NoContent() : BadRequest(new { message = error });
+        if (error is not null) return BadRequest(new { message = error });
+
+        var ctx = await AuditLogContextFactory.BuildAsync(http, db, AuditModules.UserRoleManagement, cancellationToken);
+        await audit.LogAsync(ctx, AuditActions.PermissionChange, "AppRole", role,
+            $"Updated permission matrix for role '{role}' ({request.Permissions?.Count ?? 0} entries)",
+            newValues: request.Permissions,
+            cancellationToken: cancellationToken);
+
+        return NoContent();
     }
 }
