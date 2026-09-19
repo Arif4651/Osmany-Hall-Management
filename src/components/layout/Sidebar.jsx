@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { X, LogOut, Key } from 'lucide-react';
+import { X, LogOut, Key, ScrollText } from 'lucide-react';
 import Button from '../ui/Button';
 import mistLogo from '../../assets/images/mist-logo.png';
 import { BRANDING } from '../../constants/branding';
@@ -10,16 +10,36 @@ import { ROUTE_PATHS } from '../../constants/routePaths';
 import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices, setHasNewNotices }) {
-  const { user, logout, can } = useAuth();
+  const { user, logout, can, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
+  const userRole = (user?.role || '').toLowerCase();
+  const userDesignation = (user?.designation || '').toLowerCase();
+  const userEmail = (user?.email || '').toLowerCase();
+  const isSuper = Boolean(
+    isSuperAdmin ||
+    userRole === 'super_admin' ||
+    userRole === 'superadmin' ||
+    userDesignation.includes('super') ||
+    userEmail.startsWith('superadmin')
+  );
   const devProfileItem = navItems.find((item) => item.key === 'dev-profile');
   // Nav is now a projection of the permission matrix: an entry appears only where the role has
   // view access to its menu. Entries with no menuKey are unrestricted.
   const filteredNavItems = navItems.filter(
-    (item) => item.key !== 'dev-profile' && (!item.menuKey || can(item.menuKey, 'view'))
+    (item) => item.key !== 'dev-profile' &&
+      (!item.menuKey || can(item.menuKey, 'view')) &&
+      (!item.superAdminOnly || isSuper)
   );
+  // Super Admin Logs item placed below divider
+  const logsItem = navItems.find((item) => item.key === 'logs') || {
+    key: 'logs',
+    label: 'Logs',
+    path: ROUTE_PATHS.adminLogs,
+    icon: ScrollText,
+  };
+  const showLogs = role === 'admin' && isSuper;
   const DevIcon = devProfileItem?.icon;
 
   const handleLogout = () => {
@@ -44,31 +64,49 @@ export default function Sidebar({ role, navItems, isOpen, onClose, hasNewNotices
         </div>
 
         <nav className="sidebar-nav" aria-label={`${role} navigation`}>
-          {filteredNavItems.map((item) => {
-            const Icon = item.icon;
-            const isNoticeBoard = item.key === 'notice-board';
-            const showBadge = isNoticeBoard && role === 'student' && hasNewNotices;
+          {filteredNavItems
+            .filter((item) => !item.superAdminOnly)
+            .map((item) => {
+              const Icon = item.icon;
+              const isNoticeBoard = item.key === 'notice-board';
+              const showBadge = isNoticeBoard && role === 'student' && hasNewNotices;
 
-            return (
+              return (
+                <NavLink
+                  key={item.key}
+                  to={item.path}
+                  className={({ isActive }) => clsx('nav-item', { 'is-active': isActive }, item.className)}
+                  onClick={() => {
+                    if (isNoticeBoard) {
+                      setHasNewNotices(false);
+                      localStorage.setItem('lastNoticeBoardVisit', new Date().toISOString());
+                    }
+                    onClose();
+                  }}
+                  title={item.label}
+                >
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                  {showBadge && <span className="nav-badge-dot" />}
+                </NavLink>
+              );
+            })}
+
+          {/* Super Admin-only items separated by a divider */}
+          {showLogs && (
+            <>
+              <div className="sidebar-nav-divider" />
               <NavLink
-                key={item.key}
-                to={item.path}
-                className={({ isActive }) => clsx('nav-item', { 'is-active': isActive }, item.className)}
-                onClick={() => {
-                  if (isNoticeBoard) {
-                    setHasNewNotices(false);
-                    localStorage.setItem('lastNoticeBoardVisit', new Date().toISOString());
-                  }
-                  onClose();
-                }}
-                title={item.label}
+                to={ROUTE_PATHS.adminLogs || '/admin/logs'}
+                className={({ isActive }) => clsx('nav-item', { 'is-active': isActive })}
+                onClick={onClose}
+                title="Logs"
               >
-                <Icon size={18} />
-                <span>{item.label}</span>
-                {showBadge && <span className="nav-badge-dot" />}
+                <ScrollText size={18} />
+                <span>Logs</span>
               </NavLink>
-            );
-          })}
+            </>
+          )}
         </nav>
 
         {devProfileItem && (

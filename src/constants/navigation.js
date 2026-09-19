@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardCheck, ClipboardList, CreditCard, Package, Receipt, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone, Terminal } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, ClipboardList, CreditCard, Package, Receipt, ScrollText, Settings, ShieldCheck, Soup, Users, WalletCards, Megaphone, Terminal } from 'lucide-react';
 import { ROUTE_PATHS } from './routePaths';
 
 import { MENU_KEYS } from '../services/permissionService';
@@ -29,4 +29,6 @@ export const ADMIN_NAV_ITEMS = [
   { key: 'daily-cost', label: 'Daily Cost', path: ROUTE_PATHS.adminDailyCost, icon: CalendarDays, menuKey: MENU_KEYS.adminDailyCost },
   { key: 'notice-board', label: 'Notice Board', path: ROUTE_PATHS.adminNoticeBoard, icon: Megaphone, menuKey: MENU_KEYS.adminNoticeBoard },
   { key: 'settings', label: 'Settings', path: ROUTE_PATHS.adminSettings, icon: Settings, menuKey: MENU_KEYS.adminSettings },
+  // Divider + Logs — visible only to Super Admins (checked in Sidebar, not via permission matrix)
+  { key: 'logs', label: 'Logs', path: ROUTE_PATHS.adminLogs || '/admin/logs', icon: ScrollText, superAdminOnly: true },
 ];

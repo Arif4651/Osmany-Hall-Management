@@ -27,6 +27,7 @@ export const ROUTE_PATHS = {
   adminDailyCost: '/admin/daily-cost',
   adminNoticeBoard: '/admin/notice-board',
   adminSettings: '/admin/settings',
+  adminLogs: '/admin/logs',
   adminDeveloperProfile: '/admin/developer-profile',
   notFound: '*',
 };

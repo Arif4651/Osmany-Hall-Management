@@ -6,6 +6,7 @@ import { ADMIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '../constants/navigation';
 import { DEFAULT_REDIRECTS, ROUTE_PATHS } from '../constants/routePaths';
 import { MENU_KEYS } from '../services/permissionService';
 import { ProtectedRoute, PublicOnlyRoute } from './RouteGuards';
+import { useAuth } from '../context/AuthContext';
 
 /** Wraps a page in the permission guard for its menu. */
 const guard = (menuKey, element) => <ProtectedRoute menuKey={menuKey}>{element}</ProtectedRoute>;
@@ -37,6 +38,7 @@ const DueBill            = lazy(() => import('../pages/admin/DueBill'));
 const DailyCost          = lazy(() => import('../pages/admin/DailyCost'));
 const AdminSettings      = lazy(() => import('../pages/admin/AdminSettings'));
 const AdminNoticeBoard   = lazy(() => import('../pages/admin/AdminNoticeBoard'));
+const AdminLogs          = lazy(() => import('../pages/admin/AdminLogs'));
 
 // ── Lazy-loaded shared pages ──────────────────────────────────────────────────
 const DeveloperProfile = lazy(() => import('../pages/common/DeveloperProfile'));
@@ -113,6 +115,7 @@ export default function AppRouter() {
           <Route path="daily-cost"  element={guard(MENU_KEYS.adminDailyCost, <DailyCost />)} />
           <Route path="notice-board" element={guard(MENU_KEYS.adminNoticeBoard, <AdminNoticeBoard />)} />
           <Route path="settings"    element={guard(MENU_KEYS.adminSettings, <AdminSettings />)} />
+          <Route path="logs"        element={<SuperAdminRoute><AdminLogs /></SuperAdminRoute>} />
           <Route path="developer-profile" element={<DeveloperProfile />} />
         </Route>
 
@@ -120,4 +123,22 @@ export default function AppRouter() {
       </Routes>
     </Suspense>
   );
+}
+
+/** Restricts a route to super admins — a secondary guard on top of the admin ProtectedRoute. */
+function SuperAdminRoute({ children }) {
+  const { isSuperAdmin, isPermissionsLoading, user } = useAuth();
+  if (isPermissionsLoading) return <PageSkeleton />;
+  const userRole = (user?.role || '').toLowerCase();
+  const userDesignation = (user?.designation || '').toLowerCase();
+  const userEmail = (user?.email || '').toLowerCase();
+  const isSuper = Boolean(
+    isSuperAdmin ||
+    userRole === 'super_admin' ||
+    userRole === 'superadmin' ||
+    userDesignation.includes('super') ||
+    userEmail.startsWith('superadmin')
+  );
+  if (!isSuper) return <Navigate to={DEFAULT_REDIRECTS.admin} replace />;
+  return children;
 }

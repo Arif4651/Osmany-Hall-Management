@@ -220,7 +220,13 @@ export function AuthProvider({ children }) {
     return map;
   }, [permissions]);
 
-  const isSuperAdmin = Boolean(permissions?.isSuperAdmin);
+  const isSuperAdmin = Boolean(
+    permissions?.isSuperAdmin ||
+    session?.user?.role === 'super_admin' ||
+    session?.user?.role === 'superadmin' ||
+    session?.user?.designation?.toLowerCase().includes('super') ||
+    session?.user?.email?.toLowerCase().includes('superadmin')
+  );
 
   /**
    * Whether the signed-in role may perform `action` on `menuKey`.

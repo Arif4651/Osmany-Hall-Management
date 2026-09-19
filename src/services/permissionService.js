@@ -36,6 +36,7 @@ export const MENU_KEYS = {
   adminNoticeBoard: 'admin.notice-board',
   adminSettings: 'admin.settings',
   adminRolePermissions: 'admin.role-permissions',
+  adminLogs: 'admin.logs',
 
   studentMeals: 'student.meals',
   studentAttendance: 'student.attendance',
