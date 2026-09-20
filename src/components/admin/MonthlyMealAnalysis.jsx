@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   BarChart2, ChevronLeft, ChevronRight, X, Search, ChevronsUpDown,
   ChevronUp, ChevronDown, Download, User, AlertCircle, Loader2,
@@ -6,22 +6,13 @@ import {
 import { adminDataService } from '../../services/adminDataService';
 import { useToast } from '../../context/ToastContext';
 import { DEPARTMENTS, STUDENT_LEVELS, HALL_NAMES } from '../../types/student.types';
+import MonthYearPicker from '../financial/MonthYearPicker';
 import { utils, writeFile } from 'xlsx';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function monthLabel(year, month) {
   return new Date(year, month - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-}
-
-function todayYearMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function parseYearMonth(str) {
-  const [y, m] = str.split('-').map(Number);
-  return { year: y, month: m };
 }
 
 // ── sub-components ───────────────────────────────────────────────────────────
@@ -89,7 +80,50 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   // ── filter state ───────────────────────────────────────────────────────────
-  const [analysisMonth, setAnalysisMonth] = useState(todayYearMonth);
+  const today = useMemo(() => new Date(), []);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => ({
+    month: today.getMonth() + 1,
+    year: today.getFullYear(),
+  }));
+  const [operationalRange, setOperationalRange] = useState({
+    minMonth: today.getMonth() + 1,
+    minYear: today.getFullYear(),
+    maxMonth: today.getMonth() + 1,
+    maxYear: today.getFullYear(),
+  });
+
+  // Fetch authoritative operational range from backend
+  useEffect(() => {
+    let active = true;
+    adminDataService.getMonthlyMealAnalysisRange()
+      .then((range) => {
+        if (!active || !range) return;
+        setOperationalRange({
+          minMonth: range.minMonth,
+          minYear: range.minYear,
+          maxMonth: range.maxMonth,
+          maxYear: range.maxYear,
+        });
+        setSelectedPeriod((curr) => {
+          const asIdx = (y, m) => y * 12 + (m - 1);
+          const currIdx = asIdx(curr.year, curr.month);
+          const minIdx = asIdx(range.minYear, range.minMonth);
+          const maxIdx = asIdx(range.maxYear, range.maxMonth);
+          if (currIdx < minIdx) {
+            return { year: range.minYear, month: range.minMonth };
+          }
+          if (currIdx > maxIdx) {
+            return { year: range.maxYear, month: range.maxMonth };
+          }
+          return curr;
+        });
+      })
+      .catch(() => {
+        // Fallback gracefully
+      });
+    return () => { active = false; };
+  }, []);
+
   const [wingFilter, setWingFilter] = useState(activeWing ?? 'All');
   const [hallFilter, setHallFilter] = useState('All');
   const [deptFilter, setDeptFilter] = useState('all');
@@ -126,7 +160,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   // Reset page on any filter change.
   useEffect(() => {
     setPage(1);
-  }, [analysisMonth, wingFilter, hallFilter, deptFilter, levelFilter, appliedSearch, pageSize, sortBy, sortAsc]);
+  }, [selectedPeriod.month, selectedPeriod.year, wingFilter, hallFilter, deptFilter, levelFilter, appliedSearch, pageSize, sortBy, sortAsc]);
 
   // ── fetch ranking ──────────────────────────────────────────────────────────
   const fetchRanking = useCallback(async () => {
@@ -134,7 +168,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
     setRankingLoading(true);
     setRankingError('');
     try {
-      const { year, month } = parseYearMonth(analysisMonth);
+      const { year, month } = selectedPeriod;
       const wing = wingFilter === 'All' ? undefined : wingFilter;
       const hall = hallFilter === 'All' ? undefined : hallFilter;
       const dept = deptFilter === 'all' ? undefined : deptFilter;
@@ -151,7 +185,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
     } finally {
       setRankingLoading(false);
     }
-  }, [isExpanded, analysisMonth, wingFilter, hallFilter, deptFilter, levelFilter, appliedSearch, page, pageSize, sortBy, sortAsc]);
+  }, [isExpanded, selectedPeriod.month, selectedPeriod.year, wingFilter, hallFilter, deptFilter, levelFilter, appliedSearch, page, pageSize, sortBy, sortAsc]);
 
   useEffect(() => {
     fetchRanking();
@@ -163,7 +197,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
     setDetailLoading(true);
     setDetailError('');
     try {
-      const { year, month } = parseYearMonth(analysisMonth);
+      const { year, month } = selectedPeriod;
       const wing = wingFilter === 'All' ? undefined : wingFilter;
       const data = await adminDataService.getStudentMonthlyMealDetail(studentRecordId, month, year, wing);
       setDetailData(data);
@@ -172,7 +206,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
     } finally {
       setDetailLoading(false);
     }
-  }, [analysisMonth, wingFilter]);
+  }, [selectedPeriod.month, selectedPeriod.year, wingFilter]);
 
   const selectStudent = useCallback((studentRecordId) => {
     setSelectedStudentId(studentRecordId);
@@ -191,7 +225,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   useEffect(() => {
     if (selectedStudentId) fetchDetail(selectedStudentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisMonth, wingFilter]);
+  }, [selectedPeriod.month, selectedPeriod.year, wingFilter]);
 
   // ── sort toggle ────────────────────────────────────────────────────────────
   const toggleSort = (field) => {
@@ -207,7 +241,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   // ── export ─────────────────────────────────────────────────────────────────
   const exportRankingExcel = () => {
     if (!rankingData?.rows?.length) return;
-    const { year, month } = parseYearMonth(analysisMonth);
+    const { year, month } = selectedPeriod;
     const rows = rankingData.rows.map(r => ({
       'Rank': r.rank,
       'Student Name': r.studentName,
@@ -230,7 +264,8 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   };
 
   // ── derived ────────────────────────────────────────────────────────────────
-  const { year: selYear, month: selMonth } = parseYearMonth(analysisMonth);
+  const selYear = selectedPeriod.year;
+  const selMonth = selectedPeriod.month;
   const summary = rankingData?.summary;
   const totalPages = rankingData?.totalPages ?? 0;
   const totalRows = rankingData?.totalRows ?? 0;
@@ -294,24 +329,21 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
             className="wing-filter-bar"
             style={{ flexWrap: 'wrap', marginBottom: '1.25rem', gap: '0.6rem' }}
           >
-            {/* Month picker */}
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <input
-                id="analysis-month-picker"
-                type="month"
-                value={analysisMonth}
-                onChange={e => { setAnalysisMonth(e.target.value); setPage(1); }}
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border)',
-                  background: '#fff',
-                  color: 'var(--text)',
-                  fontSize: '0.9rem',
-                  outline: 'none',
-                }}
-              />
-            </div>
+            {/* Month & Year picker */}
+            <MonthYearPicker
+              month={selectedPeriod.month}
+              year={selectedPeriod.year}
+              minYear={operationalRange.minYear}
+              minMonth={operationalRange.minMonth}
+              maxYear={operationalRange.maxYear}
+              maxMonth={operationalRange.maxMonth}
+              allowFuture={false}
+              label="Analysis Month"
+              onChange={({ month, year }) => {
+                setSelectedPeriod({ month, year });
+                setPage(1);
+              }}
+            />
 
             {/* Wing filter (locked for wing admins) */}
             {isWingAdmin ? (

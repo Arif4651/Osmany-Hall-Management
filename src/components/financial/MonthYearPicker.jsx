@@ -22,6 +22,8 @@ export default function MonthYearPicker({
   onChange,
   minYear,
   maxYear,
+  minMonth = 1,
+  maxMonth = 12,
   label = 'Report period',
   allowFuture = false,
 }) {
@@ -38,12 +40,12 @@ export default function MonthYearPicker({
 
   // Absolute month index makes the range checks below trivial.
   const asIndex = useCallback((y, m) => (y * 12) + (m - 1), []);
-  const minIndex = asIndex(minYear, 1);
+  const minIndex = asIndex(minYear, minMonth || 1);
   // Periods that have not started yet have nothing to report on, so unless the
   // caller opts in the range stops at the current month.
   const maxIndex = allowFuture
-    ? asIndex(maxYear, 12)
-    : Math.min(asIndex(maxYear, 12), asIndex(currentYear, currentMonth));
+    ? asIndex(maxYear, maxMonth || 12)
+    : Math.min(asIndex(maxYear, maxMonth || 12), asIndex(currentYear, currentMonth));
   const effectiveMaxYear = allowFuture ? maxYear : Math.min(maxYear, currentYear);
   const selectedIndex = asIndex(year, month);
 
@@ -133,7 +135,7 @@ export default function MonthYearPicker({
         type="button"
         className="period-picker-today"
         onClick={() => onChange({ month: currentMonth, year: currentYear })}
-        disabled={isOnCurrentPeriod}
+        disabled={isOnCurrentPeriod || asIndex(currentYear, currentMonth) < minIndex || asIndex(currentYear, currentMonth) > maxIndex}
         title="Jump to the current month"
       >
         <Undo2 size={14} />
