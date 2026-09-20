@@ -4,6 +4,7 @@ import {
   auditLogService,
   AUDIT_MODULES,
   AUDIT_ACTIONS,
+  AUDIT_ROLES,
   getActionBadgeClass,
 } from '../../services/auditLogService';
 
@@ -176,6 +177,7 @@ export default function AdminLogs() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [activePreset, setActivePreset] = useState(null);
+  const [selectedRole, setSelectedRole] = useState('');
 
   const searchTimer = useRef(null);
 
@@ -188,6 +190,7 @@ export default function AdminLogs() {
         pageSize: PAGE_SIZE,
         ...(selectedModule && selectedModule !== 'All' ? { module: selectedModule } : {}),
         ...(selectedAction ? { action: selectedAction } : {}),
+        ...(selectedRole ? { role: selectedRole } : {}),
         ...(search ? { search } : {}),
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
@@ -202,7 +205,7 @@ export default function AdminLogs() {
     } finally {
       setLoading(false);
     }
-  }, [selectedModule, selectedAction, search, fromDate, toDate]);
+  }, [selectedModule, selectedAction, selectedRole, search, fromDate, toDate]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -218,7 +221,7 @@ export default function AdminLogs() {
     fetchLogs(1);
     fetchStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModule, selectedAction, search, fromDate, toDate]);
+  }, [selectedModule, selectedAction, selectedRole, search, fromDate, toDate]);
 
   // Debounced search
   const handleSearchChange = (val) => {
@@ -241,6 +244,7 @@ export default function AdminLogs() {
   const clearFilters = () => {
     setSelectedModule('All');
     setSelectedAction('');
+    setSelectedRole('');
     setSearch('');
     setSearchInput('');
     setFromDate('');
@@ -248,11 +252,12 @@ export default function AdminLogs() {
     setActivePreset(null);
   };
 
-  const hasActiveFilters = selectedModule !== 'All' || selectedAction || search || fromDate || toDate;
+  const hasActiveFilters = selectedModule !== 'All' || selectedAction || selectedRole || search || fromDate || toDate;
 
   const exportParams = {
     ...(selectedModule && selectedModule !== 'All' ? { module: selectedModule } : {}),
     ...(selectedAction ? { action: selectedAction } : {}),
+    ...(selectedRole ? { role: selectedRole } : {}),
     ...(search ? { search } : {}),
     ...(fromDate ? { fromDate } : {}),
     ...(toDate ? { toDate } : {}),
@@ -343,6 +348,19 @@ export default function AdminLogs() {
         >
           {AUDIT_ACTIONS.map((a) => (
             <option key={a.value} value={a.value}>{a.label}</option>
+          ))}
+        </select>
+
+        {/* Role filter */}
+        <select
+          id="logs-role-filter"
+          className="log-filter-select"
+          value={selectedRole}
+          onChange={(e) => { setSelectedRole(e.target.value); setPage(1); }}
+          title="Filter by actor role"
+        >
+          {AUDIT_ROLES.map((r) => (
+            <option key={r.value} value={r.value}>{r.label}</option>
           ))}
         </select>
 

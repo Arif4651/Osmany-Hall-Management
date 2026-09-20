@@ -93,3 +93,16 @@ export function getActionBadgeClass(action) {
     default: return 'log-action-other';
   }
 }
+
+/**
+ * Admin role options for the Role filter in System Logs.
+ * Student is intentionally omitted — student actions are not logged.
+ */
+export const AUDIT_ROLES = [
+  { value: '', label: 'All Roles' },
+  { value: 'super_admin', label: 'Super Admin' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'male_wing_admin', label: 'Male Wing Admin' },
+  { value: 'female_wing_admin', label: 'Female Wing Admin' },
+];
+
