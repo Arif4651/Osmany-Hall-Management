@@ -1534,7 +1534,12 @@ public sealed class MealsController(
             return BadRequest(new { message = "No meal operations were recorded for the selected month." });
 
         var from = new DateOnly(targetYear, targetMonth, 1);
-        var to = from.AddMonths(1).AddDays(-1);
+        // Cap `to` at today so that future days in the current month are not
+        // treated as OFF (they simply have no records yet).
+        var lastOfMonth = from.AddMonths(1).AddDays(-1);
+        var to = (targetYear == today.Year && targetMonth == today.Month)
+            ? today   // HallClock.Today is already DateOnly
+            : lastOfMonth;
 
         // Resolve wing scope — wing admins are locked to their own wing.
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
@@ -1718,7 +1723,11 @@ public sealed class MealsController(
             return BadRequest(new { message = "No meal operations were recorded for the selected month." });
 
         var from = new DateOnly(targetYear, targetMonth, 1);
-        var to = from.AddMonths(1).AddDays(-1);
+        // Cap `to` at today for the current month — same rule as the ranking endpoint.
+        var lastOfMonth = from.AddMonths(1).AddDays(-1);
+        var to = (targetYear == today.Year && targetMonth == today.Month)
+            ? today   // HallClock.Today is already DateOnly
+            : lastOfMonth;
 
         var adminWing = await currentUser.GetAdminWingAsync(cancellationToken);
         var effectiveWing = !string.IsNullOrWhiteSpace(adminWing) ? adminWing : wing;
