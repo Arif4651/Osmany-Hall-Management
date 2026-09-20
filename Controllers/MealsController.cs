@@ -1472,6 +1472,35 @@ public sealed class MealsController(
 
     /// <summary>
     /// Paginated monthly OFF-meal ranking.
+    private async Task<(DateOnly EarliestDate, DateOnly LatestDate)> GetOperationalMealRangeAsync(CancellationToken cancellationToken)
+    {
+        var today = HallClock.Today;
+        var minStatusDate = await db.MealStatusHistory.AsNoTracking()
+            .MinAsync(x => (DateOnly?)x.EffectiveFrom, cancellationToken);
+        var earliest = minStatusDate ?? today;
+        if (earliest > today) earliest = today;
+        return (earliest, today);
+    }
+
+    /// <summary>
+    /// Returns the operational boundary for monthly meal analysis.
+    /// Prevents selection of future months and months before meal operations began.
+    /// </summary>
+    [HttpGet("monthly-analysis/operational-range")]
+    [RequirePermission(MenuKeys.AdminMealSheet, PermissionActions.View)]
+    public async Task<ActionResult<MonthlyMealAnalysisRangeDto>> GetMonthlyAnalysisRange(CancellationToken cancellationToken)
+    {
+        var (earliest, today) = await GetOperationalMealRangeAsync(cancellationToken);
+        return new MonthlyMealAnalysisRangeDto(
+            MinMonth: earliest.Month,
+            MinYear: earliest.Year,
+            MaxMonth: today.Month,
+            MaxYear: today.Year,
+            CurrentMonth: today.Month,
+            CurrentYear: today.Year);
+    }
+
+    /// <summary>
     /// Returns summary cards + a ranked list of students ordered by total OFF meals DESC.
     /// All aggregation is done in-memory after a single DB load; no N+1 queries.
     /// </summary>
@@ -1496,8 +1525,13 @@ public sealed class MealsController(
         var targetYear = year ?? today.Year;
         if (targetMonth < 1 || targetMonth > 12)
             return BadRequest(new { message = "Month must be between 1 and 12." });
-        if (targetYear < 2020 || targetYear > today.Year + 1)
-            return BadRequest(new { message = "Year is out of range." });
+
+        if (targetYear > today.Year || (targetYear == today.Year && targetMonth > today.Month))
+            return BadRequest(new { message = "Monthly meal analysis cannot be generated for future months." });
+
+        var (earliest, _) = await GetOperationalMealRangeAsync(cancellationToken);
+        if (targetYear < earliest.Year || (targetYear == earliest.Year && targetMonth < earliest.Month))
+            return BadRequest(new { message = "No meal operations were recorded for the selected month." });
 
         var from = new DateOnly(targetYear, targetMonth, 1);
         var to = from.AddMonths(1).AddDays(-1);
@@ -1675,6 +1709,13 @@ public sealed class MealsController(
         var targetYear = year ?? today.Year;
         if (targetMonth < 1 || targetMonth > 12)
             return BadRequest(new { message = "Month must be between 1 and 12." });
+
+        if (targetYear > today.Year || (targetYear == today.Year && targetMonth > today.Month))
+            return BadRequest(new { message = "Monthly meal analysis cannot be generated for future months." });
+
+        var (earliest, _) = await GetOperationalMealRangeAsync(cancellationToken);
+        if (targetYear < earliest.Year || (targetYear == earliest.Year && targetMonth < earliest.Month))
+            return BadRequest(new { message = "No meal operations were recorded for the selected month." });
 
         var from = new DateOnly(targetYear, targetMonth, 1);
         var to = from.AddMonths(1).AddDays(-1);

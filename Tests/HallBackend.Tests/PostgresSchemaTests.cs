@@ -98,3 +98,4 @@ public sealed class PostgresSchemaTests
         Assert.Equal(20, columns["TargetWing"].MaxLength);
     }
 }
+

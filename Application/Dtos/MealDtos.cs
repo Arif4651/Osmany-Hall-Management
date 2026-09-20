@@ -168,6 +168,18 @@ public sealed record MonthlyMealOffRankingDto(
     int Year);
 
 /// <summary>
+/// Operational month/year boundary returned by GET /api/meals/monthly-analysis/operational-range.
+/// </summary>
+public sealed record MonthlyMealAnalysisRangeDto(
+    int MinMonth,
+    int MinYear,
+    int MaxMonth,
+    int MaxYear,
+    int CurrentMonth,
+    int CurrentYear);
+
+
+/// <summary>
 /// Meal status for a single calendar day in the student's monthly breakdown.
 /// </summary>
 public sealed record StudentMonthlyDayDto(
