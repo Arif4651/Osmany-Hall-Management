@@ -127,10 +127,13 @@ public sealed class AuditLogsController(HallDbContext db) : ControllerBase
         var weekStart = now.Date.AddDays(-(int)now.DayOfWeek).ToUniversalTime();
         var recentWindow = now.AddDays(-30);
 
-        var total = await db.AuditLogs.CountAsync(cancellationToken);
-        var today = await db.AuditLogs.CountAsync(x => x.CreatedAtUtc >= todayStart, cancellationToken);
-        var week = await db.AuditLogs.CountAsync(x => x.CreatedAtUtc >= weekStart, cancellationToken);
-        var activeAdmins = await db.AuditLogs
+        // Exclude student-role rows, consistent with the list endpoint.
+        var baseQuery = db.AuditLogs.Where(x => x.ActorRole != Roles.Student);
+
+        var total = await baseQuery.CountAsync(cancellationToken);
+        var today = await baseQuery.CountAsync(x => x.CreatedAtUtc >= todayStart, cancellationToken);
+        var week  = await baseQuery.CountAsync(x => x.CreatedAtUtc >= weekStart,  cancellationToken);
+        var activeAdmins = await baseQuery
             .Where(x => x.CreatedAtUtc >= recentWindow && x.ActorUserId.HasValue)
             .Select(x => x.ActorUserId)
             .Distinct()
