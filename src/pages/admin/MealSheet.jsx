@@ -269,13 +269,13 @@ export default function MealSheet() {
   }, [date, genderFilter, hallFilter]);
 
   // Static list of halls relevant to the current gender scope, not derived from whichever
-  // students happen to be on the roster today — Osmany Hall-Male, Extension-D and Student Run
-  // Hostel should all be selectable even if one of them currently has zero students on this
-  // date, so the admin can see that "0 students" for themselves rather than the option just
-  // being missing. Only Osmany Hall-Female is excluded, since that's the sole female hall.
+  // students happen to be on the roster today — all halls should be selectable even if one
+  // currently has zero students, so the admin can see that "0 students" themselves.
+  // All Gender → all halls; Male → male halls only; Female → female hall only.
   const availableHalls = useMemo(() => {
     const scopeGender = isWingAdmin ? (user?.wing || 'Male') : genderFilter;
-    if (scopeGender === 'Female') return [];
+    if (scopeGender === 'All') return HALL_NAMES;
+    if (scopeGender === 'Female') return HALL_NAMES.filter((h) => h === 'Osmany Hall-Female');
     return HALL_NAMES.filter((h) => h !== 'Osmany Hall-Female');
   }, [isWingAdmin, user?.wing, genderFilter]);
 

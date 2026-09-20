@@ -11,7 +11,18 @@ import { utils, writeFile } from 'xlsx';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-function monthLabel(year, month) {
+/**
+ * Returns a human-readable period label.
+ * - Completed months  → "August 2026"
+ * - Current month     → "September 1 – September 20, 2026"  (month-to-date)
+ */
+function monthLabel(year, month, today) {
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  if (isCurrentMonth) {
+    const startFmt = new Date(year, month - 1, 1).toLocaleString('default', { month: 'long', day: 'numeric' });
+    const endFmt   = today.toLocaleString('default', { month: 'long', day: 'numeric', year: 'numeric' });
+    return `${startFmt} \u2013 ${endFmt}`;
+  }
   return new Date(year, month - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
@@ -270,9 +281,15 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   const totalPages = rankingData?.totalPages ?? 0;
   const totalRows = rankingData?.totalRows ?? 0;
 
+  // Hall list shown in the dropdown — filtered to match the active wing selection.
+  // All Gender → all halls; Male → male halls only; Female → female hall only.
   const availableHalls = isWingAdmin
-    ? (activeWing === 'Female' ? [] : HALL_NAMES.filter(h => h !== 'Osmany Hall-Female'))
-    : (wingFilter === 'Female' ? [] : HALL_NAMES.filter(h => h !== 'Osmany Hall-Female'));
+    ? HALL_NAMES.filter(h => activeWing === 'Female' ? h === 'Osmany Hall-Female' : h !== 'Osmany Hall-Female')
+    : wingFilter === 'All'
+      ? HALL_NAMES
+      : wingFilter === 'Female'
+        ? HALL_NAMES.filter(h => h === 'Osmany Hall-Female')
+        : HALL_NAMES.filter(h => h !== 'Osmany Hall-Female');
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
@@ -313,7 +330,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
               borderRadius: '20px', padding: '0.15rem 0.6rem',
               fontSize: '0.76rem', fontWeight: 700,
             }}>
-              {monthLabel(selYear, selMonth)}
+              {monthLabel(selYear, selMonth, today)}
             </span>
           )}
         </span>
@@ -525,7 +542,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
                     <td colSpan={9} style={{ textAlign: 'center', color: 'var(--muted)', padding: '2.5rem 1rem' }}>
                       {appliedSearch || deptFilter !== 'all' || levelFilter !== 'all' || hallFilter !== 'All'
                         ? 'No students found matching the selected filters.'
-                        : `No meal data found for ${monthLabel(selYear, selMonth)}.`}
+                        : `No meal data found for ${monthLabel(selYear, selMonth, today)}.`}
                     </td>
                   </tr>
                 ) : (
@@ -642,7 +659,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
               }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: '#3730a3', fontSize: '0.95rem' }}>
                   <User size={16} />
-                  Student Monthly Detail — {monthLabel(selYear, selMonth)}
+                  Student Monthly Detail — {monthLabel(selYear, selMonth, today)}
                 </span>
                 <button type="button" onClick={closeDetail}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'flex', padding: '0.25rem' }}
