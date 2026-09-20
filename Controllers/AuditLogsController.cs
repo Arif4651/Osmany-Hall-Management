@@ -43,6 +43,11 @@ public sealed class AuditLogsController(HallDbContext db) : ControllerBase
 
         var query = db.AuditLogs.AsNoTracking().AsQueryable();
 
+        // Student actions are excluded from the admin log viewer.
+        // They are never written any more (AuthController guards them by role),
+        // but this clause also hides any older rows that may exist in the DB.
+        query = query.Where(x => x.ActorRole != Roles.Student);
+
         // ── Filters ──────────────────────────────────────────────────────
         if (!string.IsNullOrWhiteSpace(module) && module != "All")
             query = query.Where(x => x.Module == module);
@@ -180,6 +185,9 @@ public sealed class AuditLogsController(HallDbContext db) : ControllerBase
         CancellationToken cancellationToken)
     {
         var query = db.AuditLogs.AsNoTracking().AsQueryable();
+
+        // Exclude student-role rows — same policy as the paginated endpoint.
+        query = query.Where(x => x.ActorRole != Roles.Student);
 
         if (!string.IsNullOrWhiteSpace(module) && module != "All")
             query = query.Where(x => x.Module == module);

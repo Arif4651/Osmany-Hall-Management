@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HallBackend.Application.Dtos;
 using HallBackend.Application.Services;
+using HallBackend.Domain.Constants;
 using HallBackend.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -129,17 +130,21 @@ public sealed class AuthController(
             tokenCreateMs,
             totalTimer.Elapsed.TotalMilliseconds);
 
-        // Audit log: login success
-        _ = audit.LogAsync(
-            actorName: user.FullName,
-            actorUserId: user.Id,
-            actorRole: user.Role,
-            module: AuditModules.Authentication,
-            action: AuditActions.Login,
-            entityType: "AppUser",
-            entityId: user.Id.ToString(),
-            description: $"{user.FullName} ({user.Role}) logged in",
-            cancellationToken: CancellationToken.None);
+        // Audit log: login success — student logins are intentionally excluded.
+        // To re-enable student logging, remove the role guard below.
+        if (user.Role != Roles.Student)
+        {
+            _ = audit.LogAsync(
+                actorName: user.FullName,
+                actorUserId: user.Id,
+                actorRole: user.Role,
+                module: AuditModules.Authentication,
+                action: AuditActions.Login,
+                entityType: "AppUser",
+                entityId: user.Id.ToString(),
+                description: $"{user.FullName} ({user.Role}) logged in",
+                cancellationToken: CancellationToken.None);
+        }
 
         return Ok(loginSuccess);
     }
@@ -164,15 +169,19 @@ public sealed class AuthController(
             Path = "/",
         });
 
-        // Audit log: logout (fire-and-forget, no cancellation token needed)
+        // Audit log: logout — student logouts are intentionally excluded.
+        // To re-enable student logging, remove the role guard below.
         var idClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(idClaim, out var logoutUserId))
         {
             var actorName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
             var actorRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? string.Empty;
-            _ = audit.LogAsync(actorName, logoutUserId, actorRole,
-                AuditModules.Authentication, AuditActions.Logout, "AppUser", logoutUserId.ToString(),
-                $"{actorName} logged out", cancellationToken: CancellationToken.None);
+            if (actorRole != Roles.Student)
+            {
+                _ = audit.LogAsync(actorName, logoutUserId, actorRole,
+                    AuditModules.Authentication, AuditActions.Logout, "AppUser", logoutUserId.ToString(),
+                    $"{actorName} logged out", cancellationToken: CancellationToken.None);
+            }
         }
 
         return NoContent();
@@ -220,10 +229,14 @@ public sealed class AuthController(
         var (tokenString, loginSuccess) = tokens.CreateToken(refreshedUser);
         WriteAuthCookie(tokenString, loginSuccess.ExpiresAtUtc);
 
-        // Audit log: password change
-        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
-            AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
-            $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
+        // Audit log: password change — student password changes are intentionally excluded.
+        // To re-enable student logging, remove the role guard below.
+        if (user.Role != Roles.Student)
+        {
+            _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+                AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
+                $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
+        }
 
         return NoContent();
     }
