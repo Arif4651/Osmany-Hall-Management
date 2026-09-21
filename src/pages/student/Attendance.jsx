@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, CheckCircle2, Clock, LocateFixed, MapPin, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarClock, CheckCircle2, Clock, Info, LocateFixed, MapPin, TriangleAlert, XCircle } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/ui/Card';
@@ -80,9 +80,23 @@ export default function Attendance() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimerRef = useRef(null);
+
+  const showToast = useCallback((msg) => {
+    setMessage(msg);
+    setToastVisible(true);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    if (msg?.type !== 'error') {
+      toastTimerRef.current = setTimeout(() => setToastVisible(false), 6000);
+    }
+  }, []);
+
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const load = useCallback(async () => {
     setIsLoading(true);
+    setToastVisible(false);
     setMessage(null);
     try {
       const { year, month } = parseMonthValue(monthValue);
@@ -93,7 +107,7 @@ export default function Attendance() {
       setCurrent(currentResult);
       setMonthDetails(monthResult);
     } catch (error) {
-      setMessage({
+      showToast({
         type: 'error',
         title: 'Attendance unavailable',
         text: error instanceof Error ? error.message : 'Please try again.',
@@ -101,7 +115,7 @@ export default function Attendance() {
     } finally {
       setIsLoading(false);
     }
-  }, [monthValue]);
+  }, [monthValue, showToast]);
 
   useEffect(() => {
     load();
@@ -129,14 +143,14 @@ export default function Attendance() {
 
   const handleMark = useCallback(async () => {
     setIsSubmitting(true);
-    setMessage({
+    showToast({
       type: 'info',
-      title: 'Getting your location...',
+      title: 'Getting your location…',
       text: 'Please approve the browser location request and wait a few seconds.',
     });
     try {
       const position = await getLocation();
-      setMessage({
+      showToast({
         type: 'info',
         title: 'Verifying attendance',
         text: 'Your location is being checked against your assigned hall.',
@@ -146,14 +160,14 @@ export default function Attendance() {
         longitude: position.coords.longitude,
         accuracyMeters: position.coords.accuracy,
       });
-      setMessage({
+      showToast({
         type: 'success',
-        title: 'Attendance marked',
+        title: 'Attendance marked!',
         text: result.message,
       });
       await load();
     } catch (error) {
-      setMessage({
+      showToast({
         type: 'error',
         title: 'Could not mark attendance',
         text: error instanceof Error ? error.message : 'Please try again.',
@@ -161,7 +175,13 @@ export default function Attendance() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [load]);
+  }, [load, showToast]);
+
+  const toastIcon = message?.type === 'success'
+    ? <CheckCircle2 size={22} />
+    : message?.type === 'error'
+      ? <XCircle size={22} />
+      : <Info size={22} />;
 
   return (
     <div className="financial-page attendance-page">
@@ -170,12 +190,6 @@ export default function Attendance() {
         description="Mark hall attendance during the active session using your device location."
       />
 
-      {message ? (
-        <div className={`student-message student-message-${message.type === 'error' ? 'error' : 'success'}`}>
-          <strong>{message.title}</strong>
-          <span>{message.text}</span>
-        </div>
-      ) : null}
 
       <section className="attendance-session-section">
         <Card className="attendance-primary-card">
@@ -215,10 +229,25 @@ export default function Attendance() {
             </div>
           )}
 
+          {message && toastVisible ? (
+            <div className={`attendance-toast attendance-toast-${message.type}`} role="alert">
+              <span className="attendance-toast-icon">{toastIcon}</span>
+              <div className="attendance-toast-body">
+                <strong>{message.title}</strong>
+                <span>{message.text}</span>
+              </div>
+              <button
+                className="attendance-toast-close"
+                aria-label="Dismiss"
+                onClick={() => setToastVisible(false)}
+              >✕</button>
+            </div>
+          ) : null}
+
           <div className="attendance-action-row">
             <Button onClick={handleMark} disabled={!canSubmit}>
               <LocateFixed size={17} />
-              {isSubmitting ? 'Getting your location...' : 'Give Attendance'}
+              {isSubmitting ? 'Getting your location…' : 'Give Attendance'}
             </Button>
             <small>
               Your hall is selected from your student record. You cannot choose a different hall.
