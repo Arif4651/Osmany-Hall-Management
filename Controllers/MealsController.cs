@@ -85,7 +85,7 @@ public sealed class MealsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.ConfigurationChange, "MealSetting", setting.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.ConfigurationChange, "MealSetting", setting.Id.ToString(),
             $"Updated meal cutoff time to {request.CutoffTime} for {selectedWing} wing",
             newValues: new { CutoffTime = request.CutoffTime, Wing = selectedWing },
             cancellationToken: CancellationToken.None);
@@ -200,7 +200,7 @@ public sealed class MealsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "MealConfiguration", config.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Update, "MealConfiguration", config.Id.ToString(),
             $"Updated meal menu configuration for {request.DayId} {request.MealTypeId} ({selectedWing} wing)",
             newValues: new { request.DayId, request.MealTypeId, Wing = selectedWing, ItemCount = nextItems.Count },
             cancellationToken: CancellationToken.None);
@@ -435,7 +435,7 @@ public sealed class MealsController(
             await billing.RecalculateForwardAsync(request.EffectiveFrom.Month, request.EffectiveFrom.Year, cancellationToken);
 
             var ctx = await BuildCtxAsync(cancellationToken);
-            _ = audit.LogAsync(ctx, AuditActions.StatusChange, "MealStatus", student.Id.ToString(),
+            await audit.LogAsync(ctx, AuditActions.StatusChange, "MealStatus", student.Id.ToString(),
                 $"Changed meal status for student {student.StudentName} ({student.StudentId}) on {request.EffectiveFrom:yyyy-MM-dd} {request.MealPeriod} to {(request.IsOn ? "ON" : "OFF")}",
                 newValues: new { request.StudentRecordId, request.MealPeriod, request.IsOn, request.OptionItemId, EffectiveFrom = request.EffectiveFrom.ToString("yyyy-MM-dd") },
                 cancellationToken: CancellationToken.None);

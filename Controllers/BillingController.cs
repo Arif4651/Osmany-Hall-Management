@@ -68,7 +68,7 @@ public sealed class BillingController(
         await billing.RecalculateForwardAsync(month, year, cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.BillGeneration, "Billing", $"{month}/{year}",
+        await audit.LogAsync(ctx, AuditActions.BillGeneration, "Billing", $"{month}/{year}",
             $"Triggered bill recalculation for {month:D2}/{year}",
             cancellationToken: CancellationToken.None);
 

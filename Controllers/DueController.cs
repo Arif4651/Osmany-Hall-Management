@@ -119,7 +119,7 @@ public sealed class DueController(
             await db.SaveChangesAsync(cancellationToken);
 
             var ctx = await BuildCtxAsync(cancellationToken);
-            _ = audit.LogAsync(ctx, AuditActions.DueAdjustment, "DueAdjustment", request.StudentId.ToString(),
+            await audit.LogAsync(ctx, AuditActions.DueAdjustment, "DueAdjustment", request.StudentId.ToString(),
                 $"Adjusted due for student {student.StudentName} (ID: {student.StudentId}, Room: {student.RoomNo ?? "N/A"}, Dept: {student.Department ?? "N/A"}) to {request.AdjustedAmount:F2} BDT (previous: {previous:F2} BDT) for {request.BillingMonth:D2}/{request.BillingYear}",
                 oldValues: new
                 {

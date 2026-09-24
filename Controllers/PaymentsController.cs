@@ -228,7 +228,7 @@ public sealed class PaymentsController(
 
         var ctx = await BuildCtxAsync(cancellationToken);
         var auditAction = action == "approve" ? AuditActions.Approve : AuditActions.Reject;
-        _ = audit.LogAsync(ctx, auditAction, "PaymentSubmission", row.Id.ToString(),
+        await audit.LogAsync(ctx, auditAction, "PaymentSubmission", row.Id.ToString(),
             $"{auditAction} payment of {(row.ApprovedAmount ?? row.SubmittedAmount):F2} BDT (TxID: {row.TransactionId}) for {saved.Student?.StudentName} ({saved.Student?.RollNumber})",
             newValues: new { Status = row.Status, ApprovedAmount = row.ApprovedAmount, TransactionId = row.TransactionId },
             cancellationToken: CancellationToken.None);

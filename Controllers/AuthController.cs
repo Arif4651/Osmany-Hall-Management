@@ -134,7 +134,7 @@ public sealed class AuthController(
         // To re-enable student logging, remove the role guard below.
         if (user.Role != Roles.Student)
         {
-            _ = audit.LogAsync(
+            await audit.LogAsync(
                 actorName: user.FullName,
                 actorUserId: user.Id,
                 actorRole: user.Role,
@@ -151,7 +151,7 @@ public sealed class AuthController(
 
     [HttpPost("logout")]
     [Authorize]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout()
     {
         // Clear the auth cookie on the client.
         Response.Cookies.Delete(AuthCookieName, new CookieOptions
@@ -178,7 +178,7 @@ public sealed class AuthController(
             var actorRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? string.Empty;
             if (actorRole != Roles.Student)
             {
-                _ = audit.LogAsync(actorName, logoutUserId, actorRole,
+                await audit.LogAsync(actorName, logoutUserId, actorRole,
                     AuditModules.Authentication, AuditActions.Logout, "AppUser", logoutUserId.ToString(),
                     $"{actorName} logged out", cancellationToken: CancellationToken.None);
             }
@@ -233,7 +233,7 @@ public sealed class AuthController(
         // To re-enable student logging, remove the role guard below.
         if (user.Role != Roles.Student)
         {
-            _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+            await audit.LogAsync(user.FullName, user.Id, user.Role,
                 AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
                 $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
         }

@@ -56,7 +56,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.SaveHallLocationAsync(null, request, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Create, "AttendanceHallLocation", result.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Create, "AttendanceHallLocation", result.Id.ToString(),
             $"Created attendance location '{result.HallName}' ({result.HallId})",
             newValues: new { result.HallName, result.HallId, result.Latitude, result.Longitude, result.RadiusMeters },
             cancellationToken: CancellationToken.None);
@@ -69,7 +69,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.SaveHallLocationAsync(id, request, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "AttendanceHallLocation", id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Update, "AttendanceHallLocation", id.ToString(),
             $"Updated attendance location '{result.HallName}'",
             newValues: new { result.HallName, result.HallId, result.Latitude, result.Longitude, result.RadiusMeters },
             cancellationToken: CancellationToken.None);
@@ -82,7 +82,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.SetHallLocationActiveAsync(id, isActive, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, isActive ? AuditActions.Activate : AuditActions.Deactivate, "AttendanceHallLocation", id.ToString(),
+        await audit.LogAsync(ctx, isActive ? AuditActions.Activate : AuditActions.Deactivate, "AttendanceHallLocation", id.ToString(),
             $"{(isActive ? "Activated" : "Deactivated")} attendance location '{result.HallName}'",
             cancellationToken: CancellationToken.None);
         return result;
@@ -99,7 +99,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.CreateSessionAsync(request, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Create, "AttendanceSession", result.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Create, "AttendanceSession", result.Id.ToString(),
             $"Created attendance session '{result.HallName}' ({result.HallId})",
             newValues: new { result.HallName, result.HallId, result.StartTime, result.EndTime },
             cancellationToken: CancellationToken.None);
@@ -112,7 +112,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.UpdateSessionAsync(id, request, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "AttendanceSession", id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Update, "AttendanceSession", id.ToString(),
             $"Updated attendance session '{result.HallName}'",
             newValues: new { result.HallName, result.HallId, result.StartTime, result.EndTime },
             cancellationToken: CancellationToken.None);
@@ -125,7 +125,7 @@ public sealed class AttendanceController(
     {
         var result = await attendance.SetSessionActiveAsync(id, isActive, cancellationToken);
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, isActive ? AuditActions.Activate : AuditActions.Deactivate, "AttendanceSession", id.ToString(),
+        await audit.LogAsync(ctx, isActive ? AuditActions.Activate : AuditActions.Deactivate, "AttendanceSession", id.ToString(),
             $"{(isActive ? "Activated" : "Deactivated")} attendance session '{result.HallName}'",
             cancellationToken: CancellationToken.None);
         return result;

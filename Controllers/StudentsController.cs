@@ -159,7 +159,7 @@ public sealed class StudentsController(
         await billing.RecalculateMonthAsync(today.Month, today.Year, cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Create, "Student", student.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Create, "Student", student.Id.ToString(),
             $"Created student {student.StudentName} ({student.StudentId})",
             newValues: new { student.StudentName, student.StudentId, student.Department, student.Level, student.Gender, student.HallName },
             cancellationToken: CancellationToken.None);
@@ -194,7 +194,7 @@ public sealed class StudentsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "Student", student.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Update, "Student", student.Id.ToString(),
             $"Updated student {student.StudentName} ({student.StudentId})",
             oldValues: oldValues,
             newValues: new { student.StudentName, student.StudentId, student.Department, student.Level, student.Status },
@@ -213,7 +213,7 @@ public sealed class StudentsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Deactivate, "Student", student.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Deactivate, "Student", student.Id.ToString(),
             $"Marked student {student.StudentName} ({student.StudentId}) as inactive",
             cancellationToken: CancellationToken.None);
 
@@ -236,7 +236,7 @@ public sealed class StudentsController(
         await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Delete, "Student", id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Delete, "Student", id.ToString(),
             $"Permanently deleted student {studentInfo}",
             cancellationToken: CancellationToken.None);
 
@@ -277,7 +277,7 @@ public sealed class StudentsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "Student", null,
+        await audit.LogAsync(ctx, AuditActions.Update, "Student", null,
             $"Bulk updated {students.Count} students with fields: {string.Join(", ", request.UpdateFields.Keys)}",
             cancellationToken: CancellationToken.None);
 
@@ -320,7 +320,7 @@ public sealed class StudentsController(
         if (eligible.Count > 0) await CleanUpOrphanedDswSubsidiesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Delete, "Student", null,
+        await audit.LogAsync(ctx, AuditActions.Delete, "Student", null,
             $"Bulk permanently deleted {eligible.Count} students",
             cancellationToken: CancellationToken.None);
 
@@ -361,7 +361,7 @@ public sealed class StudentsController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.PasswordChange, "Student", student.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.PasswordChange, "Student", student.Id.ToString(),
             $"Reset password for student {student.StudentName} ({student.StudentId})",
             cancellationToken: CancellationToken.None);
 

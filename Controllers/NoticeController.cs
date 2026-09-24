@@ -107,7 +107,7 @@ public sealed class NoticeController(
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
 
         var creatorName = user.FullName;
-        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+        await audit.LogAsync(user.FullName, user.Id, user.Role,
             AuditModules.NoticeBoard, AuditActions.Create, "Notice", notice.Id.ToString(),
             $"Created notice '{notice.Title}' targeting {notice.TargetWing} wing",
             newValues: new { notice.Title, notice.TargetWing }, cancellationToken: CancellationToken.None);
@@ -166,7 +166,7 @@ public sealed class NoticeController(
         await db.SaveChangesAsync(cancellationToken);
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
 
-        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+        await audit.LogAsync(user.FullName, user.Id, user.Role,
             AuditModules.NoticeBoard, AuditActions.Update, "Notice", id.ToString(),
             $"Updated notice '{notice.Title}'",
             cancellationToken: CancellationToken.None);
@@ -199,7 +199,7 @@ public sealed class NoticeController(
         await db.SaveChangesAsync(cancellationToken);
         await cacheStore.EvictByTagAsync("notices", cancellationToken);
 
-        _ = audit.LogAsync(user.FullName, user.Id, user.Role,
+        await audit.LogAsync(user.FullName, user.Id, user.Role,
             AuditModules.NoticeBoard, AuditActions.Delete, "Notice", id.ToString(),
             $"Deleted notice '{notice.Title}' ({notice.TargetWing} wing)",
             cancellationToken: CancellationToken.None);

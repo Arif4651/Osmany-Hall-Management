@@ -88,7 +88,7 @@ public sealed class InventoryController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Create, "InventoryItem", item.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Create, "InventoryItem", item.Id.ToString(),
             $"Created inventory item '{item.Item}' ({item.Category}) for {selectedWing} wing",
             newValues: new { item.Item, item.Category, item.Unit, item.Wing, item.IsStored },
             cancellationToken: CancellationToken.None);
@@ -117,7 +117,7 @@ public sealed class InventoryController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Update, "InventoryItem", item.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Update, "InventoryItem", item.Id.ToString(),
             $"Updated inventory item '{item.Item}'",
             oldValues: oldValues,
             newValues: new { item.Item, item.Category, item.Unit, item.IsStored },
@@ -155,7 +155,7 @@ public sealed class InventoryController(
         await db.SaveChangesAsync(cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
-        _ = audit.LogAsync(ctx, AuditActions.Delete, "InventoryItem", item.Id.ToString(),
+        await audit.LogAsync(ctx, AuditActions.Delete, "InventoryItem", item.Id.ToString(),
             $"{(hasHistory ? "Archived" : "Deleted")} inventory item '{item.Item}'",
             cancellationToken: CancellationToken.None);
 
@@ -331,7 +331,7 @@ public sealed class InventoryController(
 
             var ctx = await BuildCtxAsync(cancellationToken);
             var action = row.TransactionType == "in" ? AuditActions.StockIn : AuditActions.StockOut;
-            _ = audit.LogAsync(ctx, action, "StockTransaction", row.Id.ToString(),
+            await audit.LogAsync(ctx, action, "StockTransaction", row.Id.ToString(),
                 $"{action} {row.Quantity} {item.Unit} of '{item.Item}' ({row.Date:yyyy-MM-dd})",
                 newValues: new { row.ItemId, row.Quantity, row.Rate, row.TotalCost, row.TransactionType, row.Date },
                 cancellationToken: CancellationToken.None);
@@ -445,7 +445,7 @@ public sealed class InventoryController(
                 await billing.RecalculateForwardAsync(month, year, cancellationToken);
 
             var ctx = await BuildCtxAsync(cancellationToken);
-            _ = audit.LogAsync(ctx, AuditActions.StockOut, "StockTransaction", null,
+            await audit.LogAsync(ctx, AuditActions.StockOut, "StockTransaction", null,
                 $"Bulk stock transaction recorded {computed.Count} item(s) for {selectedWing} wing",
                 cancellationToken: CancellationToken.None);
 
@@ -523,7 +523,7 @@ public sealed class InventoryController(
             await billing.RecalculateForwardAsync(first.Month, first.Year, cancellationToken);
 
             var ctx = await BuildCtxAsync(cancellationToken);
-            _ = audit.LogAsync(ctx, AuditActions.Update, "StockTransaction", row.Id.ToString(),
+            await audit.LogAsync(ctx, AuditActions.Update, "StockTransaction", row.Id.ToString(),
                 $"Updated stock transaction {id} for item '{item.Item}'",
                 newValues: new { row.ItemId, row.Quantity, row.Rate, row.TotalCost, row.TransactionType, row.Date },
                 cancellationToken: CancellationToken.None);
@@ -573,7 +573,7 @@ public sealed class InventoryController(
             await billing.RecalculateForwardAsync(date.Month, date.Year, cancellationToken);
 
             var ctx = await BuildCtxAsync(cancellationToken);
-            _ = audit.LogAsync(ctx, AuditActions.Delete, "StockTransaction", id.ToString(),
+            await audit.LogAsync(ctx, AuditActions.Delete, "StockTransaction", id.ToString(),
                 $"Deleted stock transaction {id} for item '{itemName}'",
                 cancellationToken: CancellationToken.None);
 
