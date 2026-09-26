@@ -28,6 +28,11 @@ builder.Logging.AddDebug();
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+var pooledConnectionString = BuildPooledConnectionString(connectionString, builder.Configuration);
+var poolSettings = new NpgsqlConnectionStringBuilder(pooledConnectionString);
+var dataSourceBuilder = new NpgsqlDataSourceBuilder(pooledConnectionString);
+var dataSource = dataSourceBuilder.Build();
+
 if (builder.Environment.IsDevelopment())
 {
     var dbHost = new NpgsqlConnectionStringBuilder(connectionString).Host;
@@ -49,7 +54,9 @@ if (jwtSecret.StartsWith("CHANGE_", StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("Replace the placeholder Jwt:Secret with a secure secret.");
 }
 
-builder.Services.AddDbContext<HallDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddSingleton(dataSource);
+builder.Services.AddDbContextPool<HallDbContext>((serviceProvider, options) =>
+    options.UseNpgsql(serviceProvider.GetRequiredService<NpgsqlDataSource>()));
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddDataProtection()
@@ -265,8 +272,63 @@ app.UseMiddleware<HallBackend.Infrastructure.RequirePasswordChangeMiddleware>();
 app.UseOutputCache();
 
 app.MapHealthChecks("/health");
+app.MapGet("/health/db-pool", async (NpgsqlDataSource dataSource, CancellationToken cancellationToken) =>
+{
+    await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+    await using var command = connection.CreateCommand();
+    command.CommandText = """
+        SELECT COALESCE(state, 'unknown') AS state, count(*)::int AS count
+        FROM pg_stat_activity
+        WHERE usename = current_user
+          AND datname = current_database()
+        GROUP BY COALESCE(state, 'unknown')
+        ORDER BY state;
+        """;
+
+    var states = new List<object>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        states.Add(new
+        {
+            State = reader.GetString(0),
+            Count = reader.GetInt32(1),
+        });
+    }
+
+    return Results.Ok(new
+    {
+        ProcessId = Environment.ProcessId,
+        Pool = new
+        {
+            Min = poolSettings.MinPoolSize,
+            Max = poolSettings.MaxPoolSize,
+            IdleLifetimeSeconds = poolSettings.ConnectionIdleLifetime,
+            PruningIntervalSeconds = poolSettings.ConnectionPruningInterval,
+        },
+        States = states,
+    });
+}).RequireAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static string BuildPooledConnectionString(string connectionString, IConfiguration configuration)
+{
+    var builder = new NpgsqlConnectionStringBuilder(connectionString)
+    {
+        MinPoolSize = configuration.GetValue("DatabasePool:MinPoolSize", 0),
+        MaxPoolSize = configuration.GetValue("DatabasePool:MaxPoolSize", 20),
+        ConnectionIdleLifetime = configuration.GetValue("DatabasePool:ConnectionIdleLifetimeSeconds", 60),
+        ConnectionPruningInterval = configuration.GetValue("DatabasePool:ConnectionPruningIntervalSeconds", 10),
+    };
+
+    if (string.IsNullOrWhiteSpace(builder.ApplicationName))
+    {
+        builder.ApplicationName = "HallBackend";
+    }
+
+    return builder.ConnectionString;
+}
 
 
