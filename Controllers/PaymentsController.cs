@@ -106,6 +106,8 @@ public sealed class PaymentsController(
         [FromQuery] string? gender,
         [FromQuery] string? status,
         [FromQuery] string? search,
+        [FromQuery] int? month,
+        [FromQuery] int? year,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
@@ -142,6 +144,26 @@ public sealed class PaymentsController(
                 || EF.Functions.ILike(x.Student!.StudentName, pattern, SearchPattern.EscapeCharacter)
                 || EF.Functions.ILike(x.TransactionId, pattern, SearchPattern.EscapeCharacter)
             );
+        }
+
+        if (month is not null)
+        {
+            if (month.Value is < 1 or > 12) return BadRequest(new { message = "Month must be between 1 and 12." });
+            query = query.Where(x => x.BillingMonth == month.Value);
+        }
+
+        if (year is not null)
+        {
+            var currentYear = HallClock.Today.Year;
+            if (year.Value < 2000 || year.Value > currentYear) return BadRequest(new { message = "Enter a valid billing year." });
+            query = query.Where(x => x.BillingYear == year.Value);
+        }
+
+        if (month is not null && year is not null)
+        {
+            var today = HallClock.Today;
+            if (year.Value == today.Year && month.Value > today.Month)
+                return BadRequest(new { message = "Billing period cannot be in the future." });
         }
 
         var total = await query.CountAsync(cancellationToken);
