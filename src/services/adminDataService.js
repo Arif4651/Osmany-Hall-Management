@@ -41,7 +41,7 @@ export const adminDataService = {
   deleteServiceBill: async ({ month, year, wing }) => apiRequest(`/billing/service-bills${toQueryString({ month, year, wing })}`, { method: 'DELETE' }),
   recalculateBillingMonth: async ({ month, year }) => apiRequest(`/billing/subsidies/recalculate${toQueryString({ month, year })}`, { method: 'POST' }),
   saveServiceBill: async (payload) => apiRequest('/billing/service-bills', { method: 'PUT', body: JSON.stringify(payload) }),
-  getPayments: async ({ gender, status, search, page, pageSize }) => apiRequest(`/payments/admin${toQueryString({ gender, status, search, page, pageSize })}`),
+  getPayments: async ({ gender, status, search, month, year, page, pageSize }) => apiRequest(`/payments/admin${toQueryString({ gender, status, search, month, year, page, pageSize })}`),
   reviewPayment: async (id, action, approvedAmount = null) => apiRequest(`/payments/${id}/review`, {
     method: 'POST',
     body: JSON.stringify({ action, approvedAmount }),

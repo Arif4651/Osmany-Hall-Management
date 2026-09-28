@@ -5,10 +5,9 @@ const EXPORT_COLUMNS = [
   { title: 'Hall ID', key: 'hallId' },
   { title: 'Mobile Number', key: 'mobileNumber' },
   { title: 'Level / Year', key: 'level' },
-  { title: 'Session Year', key: 'sessionYear' },
   { title: 'Hall Name', key: 'hallName' },
-  { title: 'Admission Date', key: 'admissionDate' },
-  { title: 'Hall Validity End Date', key: 'hallValidityEndDate' },
+  { title: 'Room No', key: 'roomNo' },
+  { title: 'Admission Date', key: 'joinDate' },
   { title: 'Status', key: 'status' },
 ];
 
@@ -16,9 +15,11 @@ const EXCEL_TEXT_FIELDS = new Set([
   'studentId',
   'hallId',
   'mobileNumber',
-  'admissionDate',
-  'hallValidityEndDate',
-  'sessionYear',
+  'roomNo',
+]);
+
+const DATE_KEYS = new Set([
+  'joinDate',
 ]);
 
 function safeCell(value) {
@@ -32,7 +33,7 @@ function normalizeExportValue(value, key) {
     return '';
   }
 
-  if ((key === 'admissionDate' || key === 'hallValidityEndDate') && raw.includes('T')) {
+  if (DATE_KEYS.has(key) && raw.includes('T')) {
     return raw.split('T')[0];
   }
 

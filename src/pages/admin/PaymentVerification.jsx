@@ -10,9 +10,12 @@ import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import MonthYearPicker from '../../components/financial/MonthYearPicker';
 
 const monthNames = Array.from({ length: 12 }, (_, index) =>
   new Intl.DateTimeFormat('en', { month: 'short' }).format(new Date(2000, index, 1)));
+
+const now = new Date();
 
 export default function PaymentVerification() {
   useDocumentTitle('Payment Verification');
@@ -37,6 +40,11 @@ export default function PaymentVerification() {
   const [pageSize, setPageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [billingPeriod, setBillingPeriod] = useState(() => ({
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  }));
+  const [isBillingPeriodFilterActive, setIsBillingPeriodFilterActive] = useState(false);
   const [reviewing, setReviewing] = useState(null);
   const [approvedAmount, setApprovedAmount] = useState('');
   const [error, setError] = useState('');
@@ -45,9 +53,50 @@ export default function PaymentVerification() {
   // Reset page to 1 when filters change
   useEffect(() => {
     setPage(1);
-  }, [gender, statusFilter, searchQuery]);
+  }, [gender, statusFilter, searchQuery, isBillingPeriodFilterActive, billingPeriod.month, billingPeriod.year]);
 
-  const cacheKey = `admin-payments-${gender}-${statusFilter}-${searchQuery}-${page}-${pageSize}`;
+  const billingMonth = isBillingPeriodFilterActive ? billingPeriod.month : undefined;
+  const billingYear = isBillingPeriodFilterActive ? billingPeriod.year : undefined;
+  const cacheKey = `admin-payments-${gender}-${statusFilter}-${searchQuery}-${billingMonth || 'all'}-${billingYear || 'all'}-${page}-${pageSize}`;
+
+  const fetchPayments = useCallback(async () => {
+    if (!isBillingPeriodFilterActive) {
+      return adminDataService.getPayments({ gender, status: statusFilter, search: searchQuery, page, pageSize });
+    }
+
+    const firstPage = await adminDataService.getPayments({
+      gender,
+      status: statusFilter,
+      search: searchQuery,
+      page: 1,
+      pageSize: 100,
+    });
+    const allRows = [...(firstPage.items || [])];
+
+    for (let pageNumber = 2; pageNumber <= (firstPage.totalPages || 1); pageNumber += 1) {
+      const nextPage = await adminDataService.getPayments({
+        gender,
+        status: statusFilter,
+        search: searchQuery,
+        page: pageNumber,
+        pageSize: 100,
+      });
+      allRows.push(...(nextPage.items || []));
+    }
+
+    const filteredRows = allRows.filter((row) => row.billingMonth === billingMonth && row.billingYear === billingYear);
+    const start = (page - 1) * pageSize;
+    const items = filteredRows.slice(start, start + pageSize);
+    const total = filteredRows.length;
+
+    return {
+      items,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }, [billingMonth, billingYear, gender, isBillingPeriodFilterActive, page, pageSize, searchQuery, statusFilter]);
 
   const {
     data: paymentData = null,
@@ -57,7 +106,7 @@ export default function PaymentVerification() {
     refresh
   } = useCachedFetch(
     cacheKey,
-    () => adminDataService.getPayments({ gender, status: statusFilter, search: searchQuery, page, pageSize }),
+    fetchPayments,
     { ttl: 30_000 }
   );
 
@@ -178,6 +227,46 @@ export default function PaymentVerification() {
             <option value="rejected">Rejected</option>
           </select>
         </label>
+        <div className="field-control" style={{ minWidth: '360px', flex: '0 1 470px' }}>
+          <span>Billing Period</span>
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {isBillingPeriodFilterActive ? (
+              <>
+                <MonthYearPicker
+                  month={billingPeriod.month}
+                  year={billingPeriod.year}
+                  minYear={2000}
+                  maxYear={now.getFullYear()}
+                  minMonth={1}
+                  maxMonth={now.getMonth() + 1}
+                  onChange={setBillingPeriod}
+                  label="Billing period"
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setBillingPeriod({ month: now.getMonth() + 1, year: now.getFullYear() });
+                    setIsBillingPeriodFilterActive(false);
+                  }}
+                  style={{ padding: '0.58rem 0.8rem' }}
+                >
+                  Clear
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsBillingPeriodFilterActive(true)}
+                style={{ minWidth: '180px', justifyContent: 'space-between', padding: '0.72rem 0.9rem' }}
+                title="Filter by billing period"
+              >
+                All Periods
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       <section className="financial-card table-wrap sticky-page-table">

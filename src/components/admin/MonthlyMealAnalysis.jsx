@@ -8,6 +8,8 @@ import { useToast } from '../../context/ToastContext';
 import { DEPARTMENTS, STUDENT_LEVELS, HALL_NAMES } from '../../types/student.types';
 import MonthYearPicker from '../financial/MonthYearPicker';
 import { utils, writeFile } from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +154,7 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   const [rankingData, setRankingData] = useState(null);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingError, setRankingError] = useState('');
+  const [exportingFormat, setExportingFormat] = useState(null);
 
   // ── student detail ─────────────────────────────────────────────────────────
   const [selectedStudentId, setSelectedStudentId] = useState(null);
@@ -250,30 +253,162 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
   };
 
   // ── export ─────────────────────────────────────────────────────────────────
-  const exportRankingExcel = () => {
-    if (!rankingData?.rows?.length) return;
+  const buildMonthlyAnalysisParams = (overrides = {}) => {
     const { year, month } = selectedPeriod;
-    const rows = rankingData.rows.map(r => ({
-      'Rank': r.rank,
-      'Student Name': r.studentName,
-      'Student ID': r.studentId,
-      'Hall': r.hallName,
-      'Room': r.roomNo,
-      'Department': r.department,
-      'Level': r.level,
-      'Breakfast OFF': r.breakfastOff,
-      'Lunch OFF': r.lunchOff,
-      'Dinner OFF': r.dinnerOff,
-      'Total OFF': r.totalOff,
-      'Total Applicable': r.totalApplicable,
-      'OFF %': r.offPercent,
-    }));
-    const book = utils.book_new();
-    utils.book_append_sheet(book, utils.json_to_sheet(rows), 'Monthly OFF Ranking');
-    writeFile(book, `meal-off-ranking-${year}-${String(month).padStart(2, '0')}.xlsx`);
-    toast.success('Exported', `${rows.length} rows exported.`);
+    return {
+      month,
+      year,
+      wing: wingFilter === 'All' ? undefined : wingFilter,
+      hall: hallFilter === 'All' ? undefined : hallFilter,
+      department: deptFilter === 'all' ? undefined : deptFilter,
+      level: levelFilter === 'all' ? undefined : levelFilter,
+      search: appliedSearch || undefined,
+      sortBy,
+      sortAsc,
+      ...overrides,
+    };
   };
 
+  const fetchAllRankingRowsForExport = async () => {
+    const firstPage = await adminDataService.getMonthlyMealAnalysis(buildMonthlyAnalysisParams({ page: 1, pageSize: 100 }));
+    const rows = [...(firstPage.rows || [])];
+    const pages = Math.max(1, firstPage.totalPages || 1);
+
+    for (let pageNumber = 2; pageNumber <= pages; pageNumber += 1) {
+      const nextPage = await adminDataService.getMonthlyMealAnalysis(buildMonthlyAnalysisParams({ page: pageNumber, pageSize: 100 }));
+      rows.push(...(nextPage.rows || []));
+    }
+
+    return {
+      rows,
+      summary: firstPage.summary,
+    };
+  };
+
+  const exportRankingExcel = async () => {
+    if (!rankingData?.totalRows) return;
+    setExportingFormat('excel');
+
+    try {
+      const { year, month } = selectedPeriod;
+      const suffix = year + '-' + String(month).padStart(2, '0');
+      const exportData = await fetchAllRankingRowsForExport();
+      const rows = exportData.rows.map(r => ({
+        'Rank': r.rank,
+        'Student Name': r.studentName,
+        'Student ID': r.studentId,
+        'Hall': r.hallName,
+        'Room': r.roomNo,
+        'Department': r.department,
+        'Level': r.level,
+        'Breakfast OFF': r.breakfastOff,
+        'Lunch OFF': r.lunchOff,
+        'Dinner OFF': r.dinnerOff,
+        'Total OFF': r.totalOff,
+        'Total Applicable': r.totalApplicable,
+        'OFF %': r.offPercent,
+      }));
+      const book = utils.book_new();
+      utils.book_append_sheet(book, utils.json_to_sheet(rows), 'Monthly OFF Ranking');
+      writeFile(book, 'meal-off-ranking-' + suffix + '.xlsx');
+      toast.success('Exported', rows.length + ' rows exported.');
+    } catch (err) {
+      toast.error('Export failed', err instanceof Error ? err.message : 'Failed to export monthly analysis.');
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const exportRankingPdf = async () => {
+    if (!rankingData?.totalRows) return;
+    setExportingFormat('pdf');
+
+    try {
+      const { year, month } = selectedPeriod;
+      const exportData = await fetchAllRankingRowsForExport();
+      const rows = exportData.rows;
+      const currentSummary = exportData.summary;
+      const suffix = year + '-' + String(month).padStart(2, '0');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+      doc.setFontSize(16);
+      doc.setTextColor(20, 26, 122);
+      doc.text('Monthly Meal-Off Analysis', 40, 32);
+
+      doc.setFontSize(9.5);
+      doc.setTextColor(100, 116, 139);
+      const metaParts = [
+        'Period: ' + monthLabel(year, month, today),
+        'Wing: ' + wingFilter,
+        'Hall: ' + hallFilter,
+        'Department: ' + (deptFilter === 'all' ? 'All' : deptFilter),
+        'Level: ' + (levelFilter === 'all' ? 'All' : levelFilter),
+      ];
+      if (appliedSearch) metaParts.push('Search: ' + appliedSearch);
+      const metaLines = doc.splitTextToSize(metaParts.join(' | '), 760);
+      doc.text(metaLines, 40, 50);
+
+      let tableStartY = 50 + metaLines.length * 12;
+      if (currentSummary) {
+        doc.text(
+          'Total students: ' + currentSummary.totalStudents
+            + ' | Students with OFF: ' + currentSummary.studentsWithAtLeastOneOff
+            + ' | Total OFF meals: ' + currentSummary.totalOffMeals
+            + ' | Avg OFF/student: ' + currentSummary.averageOffPerStudent,
+          40,
+          tableStartY + 6,
+        );
+        tableStartY += 20;
+      }
+
+      autoTable(doc, {
+        startY: tableStartY + 10,
+        head: [[
+          '#', 'Student Name', 'Student ID', 'Hall', 'Room', 'Department', 'Level',
+          'B-OFF', 'L-OFF', 'D-OFF', 'Total OFF', 'OFF %',
+        ]],
+        body: rows.map(r => [
+          r.rank,
+          r.studentName,
+          r.studentId,
+          r.hallName,
+          r.roomNo || '-',
+          r.department || '-',
+          r.level || '-',
+          r.breakfastOff,
+          r.lunchOff,
+          r.dinnerOff,
+          r.totalOff,
+          String(r.offPercent ?? 0) + '%',
+        ]),
+        theme: 'striped',
+        styles: { fontSize: 7.5, cellPadding: 3, valign: 'middle', overflow: 'linebreak' },
+        headStyles: { fillColor: [32, 42, 122], textColor: [255, 255, 255], fontStyle: 'bold' },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 24 },
+          1: { cellWidth: 112 },
+          2: { cellWidth: 62 },
+          3: { cellWidth: 88 },
+          4: { cellWidth: 42 },
+          5: { cellWidth: 58 },
+          6: { cellWidth: 52 },
+          7: { halign: 'center', cellWidth: 42 },
+          8: { halign: 'center', cellWidth: 42 },
+          9: { halign: 'center', cellWidth: 42 },
+          10: { halign: 'center', cellWidth: 54 },
+          11: { halign: 'center', cellWidth: 54 },
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      doc.save('meal-off-ranking-' + suffix + '.pdf');
+      toast.success('Exported', rows.length + ' rows exported as PDF.');
+    } catch (err) {
+      toast.error('Export failed', err instanceof Error ? err.message : 'Failed to export monthly analysis.');
+    } finally {
+      setExportingFormat(null);
+    }
+  };
   // ── derived ────────────────────────────────────────────────────────────────
   const selYear = selectedPeriod.year;
   const selMonth = selectedPeriod.month;
@@ -486,16 +621,28 @@ export default function MonthlyMealAnalysis({ activeWing, isWingAdmin }) {
                 </span>
               )}
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={exportRankingExcel}
-              disabled={!rankingData?.rows?.length}
-              title="Export ranking to Excel"
-              style={{ padding: '0.45rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem' }}
-            >
-              <Download size={14} /> Export
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={exportRankingExcel}
+                disabled={!rankingData?.totalRows || Boolean(exportingFormat)}
+                title="Export ranking to Excel"
+                style={{ padding: '0.45rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem' }}
+              >
+                <Download size={14} /> {exportingFormat === 'excel' ? 'Exporting...' : 'Excel'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={exportRankingPdf}
+                disabled={!rankingData?.totalRows || Boolean(exportingFormat)}
+                title="Export ranking as PDF"
+                style={{ padding: '0.45rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem' }}
+              >
+                <Download size={14} /> {exportingFormat === 'pdf' ? 'Exporting...' : 'PDF'}
+              </button>
+            </div>
           </div>
 
           {/* ── Table ─────────────────────────────────────────────────────── */}
