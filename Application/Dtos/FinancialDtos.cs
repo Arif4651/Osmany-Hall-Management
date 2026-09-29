@@ -179,3 +179,63 @@ public sealed record StudentGuestMealBreakdownDto(
     int TotalGuestCount,
     IReadOnlyList<GuestMealBreakdownItemDto> Items);
 
+// ── Inventory Report DTOs ────────────────────────────────────────────────────
+
+/// <summary>Per-item aggregation within the selected date range.</summary>
+public sealed record InventoryReportItemDto(
+    Guid ItemId,
+    string ItemName,
+    string Category,
+    string Unit,
+    bool IsStored,
+    decimal TotalStockIn,
+    decimal TotalStockInCost,
+    decimal TotalStockOut,
+    decimal TotalStockOutCost,
+    int TransactionCount);
+
+/// <summary>Details for an individual product transacted on a specific day and meal period.</summary>
+public sealed record InventoryReportDailyItemDto(
+    Guid ItemId,
+    string ItemName,
+    string Category,
+    string Unit,
+    bool IsStored,
+    string MealPeriod,
+    decimal StockInQuantity,
+    decimal StockInCost,
+    decimal StockOutQuantity,
+    decimal StockOutCost,
+    int TransactionCount);
+
+/// <summary>One row per date showing daily aggregated spend and itemized product breakdown.</summary>
+public sealed record InventoryReportDailyDto(
+    DateOnly Date,
+    decimal StockInCost,
+    decimal StockOutCost,
+    decimal NonStockCost,
+    int TransactionCount,
+    IReadOnlyList<InventoryReportDailyItemDto> Items);
+
+/// <summary>Aggregated totals grouped by category.</summary>
+public sealed record InventoryReportCategoryDto(
+    string Category,
+    decimal TotalCost,
+    int ItemCount,
+    int TransactionCount);
+
+/// <summary>Top-level report envelope returned by the inventory report endpoint.</summary>
+public sealed record InventoryReportDto(
+    DateOnly From,
+    DateOnly To,
+    string Wing,
+    decimal TotalStockInCost,
+    decimal TotalStockOutCost,
+    decimal TotalNonStockCost,
+    decimal GrandTotalCost,
+    int TotalTransactions,
+    int UniqueItemCount,
+    IReadOnlyList<InventoryReportItemDto> Items,
+    IReadOnlyList<InventoryReportDailyDto> DailyBreakdown,
+    IReadOnlyList<InventoryReportCategoryDto> CategoryBreakdown);
+

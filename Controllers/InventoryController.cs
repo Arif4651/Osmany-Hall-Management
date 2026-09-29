@@ -731,6 +731,125 @@ public sealed class InventoryController(
             batch.Note)).ToList();
     }
 
+    // ── Inventory Report ──────────────────────────────────────────────────────
+    /// <summary>
+    /// Aggregated inventory report for a given date range. Returns per-item totals,
+    /// daily cost breakdown, and category breakdown — everything the admin report tab needs.
+    /// </summary>
+    [HttpGet("report")]
+    [RequirePermission(MenuKeys.AdminInventory, PermissionActions.View)]
+    public async Task<ActionResult<InventoryReportDto>> GetReport(
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] string? wing = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (from > to) return BadRequest(new { message = "Start date cannot be after end date." });
+
+        var selectedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
+
+        var transactions = await db.StockTransactions.AsNoTracking()
+            .Include(x => x.Item)
+            .Where(x => x.Item != null
+                && x.Item.Wing == selectedWing
+                && x.Date >= from
+                && x.Date <= to)
+            .ToListAsync(cancellationToken);
+
+        // ── Per-item aggregation ──────────────────────────────────────────────
+        var itemGroups = transactions
+            .Where(x => x.Item != null)
+            .GroupBy(x => x.ItemId)
+            .Select(g =>
+            {
+                var first = g.First().Item!;
+                var stockIn = g.Where(t => t.TransactionType == "in");
+                var stockOut = g.Where(t => t.TransactionType == "out");
+                return new InventoryReportItemDto(
+                    first.Id,
+                    first.Item,
+                    first.Category,
+                    first.Unit,
+                    first.IsStored,
+                    stockIn.Sum(t => t.Quantity),
+                    stockIn.Sum(t => t.TotalCost),
+                    stockOut.Sum(t => t.Quantity),
+                    stockOut.Sum(t => t.TotalCost),
+                    g.Count());
+            })
+            .OrderByDescending(x => x.TotalStockInCost + x.TotalStockOutCost)
+            .ToList();
+
+        // ── Daily breakdown ───────────────────────────────────────────────────
+        var dailyRows = transactions
+            .GroupBy(x => x.Date)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var dayItems = g
+                    .Where(t => t.Item != null)
+                    .GroupBy(t => new { t.ItemId, MealPeriod = string.IsNullOrWhiteSpace(t.MealPeriod) ? "General" : t.MealPeriod })
+                    .Select(ig =>
+                    {
+                        var firstItem = ig.First().Item!;
+                        var dayIn = ig.Where(t => t.TransactionType == "in");
+                        var dayOut = ig.Where(t => t.TransactionType == "out");
+                        return new InventoryReportDailyItemDto(
+                            firstItem.Id,
+                            firstItem.Item,
+                            firstItem.Category,
+                            firstItem.Unit,
+                            firstItem.IsStored,
+                            ig.Key.MealPeriod,
+                            dayIn.Sum(t => t.Quantity),
+                            dayIn.Sum(t => t.TotalCost),
+                            dayOut.Sum(t => t.Quantity),
+                            dayOut.Sum(t => t.TotalCost),
+                            ig.Count());
+                    })
+                    .OrderBy(x => x.MealPeriod)
+                    .ThenBy(x => x.ItemName)
+                    .ToList();
+
+                return new InventoryReportDailyDto(
+                    g.Key,
+                    g.Where(t => t.TransactionType == "in" && (t.Item?.IsStored ?? true)).Sum(t => t.TotalCost),
+                    g.Where(t => t.TransactionType == "out" && (t.Item?.IsStored ?? true)).Sum(t => t.TotalCost),
+                    g.Where(t => t.TransactionType == "out" && !(t.Item?.IsStored ?? true)).Sum(t => t.TotalCost),
+                    g.Count(),
+                    dayItems);
+            })
+            .ToList();
+
+        // ── Category breakdown ────────────────────────────────────────────────
+        var categoryRows = transactions
+            .Where(x => x.Item != null)
+            .GroupBy(x => x.Item!.Category)
+            .Select(g => new InventoryReportCategoryDto(
+                g.Key,
+                g.Sum(t => t.TotalCost),
+                g.Select(t => t.ItemId).Distinct().Count(),
+                g.Count()))
+            .OrderByDescending(x => x.TotalCost)
+            .ToList();
+
+        var totalStockInCost = transactions.Where(t => t.TransactionType == "in" && (t.Item?.IsStored ?? true)).Sum(t => t.TotalCost);
+        var totalStockOutCost = transactions.Where(t => t.TransactionType == "out" && (t.Item?.IsStored ?? true)).Sum(t => t.TotalCost);
+        var totalNonStockCost = transactions.Where(t => t.TransactionType == "out" && !(t.Item?.IsStored ?? true)).Sum(t => t.TotalCost);
+
+        return new InventoryReportDto(
+            from, to, selectedWing,
+            totalStockInCost,
+            totalStockOutCost,
+            totalNonStockCost,
+            totalStockInCost + totalStockOutCost + totalNonStockCost,
+            transactions.Count,
+            transactions.Select(t => t.ItemId).Distinct().Count(),
+            itemGroups,
+            dailyRows,
+            categoryRows);
+    }
+
     private static InventoryItemFinancialDto ToDto(InventoryItem x)
         => new(x.Id, x.Item, x.Wing, x.Category, x.Unit, x.LinkedOptionId, x.CurrentStockQuantity, x.CurrentWac, x.CurrentStockQuantity * x.CurrentWac, x.IsDeleted, x.IsStored);
 
