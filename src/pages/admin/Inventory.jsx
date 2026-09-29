@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronDown, Flame, Pencil, Plus, Search, Trash2, Package, Loader2, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import InventoryReport from './InventoryReport';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
@@ -16,6 +17,7 @@ const tabs = [
   { id: 'out', label: 'Stock Out' },
   { id: 'non-stock', label: 'Non-Stock' },
   { id: 'items', label: 'Items' },
+  { id: 'reports', label: 'Reports' },
 ];
 
 const MEAL_SEGMENTS = [
@@ -806,8 +808,12 @@ export default function Inventory() {
         ))}
       </nav>
 
-      {/* ── Items tab ──────────────────────────────────────────────────────── */}
-      {activeTab === 'items' ? (
+      {/* ── Reports tab ─────────────────────────────────────────────────────── */}
+      {activeTab === 'reports' ? (
+        <section className="stock-report-view">
+          <InventoryReport gender={gender} />
+        </section>
+      ) : activeTab === 'items' ? (
         <section className="stock-items-view">
           <div className="stock-items-toolbar">
             <div><Search size={17} /><input placeholder="Search items..." value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} /></div>

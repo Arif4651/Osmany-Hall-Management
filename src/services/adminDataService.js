@@ -13,6 +13,7 @@ export const adminDataService = {
   // Open batches for every stored item in the wing, in one request.
   getAllInventoryBatches: async (wing) => apiRequest(`/inventory/batches${toQueryString({ wing })}`),
   getInventoryLedger: async ({ itemId, from, to, wing }) => apiRequest(`/inventory/transactions${toQueryString({ itemId, from, to, wing })}`),
+  getInventoryReport: async ({ from, to, wing }) => apiRequest(`/inventory/report${toQueryString({ from, to, wing })}`),
   createInventoryMovement: async (payload) => apiRequest('/inventory/transactions', { method: 'POST', body: JSON.stringify(payload) }),
   createBulkInventoryMovements: async (payload) => apiRequest('/inventory/transactions/bulk', { method: 'POST', body: JSON.stringify(payload) }),
   updateInventoryMovement: async (id, payload) => apiRequest(`/inventory/transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
