@@ -611,13 +611,31 @@ public sealed class BillingCalculationService(
             }
         }
 
-        // Service bill is set independently per wing — a Male wing admin's entry never charges
-        // Female wing students, and vice versa.
-        var serviceByWing = await db.ServiceBills.AsNoTracking()
+        // Service bill is set per (wing, hallName). A hall-specific entry takes priority over a
+        // wing-wide (HallName=null) fallback, preserving backward compatibility with existing data
+        // that was stored without a HallName.
+        var serviceBillRows = await db.ServiceBills.AsNoTracking()
             .Where(x => x.Month == month && x.Year == year)
-            .GroupBy(x => x.Wing)
-            .Select(g => new { Wing = g.Key, Amount = g.OrderByDescending(x => x.Version).Select(x => x.AmountPerStudent).First() })
-            .ToDictionaryAsync(x => x.Wing, x => x.Amount, cancellationToken);
+            .ToListAsync(cancellationToken);
+        // Build a lookup keyed by (Wing, HallName ?? "") → latest version's amount (case-insensitive).
+        var serviceByHall = serviceBillRows
+            .GroupBy(x => (Wing: (x.Wing ?? string.Empty).Trim().ToLowerInvariant(), Hall: (x.HallName ?? string.Empty).Trim().ToLowerInvariant()))
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.Version).First().AmountPerStudent);
+        // Helper: resolve the service amount for a student.
+        decimal ResolveService(Student s)
+        {
+            var studentWing = (s.Gender ?? string.Empty).Trim().ToLowerInvariant();
+            var studentHall = (s.HallName ?? string.Empty).Trim().ToLowerInvariant();
+            // Exact match: (wing, hallName)
+            if (!string.IsNullOrEmpty(studentHall) && serviceByHall.TryGetValue((studentWing, studentHall), out var exact))
+                return exact;
+            // Fallback: wing-wide bill with no hall specified (legacy rows)
+            if (serviceByHall.TryGetValue((studentWing, string.Empty), out var fallback))
+                return fallback;
+            return 0m;
+        }
         var previous = from.AddMonths(-1);
         var hasPreviousCache = await db.MonthlyBillCache.AsNoTracking()
             .AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken);
@@ -652,7 +670,7 @@ public sealed class BillingCalculationService(
             var carried = previousDue.GetValueOrDefault(student.Id);
             var subsidy = subsidyTotals.GetValueOrDefault(student.Id);
             var othersBill = othersBillTotals.GetValueOrDefault(student.Id);
-            var service = serviceByWing.GetValueOrDefault(student.Gender);
+            var service = ResolveService(student);
             // A manual correction is one more charge line, not an override of the result: it goes
             // into the total alongside everything else, so the components still add up to what the
             // student is shown and payments still work the balance down.

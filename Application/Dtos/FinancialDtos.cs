@@ -59,7 +59,7 @@ public sealed record MonthlyBillDto(
     int Month, int Year, decimal ServiceBill, decimal MonthlyBill, decimal DswSubsidy, decimal GuestMealBill,
     decimal CarriedDue, decimal DueBill, decimal TotalBill, string Status, bool IsOverridden, bool IsLocked,
     decimal OthersBill = 0m, decimal Adjustment = 0m, decimal TotalPaid = 0m);
-public sealed record SaveServiceBillRequest(int Month, int Year, decimal AmountPerStudent, string? Wing = null);
+public sealed record SaveServiceBillRequest(int Month, int Year, decimal AmountPerStudent, string? Wing = null, string? HallName = null, List<string>? HallNames = null);
 
 public sealed record PaymentCategoryDto(Guid Id, string Name);
 public sealed record PaymentSubmissionDto(

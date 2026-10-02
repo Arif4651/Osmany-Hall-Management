@@ -78,6 +78,11 @@ public sealed class ServiceBill : Entity
     public int Month { get; set; }
     public int Year { get; set; }
     public string Wing { get; set; } = string.Empty;
+    /// <summary>
+    /// When set, the service bill applies only to students whose HallName matches this value.
+    /// When null/empty, it applies to all students of the wing (legacy behaviour).
+    /// </summary>
+    public string? HallName { get; set; }
     public decimal AmountPerStudent { get; set; }
     public bool IsLocked { get; set; }
     public int Version { get; set; } = 1;

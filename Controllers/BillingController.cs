@@ -234,17 +234,40 @@ public sealed class BillingController(
     {
         if (request.Month is < 1 or > 12 || request.AmountPerStudent < 0m) return BadRequest(new { message = "Invalid service bill." });
         var wing = await currentUser.GetManagedWingAsync(request.Wing, cancellationToken);
-        var version = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year && x.Wing == wing)
-            .Select(x => (int?)x.Version).MaxAsync(cancellationToken) ?? 0;
-        db.ServiceBills.Add(new ServiceBill
+        var targetHalls = new List<string?>();
+        if (request.HallNames != null && request.HallNames.Count > 0)
         {
-            Month = request.Month,
-            Year = request.Year,
-            Wing = wing,
-            AmountPerStudent = request.AmountPerStudent,
-            Version = version + 1,
-            AddedById = currentUser.UserId,
-        });
+            targetHalls = request.HallNames
+                .Where(h => !string.IsNullOrWhiteSpace(h))
+                .Select(h => (string?)h.Trim())
+                .Distinct()
+                .ToList();
+        }
+        else if (!string.IsNullOrWhiteSpace(request.HallName))
+        {
+            targetHalls.Add(request.HallName.Trim());
+        }
+        else
+        {
+            targetHalls.Add(null);
+        }
+
+        foreach (var hallName in targetHalls)
+        {
+            var version = await db.ServiceBills.Where(x => x.Month == request.Month && x.Year == request.Year && x.Wing == wing
+                    && ((hallName == null && x.HallName == null) || x.HallName == hallName))
+                .Select(x => (int?)x.Version).MaxAsync(cancellationToken) ?? 0;
+            db.ServiceBills.Add(new ServiceBill
+            {
+                Month = request.Month,
+                Year = request.Year,
+                Wing = wing,
+                HallName = hallName,
+                AmountPerStudent = request.AmountPerStudent,
+                Version = version + 1,
+                AddedById = currentUser.UserId,
+            });
+        }
         await db.SaveChangesAsync(cancellationToken);
         await billing.RecalculateForwardAsync(request.Month, request.Year, cancellationToken);
         return NoContent();
@@ -252,10 +275,25 @@ public sealed class BillingController(
 
     [HttpDelete("service-bills")]
     [RequirePermission(MenuKeys.AdminBilling, PermissionActions.Delete)]
-    public async Task<IActionResult> DeleteServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, [FromQuery] string? hallName, [FromQuery] string? hallNames, CancellationToken cancellationToken)
     {
         var resolvedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
-        var rows = await db.ServiceBills.Where(x => x.Month == month && x.Year == year && x.Wing == resolvedWing).ToListAsync(cancellationToken);
+        var targetHalls = new HashSet<string?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(hallNames))
+        {
+            foreach (var h in hallNames.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                targetHalls.Add(h);
+        }
+        else if (!string.IsNullOrWhiteSpace(hallName))
+        {
+            targetHalls.Add(hallName.Trim());
+        }
+
+        var allRows = await db.ServiceBills.Where(x => x.Month == month && x.Year == year && x.Wing == resolvedWing).ToListAsync(cancellationToken);
+        var rows = targetHalls.Count > 0
+            ? allRows.Where(x => x.HallName != null && targetHalls.Contains(x.HallName)).ToList()
+            : allRows.Where(x => x.HallName == null).ToList();
+
         db.ServiceBills.RemoveRange(rows);
         await db.SaveChangesAsync(cancellationToken);
         await billing.RecalculateForwardAsync(month, year, cancellationToken);
@@ -264,15 +302,27 @@ public sealed class BillingController(
 
     [HttpGet("service-bills")]
     [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
-    public async Task<ActionResult<decimal>> GetServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> GetServiceBill([FromQuery] int month, [FromQuery] int year, [FromQuery] string? wing, [FromQuery] string? hallName, CancellationToken cancellationToken)
     {
         var resolvedWing = await currentUser.GetManagedWingAsync(wing, cancellationToken);
-        var service = await db.ServiceBills.AsNoTracking()
+        var trimmedHall = string.IsNullOrWhiteSpace(hallName) ? null : hallName.Trim();
+        var allServiceBills = await db.ServiceBills.AsNoTracking()
             .Where(x => x.Month == month && x.Year == year && x.Wing == resolvedWing)
-            .OrderByDescending(x => x.Version)
-            .Select(x => x.AmountPerStudent)
-            .FirstOrDefaultAsync(cancellationToken);
-        return Ok(service);
+            .GroupBy(x => x.HallName ?? string.Empty)
+            .Select(g => g.OrderByDescending(x => x.Version).First())
+            .ToDictionaryAsync(x => x.HallName ?? string.Empty, x => x.AmountPerStudent, cancellationToken);
+
+        var serviceAmount = 0m;
+        if (trimmedHall != null && allServiceBills.TryGetValue(trimmedHall, out var exactAmt))
+        {
+            serviceAmount = exactAmt;
+        }
+        else if (allServiceBills.TryGetValue(string.Empty, out var fallbackAmt))
+        {
+            serviceAmount = fallbackAmt;
+        }
+
+        return Ok(new { amount = serviceAmount, hallName = trimmedHall, byHall = allServiceBills });
     }
 
     private static MonthlyBillDto ToDto(MonthlyBillCache x, bool overridden)

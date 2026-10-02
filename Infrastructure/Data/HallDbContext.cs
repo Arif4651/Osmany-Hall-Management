@@ -389,8 +389,9 @@ public sealed class HallDbContext(DbContextOptions<HallDbContext> options) : DbC
                 table.HasCheckConstraint("ck_service_bills_month", "\"Month\" BETWEEN 1 AND 12");
                 table.HasCheckConstraint("ck_service_bills_amount", "\"AmountPerStudent\" >= 0");
             });
-            entity.HasIndex(x => new { x.Month, x.Year, x.Wing, x.Version }).IsUnique();
+            entity.HasIndex(x => new { x.Month, x.Year, x.Wing, x.HallName, x.Version }).IsUnique();
             entity.Property(x => x.Wing).HasMaxLength(10).IsRequired();
+            entity.Property(x => x.HallName).HasMaxLength(100);
             entity.Property(x => x.AmountPerStudent).HasPrecision(12, 4);
             entity.HasOne(x => x.AddedBy).WithMany().HasForeignKey(x => x.AddedById).OnDelete(DeleteBehavior.Restrict);
         });
