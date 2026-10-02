@@ -12,6 +12,7 @@ import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import OthersBillPanel from '../../components/financial/OthersBillPanel';
 import { MENU_KEYS } from '../../services/permissionService';
+import { HALL_NAMES } from '../../types/student.types';
 import { adminDataService } from '../../services/adminDataService';
 import { financialService } from '../../services/financialService';
 import { formatCurrency, moneyInput, todayLocal } from '../../utils/formatters';
@@ -59,6 +60,27 @@ export default function BillingManagement() {
   const lockedWing = user?.wing || null;
   const [filters, setFilters] = useState(initialFilters);
   const [serviceWing, setServiceWing] = useState(() => lockedWing || 'Male');
+  const [markedHalls, setMarkedHalls] = useState(() => (lockedWing === 'Female' ? ['Osmany Hall-Female'] : ['Osmany Hall-Male']));
+
+  const availableHalls = useMemo(() => {
+    return HALL_NAMES.filter((h) => serviceWing === 'Female' ? h === 'Osmany Hall-Female' : h !== 'Osmany Hall-Female');
+  }, [serviceWing]);
+
+  const allHallsMarked = availableHalls.length > 0 && availableHalls.every((h) => markedHalls.includes(h));
+
+  const toggleSelectAllHalls = () => {
+    if (allHallsMarked) {
+      setMarkedHalls([]);
+    } else {
+      setMarkedHalls([...availableHalls]);
+    }
+  };
+
+  const toggleHall = (h) => {
+    setMarkedHalls((prev) =>
+      prev.includes(h) ? prev.filter((item) => item !== h) : [...prev, h]
+    );
+  };
   const [serviceAmount, setServiceAmount] = useState('');
   const [hasServiceBill, setHasServiceBill] = useState(false);
   const [editingSubsidy, setEditingSubsidy] = useState(null);
@@ -106,11 +128,13 @@ export default function BillingManagement() {
     if (lockedWing) {
       setSubsidyForm((current) => ({ ...current, wing: lockedWing }));
       setServiceWing(lockedWing);
+      setMarkedHalls(lockedWing === 'Female' ? ['Osmany Hall-Female'] : ['Osmany Hall-Male']);
       return;
     }
     if (filters.gender === 'Male' || filters.gender === 'Female') {
       setSubsidyForm((current) => ({ ...current, wing: filters.gender }));
       setServiceWing(filters.gender);
+      setMarkedHalls(filters.gender === 'Female' ? ['Osmany Hall-Female'] : ['Osmany Hall-Male']);
     }
   }, [filters.gender, lockedWing]);
 
@@ -127,14 +151,16 @@ export default function BillingManagement() {
     
     let sBillAmount = '';
     let hasSBill = false;
+    let byHallBills = {};
     try {
       const sBill = await adminDataService.getServiceBill({
         month: parseInt(filters.month, 10),
         year: parseInt(filters.year, 10),
         wing: serviceWing,
       });
-      if (sBill > 0) {
-        sBillAmount = String(sBill);
+      byHallBills = sBill?.byHall || {};
+      if (sBill?.amount > 0) {
+        sBillAmount = String(sBill.amount);
         hasSBill = true;
       }
     } catch {
@@ -161,11 +187,12 @@ export default function BillingManagement() {
       // ignore
     }
 
-    return { rows: billingRows, serviceAmount: sBillAmount, hasServiceBill: hasSBill, dswSubsidies: subsidies || [] };
+    return { rows: billingRows, serviceAmount: sBillAmount, hasServiceBill: hasSBill, byHall: byHallBills, dswSubsidies: subsidies || [] };
   }, { ttl: 30_000 });
 
   const rows = combinedData?.rows || [];
   const dswSubsidies = combinedData?.dswSubsidies || [];
+  const hallBillsMap = combinedData?.byHall || {};
 
   // Search & Sorting States
   const [searchQuery, setSearchQuery] = useState('');
@@ -317,14 +344,22 @@ export default function BillingManagement() {
   }, [rows, searchQuery, sortField, sortAsc]);
 
   useEffect(() => {
-    if (combinedData) {
-      setServiceAmount(combinedData.serviceAmount || '');
-      setHasServiceBill(combinedData.hasServiceBill || false);
-    } else {
-      setServiceAmount('');
-      setHasServiceBill(false);
+    if (markedHalls.length === 1) {
+      const amt = hallBillsMap[markedHalls[0]];
+      if (amt !== undefined && amt > 0) {
+        setServiceAmount(String(amt));
+      } else {
+        setServiceAmount('');
+      }
+    } else if (markedHalls.length > 1) {
+      const amounts = markedHalls.map((h) => hallBillsMap[h]).filter((a) => a !== undefined && a > 0);
+      if (amounts.length === markedHalls.length && new Set(amounts).size === 1) {
+        setServiceAmount(String(amounts[0]));
+      }
     }
-  }, [combinedData]);
+  }, [markedHalls, hallBillsMap]);
+
+  const hasMarkedServiceBill = markedHalls.some((h) => (hallBillsMap[h] || 0) > 0);
 
   useEffect(() => {
     if (loadError) {
@@ -339,7 +374,12 @@ export default function BillingManagement() {
   }, [refresh]);
 
   const deleteServiceBill = async () => {
-    if (!window.confirm(`Are you sure you want to delete the ${serviceWing} wing service bill for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
+    if (markedHalls.length === 0) {
+      toast.error('Please mark at least one hall first.');
+      return;
+    }
+    const hallsLabel = markedHalls.join(', ');
+    if (!window.confirm(`Are you sure you want to delete the service bill for marked hall(s) [${hallsLabel}] for ${filters.month}/${filters.year}? This will recalculate all bills for this month.`)) return;
     setSavingService(true);
     setError("");
     try {
@@ -347,14 +387,14 @@ export default function BillingManagement() {
         month: parseInt(filters.month, 10),
         year: parseInt(filters.year, 10),
         wing: serviceWing,
+        hallNames: markedHalls,
       });
       setServiceAmount('');
-      setHasServiceBill(false);
       invalidate('admin-billing-combined');
       await load();
       toast.success(
         'Service bill deleted',
-        `${serviceWing} wing · ${filters.month}/${filters.year} · all bills for the month were recalculated.`,
+        `${serviceWing} wing · [${hallsLabel}] · ${filters.month}/${filters.year} · all bills for the month were recalculated.`,
       );
     } catch (err) {
       toast.error('Could not delete service bill', err?.message);
@@ -486,6 +526,10 @@ export default function BillingManagement() {
 
   const saveService = async (event) => {
     event.preventDefault();
+    if (markedHalls.length === 0) {
+      toast.error('Please mark at least one hall to apply the service bill.');
+      return;
+    }
     setSavingService(true);
     try {
       await adminDataService.saveServiceBill({
@@ -493,12 +537,14 @@ export default function BillingManagement() {
         year: parseInt(filters.year, 10),
         amountPerStudent: moneyInput(serviceAmount),
         wing: serviceWing,
+        hallNames: markedHalls,
       });
       invalidate('admin-billing-combined');
       await load();
+      const hallsLabel = markedHalls.join(', ');
       toast.success(
         'Service bill saved',
-        `${formatCurrency(serviceAmount)} per student · ${serviceWing} wing · ${filters.month}/${filters.year}.`,
+        `${formatCurrency(serviceAmount)} per student · [${hallsLabel}] · ${filters.month}/${filters.year}.`,
       );
     } catch (saveError) {
       toast.error('Could not save service bill', saveError?.message);
@@ -662,20 +708,98 @@ export default function BillingManagement() {
                     placeholder="Enter amount per student"
                   />
                 </label>
+                <div className="billing-control-field is-full">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                    <strong style={{ fontSize: '0.85rem' }}>
+                      Mark Halls to Apply Service Bill <span style={{ color: 'var(--muted, #64748b)', fontWeight: 'normal', fontSize: '0.78rem' }}>({markedHalls.length} marked)</span>
+                    </strong>
+                    {availableHalls.length > 1 && (
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.8rem',
+                          background: 'none',
+                          border: 'none',
+                          color: '#2563eb',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          padding: '0.1rem 0.4rem',
+                          borderRadius: '4px',
+                        }}
+                        onClick={toggleSelectAllHalls}
+                      >
+                        {allHallsMarked ? 'Unmark All' : 'Mark All'}
+                      </button>
+                    )}
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                    gap: '0.5rem',
+                    padding: '0.65rem',
+                    background: '#f8fafc',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                  }}>
+                    {availableHalls.map((h) => {
+                      const isMarked = markedHalls.includes(h);
+                      const currentAmt = hallBillsMap[h] ?? 0;
+                      return (
+                        <label
+                          key={h}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.65rem',
+                            padding: '0.55rem 0.75rem',
+                            background: isMarked ? '#eff6ff' : '#ffffff',
+                            border: `1.5px solid ${isMarked ? '#2563eb' : '#cbd5e1'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            transition: 'all 0.15s ease',
+                            boxShadow: isMarked ? '0 1px 3px rgba(37,99,235,0.12)' : 'none',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isMarked}
+                            onChange={() => toggleHall(h)}
+                            style={{
+                              accentColor: '#2563eb',
+                              width: '17px',
+                              height: '17px',
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.85rem', color: isMarked ? '#1d4ed8' : '#1e293b' }}>
+                              {h}
+                            </span>
+                            <span style={{ fontSize: '0.74rem', color: currentAmt > 0 ? '#16a34a' : '#94a3b8' }}>
+                              {currentAmt > 0 ? `Current: ৳${formatCurrency(currentAmt)}` : 'No bill set'}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
               <div className="billing-control-footer">
                 <div className="inline-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button className="primary-action" type="submit" disabled={savingService}>
-                    {savingService ? 'Saving...' : 'Save Service Bill'}
+                  <button className="primary-action" type="submit" disabled={savingService || markedHalls.length === 0}>
+                    {savingService ? 'Saving...' : `Save Service Bill (${markedHalls.length} marked)`}
                   </button>
-                  {hasServiceBill && (
+                  {hasMarkedServiceBill && (
                     <button
                       type="button"
                       className="danger-action"
                       onClick={deleteServiceBill}
                       disabled={savingService}
                     >
-                      Delete Service Bill
+                      Delete Service Bill ({markedHalls.filter(h => (hallBillsMap[h] || 0) > 0).length})
                     </button>
                   )}
                   <button type="button" onClick={exportCsv}>CSV</button>
