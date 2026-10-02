@@ -20,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
 const now = new Date();
-const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All' };
+const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All', hallName: 'all' };
 const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Room No', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
 const tailHeaders = ['Due Bill', 'Total Bill', 'Status'];
 const emptySubsidyForm = { wing: 'Male', subsidyAmount: '', date: todayLocal(), mealPeriod: 'breakfast', notes: '' };
@@ -65,6 +65,13 @@ export default function BillingManagement() {
   const availableHalls = useMemo(() => {
     return HALL_NAMES.filter((h) => serviceWing === 'Female' ? h === 'Osmany Hall-Female' : h !== 'Osmany Hall-Female');
   }, [serviceWing]);
+
+  const filterWing = lockedWing || filters.gender;
+  const filterHallOptions = useMemo(() => {
+    if (filterWing === 'Female') return HALL_NAMES.filter((h) => h === 'Osmany Hall-Female');
+    if (filterWing === 'Male') return HALL_NAMES.filter((h) => h !== 'Osmany Hall-Female');
+    return HALL_NAMES;
+  }, [filterWing]);
 
   const allHallsMarked = availableHalls.length > 0 && availableHalls.every((h) => markedHalls.includes(h));
 
@@ -128,17 +135,15 @@ export default function BillingManagement() {
     if (lockedWing) {
       setSubsidyForm((current) => ({ ...current, wing: lockedWing }));
       setServiceWing(lockedWing);
-      setMarkedHalls(lockedWing === 'Female' ? ['Osmany Hall-Female'] : ['Osmany Hall-Male']);
       return;
     }
     if (filters.gender === 'Male' || filters.gender === 'Female') {
       setSubsidyForm((current) => ({ ...current, wing: filters.gender }));
       setServiceWing(filters.gender);
-      setMarkedHalls(filters.gender === 'Female' ? ['Osmany Hall-Female'] : ['Osmany Hall-Male']);
     }
   }, [filters.gender, lockedWing]);
 
-  const combinedKey = `admin-billing-combined-${filters.month}-${filters.year}-${filters.status}-${lockedWing || filters.gender}-${serviceWing}`;
+  const combinedKey = `admin-billing-combined-${filters.month}-${filters.year}-${filters.status}-${lockedWing || filters.gender}-${filters.hallName || 'all'}-${serviceWing}`;
 
   const {
     data: combinedData = null,
@@ -300,6 +305,11 @@ export default function BillingManagement() {
   const filteredAndSortedRows = useMemo(() => {
     let list = [...rows];
 
+    // Hall filter
+    if (filters.hallName && filters.hallName !== 'all') {
+      list = list.filter((r) => r.hallName === filters.hallName);
+    }
+
     // Search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -308,6 +318,7 @@ export default function BillingManagement() {
         r.rollNumber?.toLowerCase().includes(q) ||
         r.hallId?.toLowerCase().includes(q) ||
         r.roomNo?.toLowerCase().includes(q) ||
+        r.hallName?.toLowerCase().includes(q) ||
         String(r.status || '').toLowerCase().includes(q)
       );
     }
@@ -342,6 +353,22 @@ export default function BillingManagement() {
 
     return list;
   }, [rows, searchQuery, sortField, sortAsc]);
+
+  // When service bills data is loaded, automatically mark all halls that currently have an active service bill for this month
+  useEffect(() => {
+    if (!combinedData) return;
+    const hallsWithBills = availableHalls.filter((h) => (hallBillsMap[h] || 0) > 0);
+    if (hallsWithBills.length > 0) {
+      setMarkedHalls(hallsWithBills);
+      const amounts = hallsWithBills.map((h) => hallBillsMap[h]).filter((a) => a !== undefined && a > 0);
+      if (amounts.length > 0) {
+        setServiceAmount(String(amounts[0]));
+      }
+    } else {
+      setMarkedHalls(availableHalls.length === 1 ? availableHalls : []);
+      setServiceAmount('');
+    }
+  }, [combinedData, availableHalls]);
 
   useEffect(() => {
     if (markedHalls.length === 1) {
@@ -631,6 +658,14 @@ export default function BillingManagement() {
         />
         <label>Status<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option>All</option><option>Unpaid</option><option>Partial Paid</option><option>Paid</option><option>Credit</option></select></label>
         <label>Wing<select value={lockedWing || filters.gender} disabled={Boolean(lockedWing)} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>{!lockedWing ? <option>All</option> : null}<option>Male</option><option>Female</option></select></label>
+        <label>Hall
+          <select value={filters.hallName || 'all'} onChange={(e) => setFilters({ ...filters, hallName: e.target.value })}>
+            <option value="all">All Halls</option>
+            {filterHallOptions.map((h) => (
+              <option key={h} value={h}>{h}</option>
+            ))}
+          </select>
+        </label>
         <button className="primary-action" onClick={load} disabled={loading}>Generate</button>
         <button type="button" className="btn btn-secondary" onClick={recalculateMonth} disabled={loading || isRecalculating}>
           <RefreshCcw size={15} /> {isRecalculating ? 'Recalculating…' : 'Recalculate'}

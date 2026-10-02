@@ -14,6 +14,7 @@ import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { adminDataService } from '../../services/adminDataService';
 import { formatCurrency, formatBalance, isCredit, moneyInput } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { HALL_NAMES } from '../../types/student.types';
 
 const now = new Date();
 
@@ -29,6 +30,7 @@ export default function DueBill() {
   // (that access still applies on Payment Verification). Only a wing-less admin/super_admin picks.
   const isWingLocked = Boolean(user?.wing);
   const [gender, setGender] = useState(() => user?.wing || 'Male');
+  const [hallFilter, setHallFilter] = useState('all');
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [editing, setEditing] = useState(null);
   const [adjustment, setAdjustment] = useState({ amount: '', note: '' });
@@ -37,6 +39,16 @@ export default function DueBill() {
   // page-level banner, so an error reported up there is invisible until the admin closes the form.
   const [modalError, setModalError] = useState('');
   const [highlightedId, setHighlightedId] = useState(null);
+
+  const availableHalls = useMemo(() => {
+    if (gender === 'Female') return HALL_NAMES.filter((h) => h === 'Osmany Hall-Female');
+    if (gender === 'Male') return HALL_NAMES.filter((h) => h !== 'Osmany Hall-Female');
+    return HALL_NAMES;
+  }, [gender]);
+
+  useEffect(() => {
+    setHallFilter('all');
+  }, [gender]);
 
   // Filter & Search & Sort States
   const [filterAmount, setFilterAmount] = useState('');
@@ -54,7 +66,7 @@ export default function DueBill() {
     }
   };
 
-  const cacheKey = `due-rows-${period.month}-${period.year}-${gender}`;
+  const cacheKey = `due-rows-${period.month}-${period.year}-${gender}-${hallFilter}`;
 
   const {
     data: rows = [],
@@ -64,7 +76,7 @@ export default function DueBill() {
     refresh
   } = useCachedFetch(
     cacheKey,
-    () => adminDataService.getDueRows(period.month, period.year, gender),
+    () => adminDataService.getDueRows(period.month, period.year, gender, hallFilter),
     { ttl: 30_000 }
   );
 
@@ -143,6 +155,11 @@ export default function DueBill() {
   const filteredRows = useMemo(() => {
     let list = [...rows];
 
+    // Hall filter
+    if (hallFilter && hallFilter !== 'all') {
+      list = list.filter((row) => row.hallName === hallFilter);
+    }
+
     // Dues threshold filter
     if (filterCondition !== 'all') {
       const threshold = parseFloat(filterAmount);
@@ -163,7 +180,8 @@ export default function DueBill() {
         r.studentCode?.toLowerCase().includes(q) ||
         r.department?.toLowerCase().includes(q) ||
         r.mobileNumber?.toLowerCase().includes(q) ||
-        r.hallId?.toLowerCase().includes(q)
+        r.hallId?.toLowerCase().includes(q) ||
+        r.hallName?.toLowerCase().includes(q)
       );
     }
 
@@ -421,6 +439,29 @@ export default function DueBill() {
               <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>৳</span>
             </div>
           )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text)' }}>Hall:</span>
+          <select
+            value={hallFilter}
+            onChange={(e) => setHallFilter(e.target.value)}
+            style={{
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              fontSize: '0.9rem',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="all">All Halls</option>
+            {availableHalls.map((h) => (
+              <option key={h} value={h}>{h}</option>
+            ))}
+          </select>
         </div>
 
         {/* Internal Search Input */}
