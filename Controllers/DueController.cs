@@ -38,7 +38,7 @@ public sealed class DueController(
 
     [HttpGet]
     [RequirePermission(MenuKeys.AdminDue, PermissionActions.View)]
-    public async Task<IReadOnlyList<DueRowDto>> Get([FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DueRowDto>> Get([FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender, [FromQuery] string? hallName, CancellationToken cancellationToken)
     {
         if (month is < 1 or > 12) return [];
 
@@ -53,6 +53,8 @@ public sealed class DueController(
             .Where(x => x.Month == month && x.Year == year);
         var wingFilter = await currentUser.GetOwnWingFilterAsync(gender, cancellationToken);
         if (wingFilter is not null) query = query.Where(x => x.Student!.Gender == wingFilter);
+        if (!string.IsNullOrWhiteSpace(hallName) && !hallName.Equals("all", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.Student!.HallName == hallName.Trim());
         var rows = await query
             .OrderBy(x => x.Student!.StudentName)
             .Select(x => new
@@ -65,13 +67,14 @@ public sealed class DueController(
                 x.DueBill,
                 x.Student.MobileNumber,
                 x.Student.Department,
+                x.Student.HallName,
             })
             .ToListAsync(cancellationToken);
 
         return rows.Select(x => new DueRowDto(
             x.StudentId, x.StudentName, x.StudentCode,
             x.HallId, x.Gender, month, year, x.DueBill, overrideIds.Contains(x.StudentId),
-            x.MobileNumber, x.Department)).ToList();
+            x.MobileNumber, x.Department, x.HallName)).ToList();
     }
 
     [HttpPost("adjustments")]

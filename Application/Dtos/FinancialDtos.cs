@@ -58,7 +58,7 @@ public sealed record MonthlyBillDto(
     Guid StudentId, string StudentName, string RollNumber, string HallId, string RoomNo, string Gender,
     int Month, int Year, decimal ServiceBill, decimal MonthlyBill, decimal DswSubsidy, decimal GuestMealBill,
     decimal CarriedDue, decimal DueBill, decimal TotalBill, string Status, bool IsOverridden, bool IsLocked,
-    decimal OthersBill = 0m, decimal Adjustment = 0m, decimal TotalPaid = 0m);
+    decimal OthersBill = 0m, decimal Adjustment = 0m, decimal TotalPaid = 0m, string? HallName = null);
 public sealed record SaveServiceBillRequest(int Month, int Year, decimal AmountPerStudent, string? Wing = null, string? HallName = null, List<string>? HallNames = null);
 
 public sealed record PaymentCategoryDto(Guid Id, string Name);
@@ -74,7 +74,7 @@ public sealed record ReviewPaymentRequest(string Action, decimal? ApprovedAmount
 
 public sealed record DueRowDto(
     Guid StudentId, string StudentName, string StudentCode, string HallId,
-    string Gender, int Month, int Year, decimal DueBill, bool IsOverridden, string MobileNumber, string Department);
+    string Gender, int Month, int Year, decimal DueBill, bool IsOverridden, string MobileNumber, string Department, string? HallName = null);
 public sealed record SaveDueAdjustmentRequest(
     Guid StudentId, int BillingMonth, int BillingYear, decimal AdjustedAmount, string? Note);
 

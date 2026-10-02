@@ -26,7 +26,7 @@ public sealed class BillingController(
     [RequirePermission(MenuKeys.AdminBilling, PermissionActions.View)]
     public async Task<ActionResult<IReadOnlyList<MonthlyBillDto>>> GetMonthly(
         [FromQuery] int month, [FromQuery] int year, [FromQuery] string? gender,
-        [FromQuery] string? status, CancellationToken cancellationToken)
+        [FromQuery] string? status, [FromQuery] string? hallName, CancellationToken cancellationToken)
     {
         // ── Performance: read from cache first ───────────────────────────────
         // Calculates only on a cache miss, and at most once even when several admins open
@@ -45,6 +45,8 @@ public sealed class BillingController(
         // always locked to their own wing here, even if they have cross-wing Payment Verification access.
         var wingFilter = await currentUser.GetOwnWingFilterAsync(gender, cancellationToken);
         if (wingFilter is not null) query = query.Where(x => x.Student!.Gender == wingFilter);
+        if (!string.IsNullOrWhiteSpace(hallName) && !hallName.Equals("all", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.Student!.HallName == hallName.Trim());
         var rows = await query.OrderBy(x => x.Student!.StudentName).ToListAsync(cancellationToken);
         var result = rows.Select(x => ToDto(x, overrideIds.Contains(x.StudentId))).ToList();
         if (!string.IsNullOrWhiteSpace(status) && status != "All")
@@ -339,6 +341,6 @@ public sealed class BillingController(
             x.StudentId, x.Student?.StudentName ?? string.Empty, x.Student?.RollNumber ?? string.Empty,
             x.Student?.HallId ?? string.Empty, x.Student?.RoomNo ?? string.Empty, x.Student?.Gender ?? string.Empty,
             x.Month, x.Year, x.ServiceBill, x.MonthlyBill, x.DswSubsidy, x.GuestMealBill, x.CarriedDue, x.DueBill,
-            x.TotalBill, status, overridden, false, x.OthersBill, x.Adjustment, x.TotalApprovedPaid);
+            x.TotalBill, status, overridden, false, x.OthersBill, x.Adjustment, x.TotalApprovedPaid, x.Student?.HallName);
     }
 }
