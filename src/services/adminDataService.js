@@ -47,6 +47,10 @@ export const adminDataService = {
     method: 'POST',
     body: JSON.stringify({ action, approvedAmount }),
   }),
+  updatePaymentApprovedAmount: async (id, approvedAmount) => apiRequest(`/payments/${id}/approved-amount`, {
+    method: 'PUT',
+    body: JSON.stringify({ approvedAmount }),
+  }),
   getDueRows: async (month, year, gender, hallName) => apiRequest(`/due${toQueryString({ month, year, gender, hallName: hallName && hallName !== 'all' ? hallName : undefined })}`),
   saveDueAdjustment: async (payload) => apiRequest('/due/adjustments', { method: 'POST', body: JSON.stringify(payload) }),
   getDailyCost: async (month, year, gender) => apiRequest(`/daily-cost${toQueryString({ month, year, gender })}`),

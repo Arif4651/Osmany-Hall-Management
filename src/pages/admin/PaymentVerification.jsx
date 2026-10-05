@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, X, Loader2 } from 'lucide-react';
+import { Check, X, Loader2, Pencil } from 'lucide-react';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Modal from '../../components/ui/Modal';
 import Button from '../../components/ui/Button';
@@ -46,6 +46,8 @@ export default function PaymentVerification() {
   }));
   const [isBillingPeriodFilterActive, setIsBillingPeriodFilterActive] = useState(false);
   const [reviewing, setReviewing] = useState(null);
+  // true when the modal is correcting an already-approved payment rather than approving one.
+  const [isEditMode, setIsEditMode] = useState(false);
   const [approvedAmount, setApprovedAmount] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -154,11 +156,46 @@ export default function PaymentVerification() {
   };
 
   const openApproval = (row) => {
+    setIsEditMode(false);
     setReviewing(row);
     setApprovedAmount(row.submittedAmount);
   };
 
-  const approve = () => review(reviewing.id, 'approve', moneyInput(approvedAmount));
+  const openEdit = (row) => {
+    setIsEditMode(true);
+    setReviewing(row);
+    setApprovedAmount(row.approvedAmount ?? row.submittedAmount);
+  };
+
+  const saveEdit = async () => {
+    const amount = moneyInput(approvedAmount);
+    if (approvedAmount === '' || Number.isNaN(Number(amount)) || Number(amount) < 0) {
+      toast.error('Invalid amount', 'Enter a valid non-negative amount.');
+      return;
+    }
+    const row = reviewing;
+    setSubmitting(true);
+    setError('');
+    try {
+      await adminDataService.updatePaymentApprovedAmount(row.id, amount);
+      setReviewing(null);
+      setIsEditMode(false);
+      toast.success(
+        'Approved amount updated',
+        `${row?.studentName || 'Student'} · ${formatCurrency(row?.approvedAmount ?? 0)} → ${formatCurrency(amount)}. Due bill recalculated.`,
+      );
+      invalidate('admin-payments-');
+      invalidate('admin-billing-combined');
+      invalidate('due-rows-');
+      await load();
+    } catch (editError) {
+      toast.error('Could not update approved amount', editError?.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const approve = () => (isEditMode ? saveEdit() : review(reviewing.id, 'approve', moneyInput(approvedAmount)));
 
   const totalPages = paymentData?.totalPages || 1;
   const total = paymentData?.total || 0;
@@ -409,6 +446,30 @@ export default function PaymentVerification() {
                                 <X size={14} /> Reject
                               </button>
                             </div>
+                          )}
+                          {row.status === 'approved' && (
+                            <button
+                              className="edit-action"
+                              onClick={() => openEdit(row)}
+                              disabled={submitting}
+                              title="Edit approved amount"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                padding: '0.35rem 0.6rem',
+                                fontSize: '0.8rem',
+                                fontWeight: '600',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: submitting ? 'not-allowed' : 'pointer',
+                                background: '#eff6ff',
+                                color: '#1e40af',
+                                opacity: submitting ? 0.6 : 1
+                              }}
+                            >
+                              <Pencil size={14} /> Edit
+                            </button>
                           )}</td>
                       </tr>
                     );
@@ -451,15 +512,18 @@ export default function PaymentVerification() {
         onClose={() => {
           if (!submitting) setReviewing(null);
         }}
-        title="Approve Payment"
+        title={isEditMode ? 'Edit Approved Amount' : 'Approve Payment'}
       >
         <div className="payment-review-summary">
           <div><span>Student</span><strong>{reviewing?.studentName}</strong></div>
           <div><span>Submitted amount</span><strong>{formatCurrency(reviewing?.submittedAmount || 0)}</strong></div>
           <div><span>Submitted charges</span><strong>{formatCurrency(reviewing?.submittedCharge || 0)}</strong></div>
+          {isEditMode && (
+            <div><span>Currently approved</span><strong>{formatCurrency(reviewing?.approvedAmount || 0)}</strong></div>
+          )}
         </div>
         <label className="field-control">
-          <span>Amount to deduct from due bill</span>
+          <span>{isEditMode ? 'Corrected amount to deduct from due bill' : 'Amount to deduct from due bill'}</span>
           <input
             type="number"
             min="0"
@@ -473,14 +537,16 @@ export default function PaymentVerification() {
         {submitting && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
             <Loader2 size={16} className="spin-icon" />
-            <span>Processing approval and updating student billing...</span>
+            <span>{isEditMode ? 'Saving correction and recalculating student billing...' : 'Processing approval and updating student billing...'}</span>
           </div>
         )}
         <div className="payment-review-actions">
           <Button variant="secondary" onClick={() => setReviewing(null)} disabled={submitting}>Cancel</Button>
           <Button onClick={approve} disabled={submitting}>
             {submitting ? (
-              <><Loader2 size={16} className="spin-icon" /> Approving...</>
+              <><Loader2 size={16} className="spin-icon" /> {isEditMode ? 'Saving...' : 'Approving...'}</>
+            ) : isEditMode ? (
+              <><Check size={16} />Save Correction</>
             ) : (
               <><Check size={16} />Confirm Approval</>
             )}
