@@ -258,6 +258,61 @@ public sealed class PaymentsController(
         return ToDto(saved);
     }
 
+    /// <summary>
+    /// Corrects the approved amount of an already-approved payment (e.g. the admin typed the
+    /// wrong figure at approval). Bills are rebuilt from the payment's month forward so the due
+    /// balance reflects the corrected amount.
+    /// </summary>
+    [HttpPut("{id:guid}/approved-amount")]
+    [RequirePermission(MenuKeys.AdminPayments, PermissionActions.Edit)]
+    public async Task<ActionResult<PaymentSubmissionDto>> UpdateApprovedAmount(Guid id, UpdateApprovedAmountRequest request, CancellationToken cancellationToken)
+    {
+        if (request.ApprovedAmount < 0m) return BadRequest(new { message = "Approved amount cannot be negative." });
+        var newAmount = decimal.Round(request.ApprovedAmount, 2);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var row = await db.PaymentSubmissions.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (row is null) return NotFound();
+        var studentWing = await db.Students.AsNoTracking()
+            .Where(x => x.Id == row.StudentId)
+            .Select(x => x.Gender)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!await currentUser.CanManageOwnWingFinanceAsync(studentWing, cancellationToken)) return Forbid();
+        if (row.Status != "approved") return Conflict(new { message = "Only approved payments can have their amount edited." });
+
+        var oldAmount = row.ApprovedAmount;
+        if (oldAmount == newAmount) return ToDto(await Query().FirstAsync(x => x.Id == id, cancellationToken));
+
+        row.ApprovedAmount = newAmount;
+        row.ReviewedById = currentUser.UserId;
+        row.ReviewedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        try
+        {
+            await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            logger.LogError(
+                error,
+                "Payment {PaymentId} approved amount was corrected, but rebuilding the bills for {Month}/{Year} failed.",
+                row.Id, row.BillingMonth, row.BillingYear);
+        }
+
+        var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
+
+        var ctx = await BuildCtxAsync(cancellationToken);
+        await audit.LogAsync(ctx, AuditActions.Update, "PaymentSubmission", row.Id.ToString(),
+            $"Corrected approved amount from {(oldAmount ?? 0m):F2} to {newAmount:F2} BDT (TxID: {row.TransactionId}) for {saved.Student?.StudentName} ({saved.Student?.RollNumber})",
+            oldValues: new { ApprovedAmount = oldAmount },
+            newValues: new { ApprovedAmount = newAmount, TransactionId = row.TransactionId },
+            cancellationToken: CancellationToken.None);
+
+        return ToDto(saved);
+    }
+
     private IQueryable<PaymentSubmission> Query()
         => db.PaymentSubmissions.AsNoTracking().Include(x => x.Student).Include(x => x.Category);
 

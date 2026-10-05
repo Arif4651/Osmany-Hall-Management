@@ -71,6 +71,7 @@ public sealed record PaymentSubmissionDto(
 public sealed record SubmitPaymentRequest(
     Guid CategoryId, int BillingMonth, int BillingYear, decimal Amount, decimal Charges, string TransactionId);
 public sealed record ReviewPaymentRequest(string Action, decimal? ApprovedAmount);
+public sealed record UpdateApprovedAmountRequest(decimal ApprovedAmount);
 
 public sealed record DueRowDto(
     Guid StudentId, string StudentName, string StudentCode, string HallId,
