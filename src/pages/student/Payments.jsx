@@ -5,17 +5,13 @@ import { useCachedFetch } from '../../hooks/useCachedFetch';
 import { useQueryCache } from '../../context/QueryCacheContext';
 import { TableSkeleton } from '../../components/ui/PageSkeleton';
 import { financialService } from '../../services/financialService';
-import MonthYearPicker from '../../components/financial/MonthYearPicker';
 import { formatCurrency, formatDate, moneyInput } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
 
-const now = new Date();
 const months = Array.from({ length: 12 }, (_, index) => ({
   value: index + 1,
   label: new Intl.DateTimeFormat('en', { month: 'long' }).format(new Date(2000, index, 1)),
 }));
-// Payments always settle a period that has already started, so the range ends at the current year.
-const years = Array.from({ length: 3 }, (_, index) => now.getFullYear() - 2 + index);
 
 export default function Payments() {
   useDocumentTitle('Payments');
@@ -24,8 +20,6 @@ export default function Payments() {
 
   const [form, setForm] = useState({
     categoryId: '',
-    billingMonth: now.getMonth() + 1,
-    billingYear: now.getFullYear(),
     amount: '',
     charges: '',
     transactionId: '',
@@ -79,7 +73,7 @@ export default function Payments() {
       // The form resets on success, so the confirmation has to restate what was sent.
       toast.success(
         'Payment submitted',
-        `${formatCurrency(amount)} for ${months.find((m) => m.value === Number(form.billingMonth))?.label} ${form.billingYear} — awaiting admin verification.`,
+        `${formatCurrency(amount)} — awaiting admin verification. It will be applied to your oldest due first.`,
       );
     } catch (err) {
       toast.error('Could not submit payment', err?.message);
@@ -135,17 +129,6 @@ export default function Payments() {
             ))}
           </select>
         </label>
-        <div className="payment-period-field">
-          <span>Billing Period</span>
-          <MonthYearPicker
-            month={form.billingMonth}
-            year={form.billingYear}
-            minYear={years[0]}
-            maxYear={years[years.length - 1]}
-            onChange={({ month, year }) => setForm({ ...form, billingMonth: month, billingYear: year })}
-            label="Billing period"
-          />
-        </div>
         <label>
           Amount
           <input
