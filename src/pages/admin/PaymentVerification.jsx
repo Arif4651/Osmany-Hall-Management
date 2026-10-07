@@ -126,24 +126,36 @@ export default function PaymentVerification() {
     refresh();
   }, [refresh]);
 
+  const refreshBillCaches = () => {
+    invalidate('admin-payments-');
+    invalidate('admin-billing-');
+    invalidate('billing-');
+    invalidate('due-rows-');
+  };
+
   const review = async (id, action, amount = null) => {
     const row = rows.find((item) => item.id === id);
     setSubmitting(true);
     setError('');
     try {
-      await adminDataService.reviewPayment(id, action, amount);
+      const result = await adminDataService.reviewPayment(id, action, amount);
       setReviewing(null);
-      // Names the student and the amount that actually moved, so the admin can confirm they
-      // acted on the row they meant to without hunting for it again in the table.
-      toast.success(
-        action === 'approve' ? 'Payment approved' : 'Payment rejected',
-        action === 'approve'
-          ? `${row?.studentName || 'Student'} · ${formatCurrency(amount ?? row?.submittedAmount ?? 0)} deducted from the due bill.`
-          : `${row?.studentName || 'Student'}'s submission was rejected.`,
-      );
-      invalidate('admin-payments-');
-      invalidate('admin-billing-combined');
-      invalidate('due-rows-');
+      refreshBillCaches();
+      if (action === 'approve' && result?.billsRecalculated === false) {
+        toast.error(
+          'Payment approved, but bills were not updated',
+          'The approval is saved. Open Bill Management and press Recalculate to apply it oldest-first.',
+        );
+      } else {
+        // Names the student and the amount that actually moved, so the admin can confirm they
+        // acted on the row they meant to without hunting for it again in the table.
+        toast.success(
+          action === 'approve' ? 'Payment approved' : 'Payment rejected',
+          action === 'approve'
+            ? `${row?.studentName || 'Student'} · ${formatCurrency(amount ?? row?.submittedAmount ?? 0)} applied to the oldest unpaid bills.`
+            : `${row?.studentName || 'Student'}'s submission was rejected.`,
+        );
+      }
       await load();
     } catch (reviewError) {
       toast.error(
@@ -177,16 +189,21 @@ export default function PaymentVerification() {
     setSubmitting(true);
     setError('');
     try {
-      await adminDataService.updatePaymentApprovedAmount(row.id, amount);
+      const result = await adminDataService.updatePaymentApprovedAmount(row.id, amount);
       setReviewing(null);
       setIsEditMode(false);
-      toast.success(
-        'Approved amount updated',
-        `${row?.studentName || 'Student'} · ${formatCurrency(row?.approvedAmount ?? 0)} → ${formatCurrency(amount)}. Due bill recalculated.`,
-      );
-      invalidate('admin-payments-');
-      invalidate('admin-billing-combined');
-      invalidate('due-rows-');
+      refreshBillCaches();
+      if (result?.billsRecalculated === false) {
+        toast.error(
+          'Amount saved, but bills were not updated',
+          'Open Bill Management and press Recalculate to apply it oldest-first.',
+        );
+      } else {
+        toast.success(
+          'Approved amount updated',
+          `${row?.studentName || 'Student'} · ${formatCurrency(row?.approvedAmount ?? 0)} → ${formatCurrency(amount)}. Due bill recalculated.`,
+        );
+      }
       await load();
     } catch (editError) {
       toast.error('Could not update approved amount', editError?.message);
