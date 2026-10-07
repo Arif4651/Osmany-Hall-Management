@@ -143,24 +143,21 @@ public sealed class PaymentsController(
             );
         }
 
+        // Month/year mean the month the payment was SUBMITTED (hall-local), not the billing
+        // period stored on the row. Payments are allocated oldest-first, so that stored period
+        // (picked by students under the old form) no longer says which bill a payment settles.
+        var offsetHours = HallClock.UtcOffset.TotalHours;
         if (month is not null)
         {
             if (month.Value is < 1 or > 12) return BadRequest(new { message = "Month must be between 1 and 12." });
-            query = query.Where(x => x.BillingMonth == month.Value);
+            query = query.Where(x => x.SubmittedAtUtc.AddHours(offsetHours).Month == month.Value);
         }
 
         if (year is not null)
         {
             var currentYear = HallClock.Today.Year;
             if (year.Value < 2000 || year.Value > currentYear) return BadRequest(new { message = "Enter a valid billing year." });
-            query = query.Where(x => x.BillingYear == year.Value);
-        }
-
-        if (month is not null && year is not null)
-        {
-            var today = HallClock.Today;
-            if (year.Value == today.Year && month.Value > today.Month)
-                return BadRequest(new { message = "Billing period cannot be in the future." });
+            query = query.Where(x => x.SubmittedAtUtc.AddHours(offsetHours).Year == year.Value);
         }
 
         var total = await query.CountAsync(cancellationToken);

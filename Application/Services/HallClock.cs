@@ -41,6 +41,12 @@ public static class HallClock
     /// <summary>Today's calendar date at the hall.</summary>
     public static DateOnly Today => DateOnly.FromDateTime(Now);
 
+    /// <summary>
+    /// The hall's fixed offset from UTC, for translating a stored UTC instant into the hall's
+    /// calendar month inside a query. Bangladesh observes no DST, so one offset is always right.
+    /// </summary>
+    public static TimeSpan UtcOffset => HallTimeZone.BaseUtcOffset;
+
     /// <summary>The current time of day at the hall, for comparing against a cutoff.</summary>
     public static TimeOnly TimeOfDay => TimeOnly.FromDateTime(Now);
 }
