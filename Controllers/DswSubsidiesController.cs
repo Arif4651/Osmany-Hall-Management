@@ -270,7 +270,7 @@ public sealed class DswSubsidiesController(
     {
         // Forward, not just this month: a manual recalculation must also refresh every later
         // month's carried-due, or that chain silently keeps a stale figure (M6).
-        await billing.RecalculateForwardAsync(month, year, cancellationToken);
+        await billing.RecalculateFromEarliestAsync(month, year, cancellationToken);
         return NoContent();
     }
 }
