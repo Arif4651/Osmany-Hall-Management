@@ -12,9 +12,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import MonthYearPicker from '../../components/financial/MonthYearPicker';
 
-const monthNames = Array.from({ length: 12 }, (_, index) =>
-  new Intl.DateTimeFormat('en', { month: 'short' }).format(new Date(2000, index, 1)));
-
 const now = new Date();
 
 export default function PaymentVerification() {
@@ -61,44 +58,18 @@ export default function PaymentVerification() {
   const billingYear = isBillingPeriodFilterActive ? billingPeriod.year : undefined;
   const cacheKey = `admin-payments-${gender}-${statusFilter}-${searchQuery}-${billingMonth || 'all'}-${billingYear || 'all'}-${page}-${pageSize}`;
 
-  const fetchPayments = useCallback(async () => {
-    if (!isBillingPeriodFilterActive) {
-      return adminDataService.getPayments({ gender, status: statusFilter, search: searchQuery, page, pageSize });
-    }
-
-    const firstPage = await adminDataService.getPayments({
+  const fetchPayments = useCallback(
+    () => adminDataService.getPayments({
       gender,
       status: statusFilter,
       search: searchQuery,
-      page: 1,
-      pageSize: 100,
-    });
-    const allRows = [...(firstPage.items || [])];
-
-    for (let pageNumber = 2; pageNumber <= (firstPage.totalPages || 1); pageNumber += 1) {
-      const nextPage = await adminDataService.getPayments({
-        gender,
-        status: statusFilter,
-        search: searchQuery,
-        page: pageNumber,
-        pageSize: 100,
-      });
-      allRows.push(...(nextPage.items || []));
-    }
-
-    const filteredRows = allRows.filter((row) => row.billingMonth === billingMonth && row.billingYear === billingYear);
-    const start = (page - 1) * pageSize;
-    const items = filteredRows.slice(start, start + pageSize);
-    const total = filteredRows.length;
-
-    return {
-      items,
+      month: billingMonth,
+      year: billingYear,
       page,
       pageSize,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    };
-  }, [billingMonth, billingYear, gender, isBillingPeriodFilterActive, page, pageSize, searchQuery, statusFilter]);
+    }),
+    [billingMonth, billingYear, gender, page, pageSize, searchQuery, statusFilter],
+  );
 
   const {
     data: paymentData = null,
@@ -282,7 +253,7 @@ export default function PaymentVerification() {
           </select>
         </label>
         <div className="field-control" style={{ minWidth: '360px', flex: '0 1 470px' }}>
-          <span>Billing Period</span>
+          <span>Submitted Month</span>
           <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
             {isBillingPeriodFilterActive ? (
               <>
@@ -294,7 +265,7 @@ export default function PaymentVerification() {
                   minMonth={1}
                   maxMonth={now.getMonth() + 1}
                   onChange={setBillingPeriod}
-                  label="Billing period"
+                  label="Submitted month"
                 />
                 <button
                   type="button"
@@ -314,9 +285,9 @@ export default function PaymentVerification() {
                 className="btn btn-secondary"
                 onClick={() => setIsBillingPeriodFilterActive(true)}
                 style={{ minWidth: '180px', justifyContent: 'space-between', padding: '0.72rem 0.9rem' }}
-                title="Filter by billing period"
+                title="Filter by the month the payment was submitted"
               >
-                All Periods
+                All Months
               </button>
             )}
           </div>
@@ -332,7 +303,7 @@ export default function PaymentVerification() {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', padding: '0.75rem' }}>Student Info</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Billing Period</th>
+                  <th style={{ textAlign: 'left', padding: '0.75rem' }}>Applied To</th>
                   <th style={{ textAlign: 'right', padding: '0.75rem' }}>Amount</th>
                   <th style={{ textAlign: 'right', padding: '0.75rem' }}>Charges</th>
                   <th style={{ textAlign: 'right', padding: '0.75rem' }}>Approved Amount</th>
@@ -381,8 +352,8 @@ export default function PaymentVerification() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="billing-cell" data-label="Billing Period" style={{ padding: '0.75rem', textAlign: 'left' }}>
-                          {monthNames[row.billingMonth - 1]} {row.billingYear}
+                        <td className="billing-cell" data-label="Applied To" style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--muted)', fontSize: '0.85rem' }}>
+                          {row.status === 'approved' ? 'Oldest unpaid bill first' : '—'}
                         </td>
                         <td className="amount-cell" data-label="Amount" style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
                           {formatCurrency(row.submittedAmount)}
