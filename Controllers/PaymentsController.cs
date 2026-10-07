@@ -65,14 +65,11 @@ public sealed class PaymentsController(
     public async Task<ActionResult<PaymentSubmissionDto>> Submit(SubmitPaymentRequest request, CancellationToken cancellationToken)
     {
         var studentId = await currentUser.GetStudentIdAsync(cancellationToken);
-        // Bounded the same way a billing period is bounded elsewhere (BillingCalculationService):
-        // without this, a payment filed against year 3000 — or any period nobody will ever bill —
-        // is accepted, never matches a due, and quietly disappears from reconciliation instead of
-        // failing loudly at submission.
-        var currentYear = HallClock.Today.Year;
-        if (request.Amount <= 0m || request.Charges < 0m || string.IsNullOrWhiteSpace(request.TransactionId)
-            || request.BillingMonth is < 1 or > 12
-            || request.BillingYear < 2000 || request.BillingYear > currentYear)
+        // Students no longer choose a billing period — they kept forgetting to. Payments are
+        // allocated oldest-first when bills are calculated, so the period stored here is only the
+        // month the payment was filed in, kept for the record.
+        var today = HallClock.Today;
+        if (request.Amount <= 0m || request.Charges < 0m || string.IsNullOrWhiteSpace(request.TransactionId))
             return BadRequest(new { message = "Enter valid payment details." });
         if (!await db.PaymentCategories.AnyAsync(x => x.Id == request.CategoryId && x.IsActive, cancellationToken))
             return BadRequest(new { message = "Payment category is not active." });
@@ -80,8 +77,8 @@ public sealed class PaymentsController(
         {
             StudentId = studentId,
             CategoryId = request.CategoryId,
-            BillingMonth = request.BillingMonth,
-            BillingYear = request.BillingYear,
+            BillingMonth = today.Month,
+            BillingYear = today.Year,
             SubmittedAmount = request.Amount,
             SubmittedCharge = request.Charges,
             TransactionId = request.TransactionId.Trim(),
@@ -235,7 +232,7 @@ public sealed class PaymentsController(
         {
             try
             {
-                await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+                await billing.RecalculateFromEarliestAsync(row.BillingMonth, row.BillingYear, cancellationToken);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -291,7 +288,7 @@ public sealed class PaymentsController(
 
         try
         {
-            await billing.RecalculateForwardAsync(row.BillingMonth, row.BillingYear, cancellationToken);
+            await billing.RecalculateFromEarliestAsync(row.BillingMonth, row.BillingYear, cancellationToken);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

@@ -657,11 +657,22 @@ public sealed class BillingCalculationService(
             .Where(x => x.Month == previous.Month && x.Year == previous.Year)
             .ToDictionaryAsync(x => x.StudentId, x => x.DueBill, cancellationToken);
         var adjustments = await AdjustmentTotalsAsync(month, year, cancellationToken);
-        var payments = await db.PaymentSubmissions.AsNoTracking()
-            .Where(x => x.BillingMonth == month && x.BillingYear == year && x.Status == "approved")
+        // Payments are allocated oldest-first (FIFO), not by the month they were filed under:
+        // each student's approved payments form one pool, and earlier months have already taken
+        // their share of it (recorded in their cached TotalApprovedPaid). What is left is applied
+        // here. Earlier months must therefore be recalculated before this one — which the forward
+        // pass and the recursion above guarantee.
+        var paymentPool = await db.PaymentSubmissions.AsNoTracking()
+            .Where(x => x.Status == "approved")
             .GroupBy(x => x.StudentId)
             .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.ApprovedAmount ?? 0m) })
             .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
+        var appliedToEarlier = await db.MonthlyBillCache.AsNoTracking()
+            .Where(x => x.Year < year || (x.Year == year && x.Month < month))
+            .GroupBy(x => x.StudentId)
+            .Select(x => new { StudentId = x.Key, Amount = x.Sum(y => y.TotalApprovedPaid) })
+            .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
+        var isLatestMonth = year == HallClock.Today.Year && month == HallClock.Today.Month;
 
         var existing = await db.MonthlyBillCache.Where(x => x.Month == month && x.Year == year).ToDictionaryAsync(x => x.StudentId, cancellationToken);
         var results = new List<MonthlyBillResult>();
@@ -678,7 +689,10 @@ public sealed class BillingCalculationService(
             // MonthlyBill is reported at its raw, pre-subsidy value — the subsidy is shown as its
             // own line item — but the subsidy still comes out of the total exactly as before.
             var total = monthly[student.Id] - subsidy + guestBill[student.Id] + othersBill + service + carried + adjustment;
-            var approved = payments.GetValueOrDefault(student.Id);
+            var approved = FinancialMath.AllocatePayment(
+                total,
+                paymentPool.GetValueOrDefault(student.Id) - appliedToEarlier.GetValueOrDefault(student.Id),
+                isLatestMonth);
             var due = FinancialMath.CalculateDue(total, approved);
             var result = new MonthlyBillResult(student.Id, monthly[student.Id], subsidy, guestBill[student.Id], othersBill, service, carried, adjustment, approved, due, total);
             results.Add(result);
@@ -704,6 +718,25 @@ public sealed class BillingCalculationService(
 
         await db.SaveChangesAsync(cancellationToken);
         return results;
+    }
+
+    /// <summary>
+    /// Rebuilds every billed month from the earliest one (or from the given period, if that is
+    /// earlier). Payments are allocated oldest-first, so a payment — or a change to one — can
+    /// move the balance of the oldest unpaid month, not just the month it was filed in.
+    /// </summary>
+    public async Task RecalculateFromEarliestAsync(int month, int year, CancellationToken cancellationToken)
+    {
+        var earliest = await db.MonthlyBillCache.AsNoTracking()
+            .OrderBy(x => x.Year).ThenBy(x => x.Month)
+            .Select(x => new { x.Year, x.Month })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (earliest is not null && (earliest.Year < year || (earliest.Year == year && earliest.Month < month)))
+        {
+            month = earliest.Month;
+            year = earliest.Year;
+        }
+        await RecalculateForwardAsync(month, year, cancellationToken);
     }
 
     public async Task RecalculateForwardAsync(int month, int year, CancellationToken cancellationToken)

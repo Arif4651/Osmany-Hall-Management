@@ -22,6 +22,41 @@ public sealed class FinancialMathTests
     }
 
     [Fact]
+    public void AllocatePayment_SettlesTheOldestMonthFirstAndRollsTheRestForward()
+    {
+        // September owed 4452.29; 4448 was paid in October. September takes all of it and is left
+        // with 4.29; October gets nothing from the pool.
+        var september = FinancialMath.AllocatePayment(4452.29m, 4448m, isLatestMonth: false);
+        Assert.Equal(4448m, september);
+        Assert.Equal(4.29m, FinancialMath.CalculateDue(4452.29m, september));
+
+        var october = FinancialMath.AllocatePayment(139.71m, 4448m - september, isLatestMonth: true);
+        Assert.Equal(0m, october);
+    }
+
+    [Fact]
+    public void AllocatePayment_AnOlderMonthNeverTakesMoreThanItOwes()
+    {
+        Assert.Equal(300m, FinancialMath.AllocatePayment(300m, 1000m, isLatestMonth: false));
+        Assert.Equal(0m, FinancialMath.AllocatePayment(-50m, 1000m, isLatestMonth: false));
+    }
+
+    [Fact]
+    public void AllocatePayment_OverpaymentLandsOnTheLatestMonthAsCredit()
+    {
+        var applied = FinancialMath.AllocatePayment(200m, 700m, isLatestMonth: true);
+        Assert.Equal(700m, applied);
+        Assert.True(FinancialMath.IsCredit(FinancialMath.CalculateDue(200m, applied)));
+    }
+
+    [Fact]
+    public void AllocatePayment_NeverAppliesANegativePool()
+    {
+        Assert.Equal(0m, FinancialMath.AllocatePayment(500m, -20m, isLatestMonth: false));
+        Assert.Equal(0m, FinancialMath.AllocatePayment(500m, -20m, isLatestMonth: true));
+    }
+
+    [Fact]
     public void CalculateDue_IsWhatIsLeftAfterPayments()
     {
         Assert.Equal(250m, FinancialMath.CalculateDue(1000m, 750m));

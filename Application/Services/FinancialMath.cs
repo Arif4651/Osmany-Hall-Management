@@ -33,6 +33,22 @@ public static class FinancialMath
         => totalBill - approvedPaid;
 
     /// <summary>
+    /// How much of a student's approved-payment pool lands on one month under oldest-first (FIFO)
+    /// allocation. Students do not pick a billing period, so a payment settles whatever is
+    /// oldest and unpaid rather than whatever month it happened to be made in.
+    ///
+    /// <paramref name="available"/> is the pool left after earlier months took their share. An
+    /// older month takes only what it owes (never more, and nothing if it is already in credit)
+    /// so the remainder rolls to the next month. The latest billed month takes the whole
+    /// remainder: anything beyond what it owes stays as credit, exactly as overpayment always has.
+    /// </summary>
+    public static decimal AllocatePayment(decimal totalBill, decimal available, bool isLatestMonth)
+    {
+        var pool = Math.Max(0m, available);
+        return isLatestMonth ? pool : Math.Min(pool, Math.Max(0m, totalBill));
+    }
+
+    /// <summary>
     /// The signed correction needed to move a month's due to <paramref name="targetDue"/>, frozen
     /// at the moment an admin enters it. Stored as a delta rather than an absolute due so later
     /// payments keep reducing the balance normally.

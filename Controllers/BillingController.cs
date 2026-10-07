@@ -65,9 +65,9 @@ public sealed class BillingController(
         [FromQuery] int month, [FromQuery] int year, CancellationToken cancellationToken)
     {
         if (month is < 1 or > 12) return BadRequest(new { message = "Invalid month." });
-        // Forward, not just this month — otherwise later months keep a stale carried-due figure
-        // that this recalculation never touches.
-        await billing.RecalculateForwardAsync(month, year, cancellationToken);
+        // From the earliest billed month, not just this one: payments are allocated oldest-first,
+        // so every month's share of a student's payments depends on the months before it.
+        await billing.RecalculateFromEarliestAsync(month, year, cancellationToken);
 
         var ctx = await BuildCtxAsync(cancellationToken);
         await audit.LogAsync(ctx, AuditActions.BillGeneration, "Billing", $"{month}/{year}",
