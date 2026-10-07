@@ -67,7 +67,7 @@ public sealed record PaymentSubmissionDto(
     Guid CategoryId, string Category, int BillingMonth, int BillingYear,
     decimal SubmittedAmount, decimal SubmittedCharge, decimal? ApprovedAmount,
     string TransactionId, string Status,
-    DateTime SubmittedAtUtc, DateTime? ReviewedAtUtc);
+    DateTime SubmittedAtUtc, DateTime? ReviewedAtUtc, bool? BillsRecalculated = null);
 public sealed record SubmitPaymentRequest(
     Guid CategoryId, int BillingMonth, int BillingYear, decimal Amount, decimal Charges, string TransactionId);
 public sealed record ReviewPaymentRequest(string Action, decimal? ApprovedAmount);

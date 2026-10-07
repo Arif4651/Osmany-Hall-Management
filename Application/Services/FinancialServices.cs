@@ -470,6 +470,14 @@ public sealed class BillingCalculationService(
     private static readonly ConcurrentDictionary<(int Year, int Month), SemaphoreSlim> MonthLocks = new();
 
     /// <summary>
+    /// Serializes every cache rebuild. FIFO makes each month depend on the cached result of the
+    /// months before it and on the whole payment pool, so two overlapping rebuilds (two admins
+    /// approving at once, or an approval racing a meal edit) can leave the cache holding the
+    /// older run's numbers, or collide inserting the same cache row.
+    /// </summary>
+    private static readonly SemaphoreSlim RebuildGate = new(1, 1);
+
+    /// <summary>
     /// Rejects out-of-range periods before they reach the calculation. Callers reach this from
     /// query strings, so an unvalidated year would let anyone force work for arbitrary dates.
     /// </summary>
@@ -540,7 +548,17 @@ public sealed class BillingCalculationService(
             .AnyAsync(x => x.Month == month && x.Year == year, cancellationToken);
 
     public async Task<IReadOnlyList<MonthlyBillResult>> RecalculateMonthAsync(int month, int year, CancellationToken cancellationToken)
-        => await RecalculateMonthAsync(month, year, null, cancellationToken);
+    {
+        await RebuildGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await RecalculateMonthAsync(month, year, null, cancellationToken);
+        }
+        finally
+        {
+            RebuildGate.Release();
+        }
+    }
 
     /// <param name="sharedMeals">
     /// Meal history already loaded and rebuilt against by the caller, spanning at least this
@@ -649,7 +667,7 @@ public sealed class BillingCalculationService(
                 || await db.PaymentSubmissions.AnyAsync(x => x.BillingMonth == previous.Month && x.BillingYear == previous.Year, cancellationToken)
                 || await db.DueAdjustments.AnyAsync(x => x.BillingMonth == previous.Month && x.BillingYear == previous.Year, cancellationToken)
                 || await db.OthersBills.AnyAsync(x => x.Month == previous.Month && x.Year == previous.Year, cancellationToken);
-            if (hasPreviousSources) await RecalculateMonthAsync(previous.Month, previous.Year, cancellationToken);
+            if (hasPreviousSources) await RecalculateMonthAsync(previous.Month, previous.Year, null, cancellationToken);
         }
         // The previous month's cached DueBill already carries any adjustment made to it, so it is
         // the single source for what rolls forward — no second lookup of that month's overrides.
@@ -727,19 +745,40 @@ public sealed class BillingCalculationService(
     /// </summary>
     public async Task RecalculateFromEarliestAsync(int month, int year, CancellationToken cancellationToken)
     {
-        var earliest = await db.MonthlyBillCache.AsNoTracking()
-            .OrderBy(x => x.Year).ThenBy(x => x.Month)
-            .Select(x => new { x.Year, x.Month })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (earliest is not null && (earliest.Year < year || (earliest.Year == year && earliest.Month < month)))
+        await RebuildGate.WaitAsync(cancellationToken);
+        try
         {
-            month = earliest.Month;
-            year = earliest.Year;
+            var earliest = await db.MonthlyBillCache.AsNoTracking()
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .Select(x => new { x.Year, x.Month })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (earliest is not null && (earliest.Year < year || (earliest.Year == year && earliest.Month < month)))
+            {
+                month = earliest.Month;
+                year = earliest.Year;
+            }
+            await RecalculateForwardCoreAsync(month, year, cancellationToken);
         }
-        await RecalculateForwardAsync(month, year, cancellationToken);
+        finally
+        {
+            RebuildGate.Release();
+        }
     }
 
     public async Task RecalculateForwardAsync(int month, int year, CancellationToken cancellationToken)
+    {
+        await RebuildGate.WaitAsync(cancellationToken);
+        try
+        {
+            await RecalculateForwardCoreAsync(month, year, cancellationToken);
+        }
+        finally
+        {
+            RebuildGate.Release();
+        }
+    }
+
+    private async Task RecalculateForwardCoreAsync(int month, int year, CancellationToken cancellationToken)
     {
         var cursor = new DateOnly(year, month, 1);
         var today = HallClock.Today;

@@ -221,26 +221,10 @@ public sealed class PaymentsController(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        // Recalculate after the commit: it can span many months, and holding the review
-        // transaction open for its duration would keep row locks for the whole run.
-        //
-        // Because the review is already durable, a rebuild failure must not surface as a failed
-        // approval — that told the admin the payment had been rejected while it was approved in
-        // the database, and invited them to approve it a second time. The bills are derived and
-        // can be rebuilt from Bill Management; the approval cannot be un-confused.
+        var billsRecalculated = true;
         if (action == "approve")
         {
-            try
-            {
-                await billing.RecalculateFromEarliestAsync(row.BillingMonth, row.BillingYear, cancellationToken);
-            }
-            catch (Exception error) when (error is not OperationCanceledException)
-            {
-                logger.LogError(
-                    error,
-                    "Payment {PaymentId} was approved, but rebuilding the bills for {Month}/{Year} failed.",
-                    row.Id, row.BillingMonth, row.BillingYear);
-            }
+            billsRecalculated = await RebuildBillsAsync(row);
         }
 
         var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
@@ -252,7 +236,7 @@ public sealed class PaymentsController(
             newValues: new { Status = row.Status, ApprovedAmount = row.ApprovedAmount, TransactionId = row.TransactionId },
             cancellationToken: CancellationToken.None);
 
-        return ToDto(saved);
+        return ToDto(saved) with { BillsRecalculated = billsRecalculated };
     }
 
     /// <summary>
@@ -286,17 +270,7 @@ public sealed class PaymentsController(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        try
-        {
-            await billing.RecalculateFromEarliestAsync(row.BillingMonth, row.BillingYear, cancellationToken);
-        }
-        catch (Exception error) when (error is not OperationCanceledException)
-        {
-            logger.LogError(
-                error,
-                "Payment {PaymentId} approved amount was corrected, but rebuilding the bills for {Month}/{Year} failed.",
-                row.Id, row.BillingMonth, row.BillingYear);
-        }
+        var billsRecalculated = await RebuildBillsAsync(row);
 
         var saved = await Query().FirstAsync(x => x.Id == id, cancellationToken);
 
@@ -307,7 +281,37 @@ public sealed class PaymentsController(
             newValues: new { ApprovedAmount = newAmount, TransactionId = row.TransactionId },
             cancellationToken: CancellationToken.None);
 
-        return ToDto(saved);
+        return ToDto(saved) with { BillsRecalculated = billsRecalculated };
+    }
+
+    /// <summary>
+    /// Rebuilds every month's FIFO allocation after a payment change. The approval is already
+    /// committed, so a failure here must not surface as a failed approval (that invited a second
+    /// approval of the same payment); it is reported through <c>BillsRecalculated</c> instead.
+    ///
+    /// Deliberately not tied to the request's cancellation token: closing the tab or refreshing
+    /// used to abort the rebuild halfway through the month chain, leaving the later months stale.
+    /// </summary>
+    private async Task<bool> RebuildBillsAsync(PaymentSubmission row)
+    {
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                // A failed attempt can leave half-written cache rows tracked; start clean.
+                db.ChangeTracker.Clear();
+                await billing.RecalculateFromEarliestAsync(row.BillingMonth, row.BillingYear, CancellationToken.None);
+                return true;
+            }
+            catch (Exception error)
+            {
+                logger.LogError(
+                    error,
+                    "Payment {PaymentId} was saved, but rebuilding the bills for {Month}/{Year} failed (attempt {Attempt}).",
+                    row.Id, row.BillingMonth, row.BillingYear, attempt);
+            }
+        }
+        return false;
     }
 
     private IQueryable<PaymentSubmission> Query()
