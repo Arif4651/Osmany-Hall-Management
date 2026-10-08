@@ -9,5 +9,10 @@ describe('money helpers', () => {
   it('serializes four decimals and displays two', () => {
     expect(moneyInput('12.34567')).toBe('12.3457');
     expect(formatCurrency('12.3457')).toBe('৳12.35');
+    expect(formatCurrency('-12.3457')).toBe('-৳12.35');
+  });
+
+  it('formats credit balances without negative taka symbol', () => {
+    expect(formatCurrency('-5.01')).toBe('-৳5.01');
   });
 });

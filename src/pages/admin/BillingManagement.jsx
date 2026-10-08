@@ -22,7 +22,7 @@ import { useToast } from '../../context/ToastContext';
 const now = new Date();
 const initialFilters = { month: now.getMonth() + 1, year: now.getFullYear(), status: 'All', gender: 'All', hallName: 'all' };
 const baseHeaders = ['Student Name', 'Roll', 'Hall ID', 'Room No', 'Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill'];
-const tailHeaders = ['Due Bill', 'Total Bill', 'Status'];
+const tailHeaders = ['Previous Due', 'Adjustment', 'Total Bill', 'Paid', 'Due Bill', 'Status'];
 const emptySubsidyForm = { wing: 'Male', subsidyAmount: '', date: todayLocal(), mealPeriod: 'breakfast', notes: '' };
 const BILLING_STICKY_HEADER_TOP = 70;
 
@@ -36,13 +36,16 @@ const HEADER_KEY_MAP = {
   'DSW Subsidy': 'dswSubsidy',
   'Guest Meal Bill': 'guestMealBill',
   'Others Bill': 'othersBill',
-  'Due Bill': 'dueBill',
+  'Previous Due': 'carriedDue',
+  'Adjustment': 'adjustment',
   'Total Bill': 'totalBill',
+  'Paid': 'totalPaid',
+  'Due Bill': 'dueBill',
   'Status': 'status',
 };
 
 const getAlign = (header) => {
-  if (['Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Others Bill', 'Due Bill', 'Total Bill'].includes(header)) return 'right';
+  if (['Service Bill', 'Monthly Bill', 'DSW Subsidy', 'Guest Meal Bill', 'Others Bill', 'Previous Due', 'Adjustment', 'Total Bill', 'Paid', 'Due Bill'].includes(header)) return 'right';
   if (header === 'Status') return 'center';
   return 'left';
 };
@@ -329,7 +332,7 @@ export default function BillingManagement() {
       let valB = b[sortField] ?? '';
 
       // Numeric fields
-      const numericFields = ['serviceBill', 'monthlyBill', 'dswSubsidy', 'guestMealBill', 'othersBill', 'dueBill', 'totalBill'];
+      const numericFields = ['serviceBill', 'monthlyBill', 'dswSubsidy', 'guestMealBill', 'othersBill', 'carriedDue', 'adjustment', 'totalBill', 'totalPaid', 'dueBill'];
       if (numericFields.includes(sortField)) {
         valA = Number(valA) || 0;
         valB = Number(valB) || 0;
@@ -507,8 +510,11 @@ export default function BillingManagement() {
     'DSW Subsidy': row.dswSubsidy || 0,
     'Guest Meal Bill': row.guestMealBill || 0,
     ...(canSeeOthersBill ? { 'Others Bill': row.othersBill || 0 } : {}),
-    'Due Bill': row.dueBill,
+    'Previous Due': row.carriedDue || 0,
+    Adjustment: row.adjustment || 0,
     'Total Bill': row.totalBill,
+    Paid: row.totalPaid || 0,
+    'Due Bill': row.dueBill,
     Status: row.status,
   }));
 
@@ -542,8 +548,11 @@ export default function BillingManagement() {
         row.dswSubsidy || 0,
         row.guestMealBill || 0,
         ...(canSeeOthersBill ? [row.othersBill || 0] : []),
-        row.dueBill,
+        row.carriedDue || 0,
+        row.adjustment || 0,
         row.totalBill,
+        row.totalPaid || 0,
+        row.dueBill,
         row.status,
       ]),
     });
@@ -1095,15 +1104,40 @@ export default function BillingManagement() {
                       {canSeeOthersBill && (
                         <td style={{ padding: '0.75rem', textAlign: 'right' }}>{formatCurrency(row.othersBill || 0)}</td>
                       )}
-                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500' }}>
-                        {formatCurrency(row.dueBill)}
+                      <td style={{ padding: '0.75rem', textAlign: 'right', color: (row.carriedDue < 0 ? '#047857' : (row.carriedDue > 0 ? '#b91c1c' : 'inherit')) }}>
+                        {row.carriedDue < 0 ? `${formatCurrency(Math.abs(row.carriedDue))} CR` : formatCurrency(row.carriedDue || 0)}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500', color: row.adjustment > 0 ? '#b91c1c' : row.adjustment < 0 ? '#047857' : 'inherit' }}>
+                        {row.adjustment ? (row.adjustment > 0 ? `+${formatCurrency(row.adjustment)}` : formatCurrency(row.adjustment)) : '৳0.00'}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>
+                        {row.totalBill < 0 ? (
+                          <span style={{ color: '#047857' }} title="Advance credit balance exceeding charges">
+                            {formatCurrency(Math.abs(row.totalBill))} (Credit)
+                          </span>
+                        ) : (
+                          formatCurrency(row.totalBill)
+                        )}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', color: (row.totalPaid > 0 ? '#047857' : 'inherit') }}>
+                        {formatCurrency(row.totalPaid || 0)}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: row.dueBill < 0 ? '#047857' : (row.dueBill > 0 ? 'var(--primary)' : 'inherit') }}>
+                        {row.dueBill < 0 ? (
+                          <span style={{ color: '#047857' }}>{formatCurrency(Math.abs(row.dueBill))} Credit</span>
+                        ) : (
+                          formatCurrency(row.dueBill)
+                        )}
                         {row.isOverridden && (
-                          <span className="warning-badge" style={{ marginLeft: '0.35rem', background: '#fffbeb', color: '#b45309', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '600' }}>
+                          <span
+                            className="warning-badge"
+                            title="Manually adjusted by administration in Due Bill"
+                            style={{ marginLeft: '0.35rem', background: '#fffbeb', color: '#b45309', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '600' }}
+                          >
                             Override
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: 'var(--primary)' }}>{formatCurrency(row.totalBill)}</td>
                       <td style={{ padding: '0.75rem', textAlign: 'center' }}>
                         <span style={{ background: badgeBg, color: badgeColor, padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '600', textTransform: 'capitalize', display: 'inline-block', textAlign: 'center', minWidth: '95px' }}>
                           {statusNorm}

@@ -12,7 +12,13 @@ export const moneyInput = (value) => money(value).toFixed(4);
 export const moneyAdd = (...values) => values.reduce((sum, value) => sum.plus(money(value)), new Decimal(0));
 export const moneyCompare = (left, right) => money(left).comparedTo(money(right));
 
-export const formatCurrency = (amount) => `৳${money(amount).toFixed(2)}`;
+export const formatCurrency = (amount) => {
+  const val = money(amount);
+  if (val.isNegative()) {
+    return `-৳${val.abs().toFixed(2)}`;
+  }
+  return `৳${val.toFixed(2)}`;
+};
 export const todayLocal = () => new Intl.DateTimeFormat('en-CA').format(new Date());
 
 /** A closing balance is a credit when it is below zero — the hall owes the student, not the reverse. */

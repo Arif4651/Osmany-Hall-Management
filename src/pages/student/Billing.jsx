@@ -154,22 +154,25 @@ export default function Billing() {
                 : 'Outstanding from previous month'}
             </p>
           </div>
-          {/* Adjustment card hidden from students by request — the manual correction still flows
-              into Total Bill / Due Bill, it just isn't broken out as its own line here.
           {(bill.adjustment ?? 0) !== 0 && (
             <div className="financial-card financial-card-highlight">
-              <h3>Adjustment</h3>
-              <strong>{bill.adjustment > 0 ? '+ ' : '- '}{formatCurrency(Math.abs(bill.adjustment))}</strong>
+              <h3>Admin Adjustment</h3>
+              <strong style={{ color: bill.adjustment > 0 ? '#b91c1c' : '#047857' }}>
+                {bill.adjustment > 0 ? '+ ' : '- '}{formatCurrency(Math.abs(bill.adjustment))}
+              </strong>
+              <p>{bill.adjustment > 0 ? 'Adjustment added by administration' : 'Credit adjustment by administration'}</p>
             </div>
-          )} */}
+          )}
           
-          <div className="financial-card">
-            <h3>Total Bill</h3>
-            <strong>{formatCurrency(bill.totalBill)}</strong>
-            {/* <p>
+          <div className={`financial-card${isCredit(bill.totalBill) ? ' financial-card-credit' : ''}`}>
+            <h3>{isCredit(bill.totalBill) ? 'Credit Balance' : 'Total Bill'}</h3>
+            <strong style={isCredit(bill.totalBill) ? { color: '#047857' } : {}}>
+              {isCredit(bill.totalBill) ? `${formatCurrency(Math.abs(bill.totalBill))} credit` : formatCurrency(bill.totalBill)}
+            </strong>
+            <p>
               Monthly − Subsidy + Guest + Others + Service + Carried
               {(bill.adjustment ?? 0) !== 0 ? ' + Adjustment' : ''}
-            </p> */}
+            </p>
           </div>
           {(bill.totalPaid ?? 0) > 0 && (
             <div className="financial-card financial-card-highlight">
@@ -179,7 +182,7 @@ export default function Billing() {
             </div>
           )}
           <div className={`financial-card${isCredit(bill.dueBill) ? ' financial-card-credit' : ''}`}>
-            <h3>{isCredit(bill.dueBill) ? 'Credit Balance' : 'Due Bill'}</h3>
+            <h3>{isCredit(bill.dueBill) ? 'Credit Balance' : 'Due Bill'}{bill.isOverridden ? ' (Adjusted)' : ''}</h3>
             <strong>{formatBalance(bill.dueBill)}</strong>
             <p>
               {isCredit(bill.dueBill)
