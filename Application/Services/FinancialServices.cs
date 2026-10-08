@@ -674,7 +674,15 @@ public sealed class BillingCalculationService(
         var previousDue = await db.MonthlyBillCache.AsNoTracking()
             .Where(x => x.Month == previous.Month && x.Year == previous.Year)
             .ToDictionaryAsync(x => x.StudentId, x => x.DueBill, cancellationToken);
-        var adjustments = await AdjustmentTotalsAsync(month, year, cancellationToken);
+        // Load all adjustments for this billing month, ordered by time.
+        var adjustmentsList = await db.DueAdjustments.AsNoTracking()
+            .Where(x => x.BillingMonth == month && x.BillingYear == year)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+        var adjustmentsByStudent = adjustmentsList
+            .GroupBy(x => x.StudentId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.AdjustedAmount - x.PreviousAmount));
+
         // Payments are allocated oldest-first (FIFO), not by the month they were filed under:
         // each student's approved payments form one pool, and earlier months have already taken
         // their share of it (recorded in their cached TotalApprovedPaid). What is left is applied
@@ -700,18 +708,16 @@ public sealed class BillingCalculationService(
             var subsidy = subsidyTotals.GetValueOrDefault(student.Id);
             var othersBill = othersBillTotals.GetValueOrDefault(student.Id);
             var service = ResolveService(student);
-            // A manual correction is one more charge line, not an override of the result: it goes
-            // into the total alongside everything else, so the components still add up to what the
-            // student is shown and payments still work the balance down.
-            var adjustment = adjustments.GetValueOrDefault(student.Id);
-            // MonthlyBill is reported at its raw, pre-subsidy value — the subsidy is shown as its
-            // own line item — but the subsidy still comes out of the total exactly as before.
+
+            // TotalBill represents all incurred charges this month + carried due + admin adjustments.
+            // This guarantees that TotalBill - Paid = DueBill always reconciles across the entire system.
+            var adjustment = adjustmentsByStudent.GetValueOrDefault(student.Id);
             var total = monthly[student.Id] - subsidy + guestBill[student.Id] + othersBill + service + carried + adjustment;
-            var approved = FinancialMath.AllocatePayment(
-                total,
-                paymentPool.GetValueOrDefault(student.Id) - appliedToEarlier.GetValueOrDefault(student.Id),
-                isLatestMonth);
+            var availablePool = paymentPool.GetValueOrDefault(student.Id) - appliedToEarlier.GetValueOrDefault(student.Id);
+
+            var approved = FinancialMath.AllocatePayment(total, availablePool, isLatestMonth);
             var due = FinancialMath.CalculateDue(total, approved);
+
             var result = new MonthlyBillResult(student.Id, monthly[student.Id], subsidy, guestBill[student.Id], othersBill, service, carried, adjustment, approved, due, total);
             results.Add(result);
 
@@ -851,19 +857,4 @@ public sealed class BillingCalculationService(
 
         return meals;
     }
-
-    /// <summary>
-    /// The net signed correction each student carries for the month.
-    ///
-    /// Each row records the due the admin was looking at (<c>PreviousAmount</c>) and the due they
-    /// asked for (<c>AdjustedAmount</c>); the difference is that entry's contribution. Summing
-    /// them lets a month be corrected repeatedly — every entry moves the balance by what the admin
-    /// intended at the time, and the earlier entries are neither lost nor re-applied.
-    /// </summary>
-    private async Task<Dictionary<Guid, decimal>> AdjustmentTotalsAsync(int month, int year, CancellationToken cancellationToken)
-        => await db.DueAdjustments.AsNoTracking()
-            .Where(x => x.BillingMonth == month && x.BillingYear == year)
-            .GroupBy(x => x.StudentId)
-            .Select(g => new { StudentId = g.Key, Amount = g.Sum(x => x.AdjustedAmount - x.PreviousAmount) })
-            .ToDictionaryAsync(x => x.StudentId, x => x.Amount, cancellationToken);
 }
