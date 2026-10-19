@@ -43,10 +43,7 @@ public sealed class AuditLogsController(HallDbContext db) : ControllerBase
 
         var query = db.AuditLogs.AsNoTracking().AsQueryable();
 
-        // Student actions are excluded from the admin log viewer.
-        // They are never written any more (AuthController guards them by role),
-        // but this clause also hides any older rows that may exist in the DB.
-        query = query.Where(x => x.ActorRole != Roles.Student);
+        // Student password changes are now logged (AuthController). Do not exclude student rows.
 
         // ── Filters ──────────────────────────────────────────────────────
         if (!string.IsNullOrWhiteSpace(module) && module != "All")
