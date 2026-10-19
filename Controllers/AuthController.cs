@@ -229,14 +229,11 @@ public sealed class AuthController(
         var (tokenString, loginSuccess) = tokens.CreateToken(refreshedUser);
         WriteAuthCookie(tokenString, loginSuccess.ExpiresAtUtc);
 
-        // Audit log: password change — student password changes are intentionally excluded.
-        // To re-enable student logging, remove the role guard below.
-        if (user.Role != Roles.Student)
-        {
-            await audit.LogAsync(user.FullName, user.Id, user.Role,
-                AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
-                $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
-        }
+        // Audit log: password change — logged for all roles including students so that
+        // "forgot my password" disputes can be resolved by checking the audit trail.
+        await audit.LogAsync(user.FullName, user.Id, user.Role,
+            AuditModules.Authentication, AuditActions.PasswordChange, "AppUser", user.Id.ToString(),
+            $"{user.FullName} changed their password", cancellationToken: CancellationToken.None);
 
         return NoContent();
     }
