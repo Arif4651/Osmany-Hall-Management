@@ -95,8 +95,8 @@ export function getActionBadgeClass(action) {
 }
 
 /**
- * Admin role options for the Role filter in System Logs.
- * Student is intentionally omitted — student actions are not logged.
+ * Role options for the Role filter in System Logs.
+ * Student is included because student password changes are now logged.
  */
 export const AUDIT_ROLES = [
   { value: '', label: 'All Roles' },
@@ -104,5 +104,6 @@ export const AUDIT_ROLES = [
   { value: 'admin', label: 'Admin' },
   { value: 'male_wing_admin', label: 'Male Wing Admin' },
   { value: 'female_wing_admin', label: 'Female Wing Admin' },
+  { value: 'student', label: 'Student' },
 ];
 
